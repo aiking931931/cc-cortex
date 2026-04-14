@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.3] - 2026-04-15
+
+### Added
+
+- **`cc_cortex.cache.append_only_log`** — lossless cross-session
+  event log targeting CC's L9 ceiling (compact is a single LLM
+  summary; events not in the top-5 files × 5K + top-skills × 5K
+  are lost forever, see `services/compact/compact.ts:122-131`).
+  This module captures raw events BEFORE compact so the original
+  chain can be replayed at any time — useful for acquisition due
+  diligence, debug postmortems, and cross-session reasoning replay.
+  - `LogEvent` dataclass: event_id / session_id / timestamp /
+    event_type / payload / parent_event_id / tokens_estimate /
+    schema_version.
+  - `AppendOnlyLog` class: `append`, `append_batch`, `read_session`,
+    `iter_session`, `list_sessions`, `search`, `stats`.
+  - Append-only by design: no update or delete methods.
+  - JSON lines format, one event per line. Streaming-safe append,
+    crash-safe (partial lines silently skipped on read).
+  - Session-scoped files: `<log_dir>/YYYY-MM-DD/<session_id>.jsonl`,
+    O(1) daily retention + session lookup.
+  - Schema-versioned: `schema_version` field for future migration.
+  - Size-bounded replay: `read_session(limit=N)` for safety.
+  - Log dir overridable via `CCC_APPEND_LOG_DIR` env var;
+    defaults to `~/.cc_cortex_cache/append_only_log/`.
+  - Zero new dependencies — stdlib only (json / time / uuid /
+    pathlib / os). Keeps CCC core zero-dep rule intact.
+  - ZIQ index hook left as future work (comment-tagged in source)
+    to avoid coupling append path to retrieval layer in this release.
+- **`tests/test_append_only_log.py`** — 31 new tests covering
+  dataclass shape, env-var override, append + batch, cross-day
+  session reads, iter_session streaming, list_sessions filters,
+  search with date_range + limit, stats counters, crash-safe
+  corrupted-line handling, empty/missing session, and unicode
+  payloads (ensure_ascii=False).
+
 ## [1.17.2] - 2026-04-14
 
 ### Added

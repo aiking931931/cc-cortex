@@ -7,6 +7,13 @@ from cc_cortex.cache.anthropic_sink import (  # noqa: F401
     AnthropicCacheEditSink,
     MessageTransform,
 )
+from cc_cortex.cache.append_only_log import (  # noqa: F401
+    SCHEMA_VERSION as APPEND_LOG_SCHEMA_VERSION,
+)
+from cc_cortex.cache.append_only_log import (
+    AppendOnlyLog,
+    LogEvent,
+)
 from cc_cortex.cache.autocompact import (  # noqa: F401
     AUTOCOMPACT_BUFFER_TOKENS,
     DEFAULT_MODEL_BUDGETS,
@@ -107,6 +114,9 @@ from cc_cortex.cache.session_memory import (  # noqa: F401
 
 __all__ = [
     "AnthropicCacheEditSink",
+    "APPEND_LOG_SCHEMA_VERSION",
+    "AppendOnlyLog",
+    "LogEvent",
     "AUTOCOMPACT_BUFFER_TOKENS",
     "MessageTransform",
     "CacheEditAction",
