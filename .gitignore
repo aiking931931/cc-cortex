@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+
+# Local-only data — not part of the open-source distribution
+.destruction_backups/
+benchmarks/datasets/
+benchmarks/results/
+.cc_cortex_cache/
+.claude-forge/
+
+# Red-team batch test fixtures — contain format-valid dummy secrets
+# that GitHub push protection flags. Dev-only, not part of pytest CI.
+tests/red_team_guards.py
+tests/red_team_v2.py
+tests/red_team_v3_100.py
+tests/openclaw_security_test.py
+
+# Environment & secrets
+.env
+.env.*
+credentials*
+secrets*
+
+# Internal / not for release
+_recycled/
+_cognitive/
+.cc_cortex_cache/
+
+# Testing & linting caches
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+*.log

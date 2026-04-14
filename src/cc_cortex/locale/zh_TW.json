@@ -1,0 +1,244 @@
+{
+  "messages": {
+    "confidence_gate.deny": "\u5075\u6e2c\u5230\u4e0d\u78ba\u5b9a\u6027\u6a19\u8a18\uff08{markers}\uff09+ \u4e0d\u53ef\u9006\u64cd\u4f5c\u3002\u8acb\u5148\u67e5\u8b49\u518d\u57f7\u884c\u3002",
+    "confidence_gate.verify_guide": "\u4fe1\u5fc3\u5ea6\u4e0d\u8db3\u6642\u57f7\u884c\u4e0d\u53ef\u9006\u64cd\u4f5c = \u9ad8\u98a8\u96aa\u3002\u8acb\u5148\uff1a\n1. \u7528 Grep/Read \u67e5\u8b49\u95dc\u9375\u5047\u8a2d\n2. \u7528 WebSearch \u78ba\u8a8d\u4e0d\u78ba\u5b9a\u7684 API/\u8a9e\u6cd5\n3. \u78ba\u8a8d\u5f8c\u91cd\u65b0\u57f7\u884c\uff08\u4e0d\u78ba\u5b9a\u6027\u6a19\u8a18\u6d88\u5931\u5373\u653e\u884c\uff09",
+    "handoff_engine.token_gate_phase": "\ud83d\udea8 Token Gate [\u8dd1\u968e\u6bb5]: {context_k}K \u2014 \u5b89\u5168\u4e0a\u9650\u3002Agent spawn blocked.",
+    "handoff_engine.token_gate_critical": "\ud83d\udea8 Token Gate: {context_k}K tokens \u2014 \u81e8\u754c\u3002Agent spawn blocked.",
+    "handoff_engine.token_gate_agent": "\u26a0\ufe0f Token Gate: {context_k}K tokens \u2014 Agent spawn blocked.",
+    "handoff_engine.reminder": "\u270f\ufe0f \u672c Session \u5df2\u6d88\u8017 {token_k}K tokens / \u4fee\u6539 {count} \u6a94\u6848\uff0c\u4f46\u4ea4\u63a5\u6a94\u672a\u66f4\u65b0\u3002\u5efa\u8b70\u73fe\u5728\u5c31\u5beb\u4ea4\u63a5\u3002",
+    "handoff_engine.mode_full_description": "Full 模式（最高權限 + CBUA 自主執行）：Agent spawn 無 gate、無 reminder、無 ask-user。所有決策走 CBUA 流程自主判斷（C0→C2/C3→A0-A5），只有 Destruction/Butterfly/unknown unknowns 會中斷。詳見 docs/handoff-modes.md。",
+    "handoff_engine.mode_phase_description": "Phase 模式（任務邊界感知）：完成當前任務再交接，180K 硬上限 safety net，150K 晚期 reminder。",
+    "handoff_engine.mode_save_token_description": "Save-token 模式（預設）：140K Agent gate、160K 臨界、80K+≥3 檔案觸發 reminder。保守優先，早交接常交接。",
+    "handoff_engine.guidance_critical": "{context_k}K tokens\uff08\u6210\u672c {cost_k}K\uff09\u2014 \u7acb\u5373\u5beb\u4ea4\u63a5\u6a94\uff0c\u5beb\u5b8c\u5c31\u505c\u3002",
+    "handoff_engine.guidance_normal": "{context_k}K tokens\uff08\u6210\u672c {cost_k}K\uff09\u2014 \u5b8c\u6210\u624b\u4e0a\u4efb\u52d9\u5f8c\u5beb\u4ea4\u63a5\uff0c\u4e0d\u958b\u65b0\u4efb\u52d9\u3002",
+    "handoff_engine.session_title": "Session \u7d50\u675f",
+    "equilibrium_guard.cleanup": "\u5e73\u8861\u6e05\u7406\uff1a{file} \u79fb\u9664 {count} \u7b46\u820a\u8a18\u9304\uff08\u4fdd\u7559\u6700\u65b0 {keep} \u7b46\uff09",
+    "token_warning.160000": "\u5df2\u7528 {k}K/{max}K \u2014 \u81e8\u754c",
+    "token_warning.140000": "\u5df2\u7528 {k}K/{max}K \u2014 \u504f\u9ad8",
+    "token_warning.100000": "\u5df2\u7528 {k}K/{max}K",
+    "context_compressed": "\u26d4 Context compressed \u2014 \u6a94\u6848\u8b80\u53d6\u7d00\u9304\u907a\u5931\u3002\u505c\u6b62\u6240\u6709 Edit/Write\u3002\u7acb\u5373\u5beb\u4ea4\u63a5\u3002",
+    "classify_error.fix_guidance": "（穩手先完成當前筆畫再修正上一筆 — 下次碰到這個檔案時再修，不是現在。）",
+    "sentinel.three_strikes": "三敗鐵律：盲試到此為止。\n**強制動作（按順序）**：\n1. 用 `/kb_*` Skill 查詢相關領域知識\n2. Skill 沒有 → WebSearch 查外部資料\n3. 有資料後再重新嘗試\n禁止不查資料就重試。",
+    "sentinel.rx.repeat": "\n💊 暫停→列3假設(互不同)→排除已敗→驗最可能",
+    "sentinel.rx.repeat_force": "\n💊 停編此檔→換工具/檔案/假設→Decompose拆解",
+    "sentinel.rx.stagnation": "\n💊 重讀檔案→問「什麼該在但不在」→列3新假設",
+    "sentinel.rx.paralysis_start": "\n💊 資訊已夠→選最可能假設→最小改動驗證",
+    "sentinel.rx.consecutive_fail": "\n💊 拆成更小步驟→找第一個成功點→從那推進",
+    "sentinel.rx.bash_retry": "\n💊 讀錯誤訊息→判斷環境/路徑/權限→修根因再試",
+    "sentinel.rx.scope": "\n💊 確認任務邊界→是否做了沒被要求的事→先核心",
+    "sentinel.rx.hijack_l2": "\n💊 列2替代假設→選最不同的→解釋為何可行",
+    "sentinel.rx.hijack_l3": "\n💊 忘記所有嘗試→重述問題→列3全新假設→選最不同",
+    "sentinel.rx.hijack_l4": "\n💊 停止所有工具→寫交接→告知用戶開新session",
+    "file_tracker.task_writing": "寫入 {filename}",
+    "file_tracker.conflict_readonly": "⚠ 檔案衝突（唯讀檢查）：{path} 被 {key} 使用中。",
+    "file_tracker.conflict_readonly_additional": "Lock 競爭中無法更新追蹤，但衝突檢查仍有效。請操作其他檔案。",
+    "file_tracker.handoff_queue": "⚠ 交接檔排隊：{path} 正被 {key} 寫入中（{ttl}秒短期鎖）。請稍後重試。",
+    "file_tracker.handoff_queue_additional": "另一個 session 正在更新此交接檔。交接檔使用 {ttl} 秒短期寫入鎖，不需要等對方 session 結束，等幾秒後重試即可。可以先做其他不相關的事，稍後再回來寫交接。",
+    "file_tracker.conflict_file": "⚠ 檔案衝突：{path} 正被 session {key} 使用中（{task}）。請操作其他檔案，或等對方完成。",
+    "file_tracker.conflict_file_additional": "另一個 Claude Code session 正在編輯此檔案。讀取 instance_lock.json 可查看所有 session 的 files 清單。請改做其他不衝突的檔案，或等對方的 session 結束。",
+    "prompt_guard.multi_question": "{count} 問題偵測 → 列編號清單，逐項處理，有證據才✅，解不了標❌。",
+    "prompt_guard.clarity_deny": "⚠ 歧義偵測（清晰度 {score}）+ 不可逆操作 → 請先確認意圖。\n提示：加上具體路徑或檔名可跳過",
+    "proposal_guard.missing_analysis": "新提案缺少副作用分析。請加入「副作用」或「風險」欄位，說明：① 影響什麼？② 代價是什麼？③ 代價可接受嗎？",
+    "proposal_guard.l2_requirement": "L2 甜蜜點思考要求：\n每個方案必須包含副作用/風險分析。\n格式：| 風險 | 說明 |\n至少列出 1 個副作用及其可控性。",
+    "session_format.bad_id": "⛔ SESSION ID 格式錯誤：{bad_list}\n正確格式：<專案前綴>_<4位hex>_<HHmm>（如 IA_a3f1_0835、PS_d9e4_2215）\n前綴表：{prefixes}\n根據你正在操作的專案選擇前綴，hex4 隨機生成，HHmm 為當前時間。",
+    "session_format.missing_taskpool": "⛔ 交接檔含 ABCD 分派但同目錄無 task-pool.md\n檔案：{basename}\n缺少：{taskpool_path}\n必須先建 task-pool.md（含依賴圖+角色分工+子任務），再寫 ABCD 分派到交接檔。",
+    "wiredo_guard.checklist": "📋 **WIREDO 交付清單**（代碼任務啟動，不適用項標 N/A）：\n```\n□ W — Wired（接線）：誰會 import/呼叫？刪掉會報錯？\n□ I — Inherited & Aligned（母版+合架構）：有現成模板？放對位置？\n□ R — Responsive & Performant（跨裝置+性能）：無 O(n²)/N+1？\n□ E — Extensible（可配置）：常數在頂部？有 config 介面？\n□ D — Documented, Defended & Verified（備註+測試+驗證）：怎麼測？怎麼證明？\n□ O — Observable（可觀測）：有 stats/log？SaaS 需 health check（非 SaaS 標 N/A）\n```\n完成後逐項驗證打勾，最終報告列 WIREDO 完整表格。",
+    "insight.cli_free_on_max": "Claude Code CLI（claude -p）在 Max/Team 訂閱下免費使用，不需要 API key 即可開發和測試。",
+    "insight.cli_non_interactive": "claude -p 'prompt' 非互動模式執行，擁有完整工具存取權。支援 --output-format json 程式化使用。",
+    "insight.hook_bypass_permissions": "VS Code 擴充套件有已知權限 bug（#29159、#20536）。替代方案：在整合終端使用 claude --dangerously-skip-permissions 自動接受。",
+    "insight.mcp_server": "自訂工具可透過 MCP server 加入，設定在 .claude/settings.json → mcpServers，不需要修改 Claude Code 源碼。",
+    "insight.hook_types": "Claude Code hooks：PreToolUse（工具前）、PostToolUse（工具後）、UserPromptSubmit（提示前）、Stop（session 結束）、SubagentSpawn（子代理前）。設定在 .claude/settings.json → hooks。",
+    "insight.context_management": "Context 壓縮是自動的。用 CLAUDE.md 放永久指令（永遠載入）。用 /memory 跨 session 召回。在 token 用盡前寫交接。",
+    "insight.subagent_parallel": "同一訊息中的多個 Agent 工具呼叫會並行執行。用這招處理獨立的研究/搜尋任務可省時間。",
+    "git_assist.uncommitted": "未提交變更",
+    "git_assist.staged": "已暫存",
+    "git_assist.modified": "已修改",
+    "git_assist.untracked": "未追蹤",
+    "git_assist.more": "更多",
+    "hypothesis_tracker.failed_header": "已嘗試但失敗的方法（避免重複）：",
+    "hypothesis_tracker.try_different": "\n請嘗試不同的方法。",
+    "structured_handoff.validation_errors": "結構化交接有 {count} 個問題：{errors}"
+  },
+  "patterns": {
+    "handoff_prefixes": ["\u4ea4\u63a5_"],
+    "recent_section_headers": ["\u8fd1\u671f\u8a18\u9304"],
+    "correction_l1": [
+      "\u4e0d\u5c0d",
+      "\u4e0d\u662f\u9019\u6a23",
+      "\u932f\u4e86",
+      "\u6539\u6210",
+      "\u61c9\u8a72\u662f",
+      "\u63db\u6210",
+      "\u4e0d\u8981\u7528",
+      "\u5225\u7528",
+      "\u90a3\u500b\u4e0d\u884c",
+      "\u641e\u932f\u4e86",
+      "\u5f04\u932f\u4e86",
+      "\u4e0d\u8981\u9019\u6a23",
+      "\u91cd\u65b0\u4f86",
+      "\u4f60\u641e\u932f",
+      "\u7cfe\u6b63"
+    ],
+    "correction_l2": [
+      "\u628a.{1,20}\u6539",
+      "\u628a.{1,20}\u63db",
+      "\u628a.{1,20}\u522a",
+      "\u5148.{1,30}\u518d",
+      "\u5148\u505a",
+      "\u4e0d\u662f.{1,20}\u662f",
+      "\u9019\u88e1\u8981",
+      "\u90a3\u88e1\u8981",
+      "\u9019\u908a\u8981",
+      "\u5e79\u561b",
+      "\u70ba\u4ec0\u9ebc\u8981",
+      "\u591a\u6b64\u4e00\u8209",
+      "\u592a\u8907\u96dc",
+      "\u592a\u591a\u4e86",
+      "\u592a\u5c11\u4e86",
+      "\u5c11\u4e86",
+      "\u6f0f\u4e86",
+      "\u5fd8\u4e86",
+      "\u6c92\u6709\u505a",
+      "\u4e0d\u9700\u8981",
+      "\u4e0d\u7528",
+      "\u62ff\u6389",
+      "\u79fb\u9664",
+      "\u52a0\u4e0a",
+      "\u88dc\u4e0a",
+      "\u52a0\u4e00\u500b",
+      "\u9084\u8981",
+      "\u53cd\u904e\u4f86",
+      "\u9806\u5e8f.{0,5}\u53cd",
+      "\u5012\u904e\u4f86",
+      "\u525b\u624d.{0,20}\u58de",
+      "\u525b\u624d.{0,20}\u639b",
+      "\u600e\u9ebc\u53c8",
+      "\u53c8.{1,10}\u4e86",
+      "\u9084\u662f.{1,10}\u554f\u984c",
+      "\u6c89\u6fb1",
+      "\u8a18\u4f4f",
+      "\u4ee5\u5f8c.{0,10}\u4e0d\u8981"
+    ],
+    "skip_prefixes": [
+      "\u4ea4\u63a5", "\u9032\u5316", "\u6e05\u7406", "\u80fd\u529b\u5c0d\u7167"
+    ],
+    "research_keywords": [
+      "\u7814\u7a76", "\u8abf\u67e5", "\u5206\u6790", "\u6458\u8981",
+      "\u67e5", "\u770b", "\u627e", "\u5f59\u6574", "\u6574\u7406"
+    ],
+    "execution_keywords": [
+      "\u6539", "\u4fee", "\u5beb\u5165", "\u5efa\u7acb", "\u522a", "\u79fb", "\u91cd\u69cb"
+    ],
+    "misuse.read": ["\u770b\u4e00\u4e0b", "\u8b80\u53d6", "\u8b80\u9019\u500b"],
+    "misuse.search": ["\u627e\u4e00\u4e0b", "\u641c\u5c0b", "\u641c\u4e00\u4e0b"],
+    "misuse.edit": ["\u6539", "\u5beb\u5165", "\u4fee\u6539"],
+    "uncertainty": [
+      "\u53ef\u80fd", "\u6216\u8a31", "\u4e5f\u8a31", "\u4e0d\u78ba\u5b9a",
+      "\u4e0d\u592a\u78ba\u5b9a", "\u61c9\u8a72\u662f", "\u5927\u6982",
+      "\u731c\u6e2c", "\u63a8\u6e2c", "\u4f3c\u4e4e"
+    ],
+    "classify_error_keywords": ["\u932f\u8aa4", "\u8b66\u544a", "\u4fee\u5fa9"],
+    "skill_signals.three_layer": [
+      "\u6c7a\u7b56", "\u65b9\u6848", "\u6bd4\u8f03",
+      "\u5206\u6790"
+    ],
+    "skill_signals.first_principles": [
+      "\u70ba\u4ec0\u9ebc", "\u6839\u672c", "\u672c\u8cea",
+      "\u5f9e\u982d", "\u91cd\u65b0\u601d\u8003"
+    ],
+    "skill_signals.debug_loop": [
+      "\u5361\u4f4f", "\u58de", "\u4e0dwork",
+      "\u9664\u932f", "\u6392\u67e5"
+    ],
+    "skill_signals.prompt_select": [
+      "\u63d0\u793a\u8a5e",
+      "\u63a8\u7406", "\u601d\u8003\u6a21\u5f0f"
+    ],
+    "skill_signals.decision_journal": [
+      "\u8a18\u9304", "\u8ffd\u8e64",
+      "\u6c7a\u7b56", "\u9078\u64c7"
+    ],
+    "skill_signals.pdca": [
+      "\u8a08\u756b", "\u57f7\u884c", "\u6aa2\u67e5", "\u8abf\u6574",
+      "\u8fed\u4ee3", "\u5faa\u74b0", "\u6539\u9032"
+    ],
+    "skill_signals.judgment": [
+      "\u4fe1\u5fc3", "\u78ba\u5b9a", "\u4e0d\u78ba\u5b9a",
+      "\u5143\u8a8d\u77e5", "\u56e0\u679c", "\u502b\u7406",
+      "\u8a72\u4e0d\u8a72", "\u6291\u5236"
+    ],
+    "skill_signals.awareness": [
+      "\u6ce8\u610f\u529b", "\u631f\u6301", "\u8ff4\u5708",
+      "\u964d\u7d1a", "\u6062\u5fa9", "\u81ea\u7652",
+      "\u91cd\u8907", "\u53c8\u5361"
+    ],
+    "skill_signals.learning_loop": [
+      "\u5b78\u7fd2", "\u7cfe\u6b63", "\u4fee\u6b63",
+      "\u6a21\u5f0f", "\u6539\u9032", "\u9032\u5316",
+      "\u597d\u5947", "\u6210\u5c31", "\u9a45\u529b", "\u610f\u7fa9"
+    ],
+    "handoff_file_ref": ["快速查找"],
+    "stop_guard.completion": [
+      "交接", "全部完成", "全完成", "任務完成", "建議新對話", "結束"
+    ],
+    "stop_guard.question": [
+      "？", "要繼續嗎", "要做嗎", "你要", "需要我"
+    ],
+    "stop_guard.continuation": [
+      "接下來我", "繼續做", "然後我要", "下一步我", "我來", "現在來"
+    ],
+    "stop_guard.pending": [
+      "待辦", "還沒做", "尚未完成", "還需要"
+    ],
+    "pattern_keywords.toast-notification": [
+      "彈窗", "通知", "彈出", "鈴聲"
+    ],
+    "pattern_keywords.cc-ccc-boundary": [
+      "邊界", "打包", "同步", "cc 改", "連動"
+    ],
+    "pattern_keywords.image-generation": [
+      "生圖", "臉", "照片", "圖生圖", "鵝蛋臉", "選角", "美女", "風格", "衣服"
+    ],
+    "pattern_keywords.book-content": [
+      "附錄", "章節", "書", "段落", "對照表", "人名", "橡皮筋", "膠帶", "隱喻"
+    ],
+    "pattern_keywords.token-efficiency": [
+      "估算", "性能", "最快", "注意力預算", "秒級", "並行"
+    ],
+    "pattern_keywords.ux-branding": [
+      "成癮", "命名", "更名", "爽感", "火焰", "模式"
+    ],
+    "pattern_keywords.product-design": [
+      "用戶", "使用者", "體驗", "產品", "數據", "造假", "隱藏", "客戶", "立場", "檢舉"
+    ],
+    "pattern_keywords.check-before-modify": [
+      "先查", "先檢查", "副作用", "改東西", "沉澱", "操作錯誤", "停了", "分心", "改前", "改舊"
+    ],
+    "pattern_keywords.process-guard": [
+      "進程", "殭屍", "殺", "清道夫"
+    ],
+    "planning_path_markers": ["交接_", "05_planning/"],
+    "slice_markers": ["驗收", "驗證", "測試計畫", "回歸"],
+    "work_item_markers": ["新增", "新任務", "新功能", "新模組"],
+    "hitl_keywords": [
+      "需要人", "人工", "手動", "確認", "用戶決定", "需要確認",
+      "需要人類", "不可自動", "人為判斷"
+    ],
+    "afk_keywords": [
+      "自動", "可自主", "批次", "機械式", "例行"
+    ],
+    "prompt_guard.irreversible": ["刪除", "刪掉", "部署"],
+    "prompt_guard.vague": ["那個", "之前的", "上次", "它", "這個"],
+    "prompt_guard.known_commands": ["交接"],
+    "prompt_guard.multi_topic": ["還有", "另外", "以及", "再來", "順便", "第二", "第三", "其次", "最後"],
+    "proposal_guard.planning_patterns": ["交接_", "05_planning/"],
+    "proposal_guard.proposal_markers": ["新增", "新任務", "新模組", "新功能"],
+    "proposal_guard.side_effect_kw": ["副作用", "風險", "影響", "代價"],
+    "session_format.abcd_patterns": ["母[A-D]", "四母代理", "角色[A-D]", "ABCD\\s*分", "分成\\s*ABCD"],
+    "rule_trigger.handoff": ["交接", "寫交接", "讀交接"],
+    "rule_trigger.cbua": ["決策", "架構", "選擇", "分析", "trade-off", "三層", "複雜"],
+    "rule_trigger.wiredo": ["驗證", "交付", "部署", "上線", "截圖", "wiredo"],
+    "rule_trigger.commands": ["指令", "skill", "技能"],
+    "rule_trigger.autonomous": ["自主", "判斷", "要繼續嗎"]
+  }
+}

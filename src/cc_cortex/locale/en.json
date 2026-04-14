@@ -1,0 +1,243 @@
+{
+  "messages": {
+    "confidence_gate.deny": "Uncertainty markers ({markers}) + irreversible operation detected. Verify before proceeding.",
+    "confidence_gate.verify_guide": "Low confidence + irreversible = high risk. Please:\n1. Use Grep/Read to verify key assumptions\n2. Use WebSearch to confirm uncertain API/syntax\n3. Retry after verification (uncertainty markers cleared = pass)",
+    "handoff_engine.token_gate_phase": "\ud83d\udea8 Token Gate [phase]: {context_k}K \u2014 safety ceiling. Agent spawn blocked.",
+    "handoff_engine.token_gate_critical": "\ud83d\udea8 Token Gate: {context_k}K tokens \u2014 CRITICAL. Agent spawn blocked.",
+    "handoff_engine.token_gate_agent": "\u26a0\ufe0f Token Gate: {context_k}K tokens \u2014 Agent spawn blocked.",
+    "handoff_engine.reminder": "\u270f\ufe0f This session has used {token_k}K tokens and modified {count} files, but no handoff doc updated. Consider writing a handoff now.",
+    "handoff_engine.mode_full_description": "Full mode (maximum autonomous execution): no Agent gate, no reminders, no ask-user prompts. Every decision runs the CBUA pipeline (C0\u2192C2/C3\u2192A0-A5) autonomously. Only DestructionGuard, butterfly-effect violations, and genuine unknown unknowns interrupt. See docs/handoff-modes.md.",
+    "handoff_engine.mode_phase_description": "Phase mode (task-boundary aware): finish current task before handoff, 180K hard ceiling safety net, 150K late reminder.",
+    "handoff_engine.mode_save_token_description": "Save-token mode (default): 140K Agent gate, 160K critical, 80K+ with \u22653 modified files fires reminder. Conservative, handoff often.",
+    "handoff_engine.guidance_critical": "{context_k}K tokens (cost {cost_k}K) \u2014 write handoff now, then stop.",
+    "handoff_engine.guidance_normal": "{context_k}K tokens (cost {cost_k}K) \u2014 finish current task, write handoff. No new tasks.",
+    "handoff_engine.session_title": "Session Complete",
+    "equilibrium_guard.cleanup": "Equilibrium cleanup: {file} removed {count} old records (kept latest {keep})",
+    "token_warning.160000": "{k}K/{max}K \u2014 critical",
+    "token_warning.140000": "{k}K/{max}K \u2014 elevated",
+    "token_warning.100000": "{k}K/{max}K",
+    "context_compressed": "\u26d4 Context compressed \u2014 file read records lost. Stop all Edit/Write. Write handoff NOW.",
+    "classify_error.fix_guidance": "(A steady hand finishes the current stroke before correcting the last \u2014 fix this when you next touch the file, not now.)",
+    "sentinel.three_strikes": "Three-strikes rule: no more blind retries.\n**Required actions (in order)**:\n1. Use `/kb_*` Skill to check domain knowledge\n2. No Skill? WebSearch for external references\n3. Retry only after gathering information\nDo NOT retry without research.",
+    "sentinel.rx.repeat": "\n\ud83d\udc8a Pause \u2192 list 3 hypotheses (mutually distinct) \u2192 exclude failed ones \u2192 verify most likely",
+    "sentinel.rx.repeat_force": "\n\ud83d\udc8a Stop editing this file \u2192 switch tool/file/hypothesis \u2192 Decompose",
+    "sentinel.rx.stagnation": "\n\ud83d\udc8a Re-read files \u2192 ask \"what should be here but isn't?\" \u2192 list 3 new hypotheses",
+    "sentinel.rx.paralysis_start": "\n\ud83d\udc8a Info is sufficient \u2192 pick most likely hypothesis \u2192 minimal change to verify",
+    "sentinel.rx.consecutive_fail": "\n\ud83d\udc8a Break into smaller steps \u2192 find first success point \u2192 build from there",
+    "sentinel.rx.bash_retry": "\n\ud83d\udc8a Read error message \u2192 check env/path/permissions \u2192 fix root cause then retry",
+    "sentinel.rx.scope": "\n\ud83d\udc8a Confirm task boundary \u2192 doing unrequested work? \u2192 core first",
+    "sentinel.rx.hijack_l2": "\n\ud83d\udc8a List 2 alternative hypotheses \u2192 pick the most different \u2192 explain why it works",
+    "sentinel.rx.hijack_l3": "\n\ud83d\udc8a Forget all attempts \u2192 restate problem \u2192 list 3 fresh hypotheses \u2192 pick most different",
+    "sentinel.rx.hijack_l4": "\n\ud83d\udc8a Stop all tools \u2192 write handoff \u2192 tell user to start new session",
+    "file_tracker.task_writing": "Writing {filename}",
+    "file_tracker.conflict_readonly": "\u26a0 File conflict (read-only check): {path} in use by {key}.",
+    "file_tracker.conflict_readonly_additional": "Lock contention prevented tracking update, but conflict check still works. Please work on other files.",
+    "file_tracker.handoff_queue": "\u26a0 Handoff queued: {path} being written by {key} ({ttl}s short lock). Retry shortly.",
+    "file_tracker.handoff_queue_additional": "Another session is updating this handoff file. Handoff files use a {ttl}s short write lock \u2014 no need to wait for the other session to end. Retry after a few seconds. Work on something else in the meantime.",
+    "file_tracker.conflict_file": "\u26a0 File conflict: {path} in use by session {key} ({task}). Please work on other files or wait.",
+    "file_tracker.conflict_file_additional": "Another Claude Code session is editing this file. Check instance_lock.json for all sessions' file lists. Work on non-conflicting files or wait for the other session to finish.",
+    "prompt_guard.multi_question": "{count} questions detected \u2192 create numbered checklist, process each, \u2705 only with evidence, \u274c if stuck.",
+    "prompt_guard.clarity_deny": "\u26a0 Ambiguity detected (clarity {score}) + irreversible operation \u2192 please clarify intent.\nTip: add specific path or filename to bypass",
+    "proposal_guard.missing_analysis": "New proposal missing side-effect analysis. Please add a 'Side effects' or 'Risks' section: (1) What's affected? (2) What's the cost? (3) Is the cost acceptable?",
+    "proposal_guard.l2_requirement": "L2 sweet-spot analysis required:\nEvery proposal must include side-effect/risk analysis.\nFormat: | Risk | Description |\nList at least 1 side effect and its controllability.",
+    "session_format.bad_id": "\u26d4 SESSION ID format error: {bad_list}\nCorrect format: <project_prefix>_<4hex>_<HHmm> (e.g. IA_a3f1_0835, PS_d9e4_2215)\nPrefix table: {prefixes}\nChoose prefix based on project, hex4 random, HHmm current time.",
+    "session_format.missing_taskpool": "\u26d4 Handoff contains ABCD dispatch but no task-pool.md in same directory\nFile: {basename}\nMissing: {taskpool_path}\nMust create task-pool.md (with dependency graph + role assignment + subtasks) before writing ABCD dispatch to handoff.",
+    "wiredo_guard.checklist": "\ud83d\udccb **WIREDO Delivery Checklist** (code task started, mark N/A for non-applicable items):\n```\n\u25a1 W \u2014 Wired: Who imports/calls this? Would deleting it cause errors?\n\u25a1 I \u2014 Inherited & Aligned: Existing template? Correct module location?\n\u25a1 R \u2014 Responsive & Performant: No O(n\u00b2)/N+1?\n\u25a1 E \u2014 Extensible: Constants at top? Config interface?\n\u25a1 D \u2014 Documented, Defended & Verified: How to test? How to prove?\n\u25a1 O \u2014 Observable: Has stats/log? SaaS needs health check (non-SaaS mark N/A)\n```\nVerify each item after completion, include full WIREDO table in final report.",
+    "insight.cli_free_on_max": "Claude Code CLI (claude -p) is free with Max/Team subscription. No API key needed for development and testing.",
+    "insight.cli_non_interactive": "claude -p 'prompt' runs non-interactively with full tool access. Supports --output-format json for programmatic use.",
+    "insight.hook_bypass_permissions": "VS Code extension has known permission bugs (#29159, #20536). Workaround: use integrated terminal with claude --dangerously-skip-permissions for auto-accept.",
+    "insight.mcp_server": "Custom tools can be added via MCP servers in .claude/settings.json \u2192 mcpServers. No need to modify Claude Code source.",
+    "insight.hook_types": "Claude Code hooks: PreToolUse (before tool), PostToolUse (after), UserPromptSubmit (before prompt), Stop (session end), SubagentSpawn (before subagent). Configure in .claude/settings.json \u2192 hooks.",
+    "insight.context_management": "Context compression is automatic. Use CLAUDE.md for persistent instructions (always loaded). Use /memory for cross-session recall. Write handoffs before hitting limits.",
+    "insight.subagent_parallel": "Multiple Agent tool calls in a single message run in parallel. Use this for independent research/search tasks to save time.",
+    "git_assist.uncommitted": "uncommitted changes",
+    "git_assist.staged": "Staged",
+    "git_assist.modified": "Modified",
+    "git_assist.untracked": "Untracked",
+    "git_assist.more": "more",
+    "hypothesis_tracker.failed_header": "Previously attempted approaches (avoid repeating):",
+    "hypothesis_tracker.try_different": "\nTry a different approach.",
+    "structured_handoff.validation_errors": "Structured handoff has {count} issue(s): {errors}"
+  },
+  "patterns": {
+    "handoff_prefixes": ["handoff_"],
+    "recent_section_headers": ["recent", "progress"],
+    "correction_l1": [
+      "\\bwrong\\b",
+      "\\bno[,.\\s]",
+      "\\bactually[,.\\s]",
+      "\\binstead\\b",
+      "\\bnot that\\b",
+      "\\bshould be\\b",
+      "\\bdon'?t use\\b",
+      "\\bshouldn'?t\\b",
+      "\\bfix (this|that)\\b",
+      "\\bnot right\\b",
+      "\\bincorrect\\b",
+      "\\bthat'?s not\\b",
+      "\\bplease change\\b"
+    ],
+    "correction_l2": [
+      "\\bchange .{1,30} to\\b",
+      "\\breplace .{1,30} with\\b",
+      "\\bremove\\b",
+      "\\bdelete\\b",
+      "\\bget rid of\\b",
+      "\\badd\\b .{1,20}",
+      "\\binclude\\b",
+      "\\bmissing\\b",
+      "\\bforgot\\b",
+      "\\bleft out\\b",
+      "\\bwhy (did|are|is)\\b",
+      "\\bwhat happened\\b",
+      "\\btoo (much|many|complex|simple)\\b",
+      "\\bstill (broken|failing|wrong)\\b",
+      "\\bbroke\\b",
+      "\\bbreaking\\b",
+      "\\bregression\\b",
+      "\\bnot what I\\b",
+      "\\bthat'?s not what\\b",
+      "\\bdo .{1,20} first\\b",
+      "\\bbefore that\\b",
+      "\\bremember\\b",
+      "\\bnext time\\b",
+      "\\balways\\b",
+      "\\bnever\\b .{1,20}",
+      "\\bundo\\b",
+      "\\brevert\\b",
+      "\\broll\\s*back\\b",
+      "\\bother way\\b",
+      "\\bopposite\\b",
+      "\\breverse\\b"
+    ],
+    "skip_prefixes": [
+      "<ide_", "<system", "<project_handoff", "<command", "<context"
+    ],
+    "research_keywords": [
+      "report", "research", "analyze", "investigate", "summarize",
+      "compare", "review", "survey", "explore", "check", "status", "read"
+    ],
+    "execution_keywords": [
+      "edit", "write", "create", "delete", "remove", "move", "refactor",
+      "fix", "implement", "build", "deploy", "install", "update"
+    ],
+    "misuse.read": ["read the file", "read this file", "cat "],
+    "misuse.search": ["search for", "find the", "grep"],
+    "misuse.edit": ["edit", "write", "modify"],
+    "uncertainty": [
+      "\\bmaybe\\b", "\\bmight\\b", "\\bperhaps\\b", "\\bnot\\s+sure\\b",
+      "\\buncertain\\b", "\\bpossibly\\b", "\\bI\\s+think\\b",
+      "\\bI\\s+guess\\b", "\\bI\\s+believe\\b", "\\bprobably\\b",
+      "\\blikely\\b", "\\bunclear\\b"
+    ],
+    "classify_error_keywords": ["error", "warning", "fix"],
+    "skill_signals.three_layer": [
+      "decision", "option", "trade.?off", "choose",
+      "analy[sz]", "evaluat", "assess"
+    ],
+    "skill_signals.first_principles": [
+      "why", "fundament", "essence",
+      "from scratch", "rethink"
+    ],
+    "skill_signals.debug_loop": [
+      "stuck", "bug", "error", "fail", "broken",
+      "debug", "troubleshoot", "diagnos"
+    ],
+    "skill_signals.prompt_select": [
+      "prompt", "CoT", "ToT", "chain.of.thought",
+      "reason", "thinking.mode"
+    ],
+    "skill_signals.decision_journal": [
+      "record", "journal", "log", "track",
+      "decision", "choice", "commit"
+    ],
+    "skill_signals.pdca": [
+      "plan", "execute", "check", "adjust",
+      "iterate", "cycle", "improve"
+    ],
+    "skill_signals.judgment": [
+      "confidence", "certain", "uncertain",
+      "meta.?cognit", "caus[ae]", "ethic",
+      "should.I", "pause", "inhibit"
+    ],
+    "skill_signals.awareness": [
+      "attention", "hijack", "loop",
+      "degrad", "recover", "heal",
+      "repeat", "stuck.again"
+    ],
+    "skill_signals.learning_loop": [
+      "learn", "correct", "fix.pattern",
+      "pattern", "improv", "evolv",
+      "curious", "achiev", "drive", "meaning"
+    ],
+    "handoff_file_ref": ["quick.?find", "index", "kb/", "kb_"],
+    "stop_guard.completion": [
+      "handoff", "done", "completed", "session ended", "suggest new",
+      "all tasks", "finished"
+    ],
+    "stop_guard.question": [
+      "?", "which", "should I", "want me to", "do you want", "would you like"
+    ],
+    "stop_guard.continuation": [
+      "next I'll", "let me continue", "I'll proceed", "now let me",
+      "first, let me"
+    ],
+    "stop_guard.pending": [
+      "still need to", "haven't done", "remaining tasks?:", "todo:", "⬜"
+    ],
+    "pattern_keywords.toast-notification": [
+      "toast", "notification"
+    ],
+    "pattern_keywords.cc-ccc-boundary": [
+      "CCC", "boundary", "import ccc", "pip install"
+    ],
+    "pattern_keywords.image-generation": [
+      "flux", "pulid", "casting"
+    ],
+    "pattern_keywords.book-content": [
+      "word", "chapter"
+    ],
+    "pattern_keywords.token-efficiency": [
+      "token", "attention", "performance"
+    ],
+    "pattern_keywords.ux-branding": [
+      "ux", "streak", "session", "forge", "cortex"
+    ],
+    "pattern_keywords.product-design": [
+      "api key", "product", "user"
+    ],
+    "pattern_keywords.check-before-modify": [
+      "check first", "side effect"
+    ],
+    "pattern_keywords.process-guard": [
+      "process", "pid"
+    ],
+    "planning_path_markers": ["task-pool", "planning/", "handoff", "prd", "spec", "requirements"],
+    "slice_markers": [
+      "exit.?criter", "success.?signal", "test.?plan", "acceptance",
+      "tdd", "test.?first", "regression"
+    ],
+    "work_item_markers": [
+      "⬜", "Phase\\s+\\d", "add\\s+new", "new\\s+(feature|task|module)"
+    ],
+    "hitl_keywords": [
+      "approval", "human", "manual", "review.?needed", "ask.?user"
+    ],
+    "afk_keywords": [
+      "auto", "autonomous", "scripted", "batch", "mechanical", "routine", "agent.?can"
+    ],
+    "prompt_guard.irreversible": ["drop", "reset", "force", "deploy", "push", "remove", "rm "],
+    "prompt_guard.vague": ["it", "that thing", "the previous", "this one"],
+    "prompt_guard.known_commands": ["/mode", "/evolve", "/tidy", "/schedule", "/ps", "/status", "/hook", "/ux", "/clip"],
+    "prompt_guard.multi_topic": ["also", "and also", "besides"],
+    "proposal_guard.planning_patterns": ["task-pool", "planning/", "handoff"],
+    "proposal_guard.proposal_markers": ["add\\s+new", "new\\s+feature"],
+    "proposal_guard.side_effect_kw": ["trade.?off", "side.?effect", "risk", "impact", "breaking"],
+    "session_format.abcd_patterns": ["\\[A\\d?\\].*\\[B\\d?\\]", "\\[C\\d?\\].*\\[D\\d?\\]"],
+    "rule_trigger.handoff": ["handoff", "hand off", "hand-off"],
+    "rule_trigger.cbua": ["decision", "architecture", "trade-off", "choose", "complex"],
+    "rule_trigger.wiredo": ["verify", "deliver", "deploy", "ship", "wiredo", "screenshot"],
+    "rule_trigger.commands": ["command", "skill", "slash command"],
+    "rule_trigger.autonomous": ["autonomous", "judgment", "should i continue"]
+  }
+}

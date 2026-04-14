@@ -1,0 +1,50 @@
+# cc-cortex guards quota — enforces GUARDS_CHARTER.md §2 and §3.
+#
+# This file is the forcing function for the three-tier severity model.
+# CI fails any PR that violates these quotas. Promoting a guard to a
+# higher tier when the quota is full requires simultaneously demoting
+# another guard of that tier in the same PR.
+#
+# Edit history: every change to this file MUST cite the corresponding
+# charter clause and incident ID (or "n/a — initial bootstrap") in the
+# commit message.
+#
+# Audited by:  scripts/charter_audit.py
+# Authority:   GUARDS_CHARTER.md (this file is subordinate)
+
+[quota]
+# Maximum number of guards allowed at each tier.
+# `hard_block`  — interrupts the user. Cap is firm at 10. Charter §3.
+# `advisory`    — unlimited; absorbed into the once-per-session digest.
+# `telemetry`   — unlimited; never user-visible, audit-only.
+hard_block = 10
+advisory   = -1   # unlimited
+telemetry  = -1   # unlimited
+
+[grace]
+# Charter §5.1: grace window above the firm cap before kill criteria fires.
+# If hard_block exceeds (quota.hard_block + grace.hard_block) for any audit
+# window, the reform is judged failed and hard_block resets to baseline.
+hard_block = 2
+
+[demotion]
+# Charter §6: two-step demotion path. Days at zero real-incident catches
+# before each tier transition.
+hard_block_to_advisory_days = 90
+advisory_to_telemetry_days  = 90
+telemetry_to_deleted_days   = 90
+
+[kill_criteria]
+# Charter §5: pre-registered failure conditions. Checked by charter_audit.py.
+hard_block_count_max          = 12       # §5.1
+override_rate_max             = 0.50     # §5.2 (50% over rolling 14d)
+override_rate_window_days     = 14       # §5.2
+digest_unread_streak_days_max = 7        # §5.3
+
+[audit]
+# Cadence (in days) for charter audits.
+quota_compliance_days        = 0    # 0 = per-PR
+override_rate_days           = 1    # daily
+digest_read_state_days       = 7    # weekly
+demotion_execution_days      = 30   # monthly
+kill_criteria_evaluation_days = 90  # quarterly

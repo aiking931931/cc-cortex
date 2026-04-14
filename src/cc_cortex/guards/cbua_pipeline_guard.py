@@ -1,0 +1,400 @@
+"""cc_cortex.guards.cbua_pipeline_guard — Hardened CBUA pipeline enforcement.
+
+Closes text-only CBUA gaps via PostToolUse state tracking + context injection.
+Uses StateStore.read_modify_write for atomic cross-tick persistence.
+
+@module cbua_pipeline_guard
+@responsibility Enforce CBUA B1/C1/U1/A4/A5 steps. Uses behavioral signals
+    (edit count, read count, agent dispatches) + text markers as secondary.
+@dependencies cc_cortex.guards.base, cc_cortex.core.state_store
+@exports CbuaPipelineGuard
+
+CC ceiling notes:
+- L1 (Agent spawn unmonitored): red team dispatch can only be DETECTED
+  (by Agent tool name), not ENFORCED. When L1 unlocks → upgrade to enforce.
+- L4 (Hook can't read conversation): guard scans tool_input/tool_result only,
+  not Claude's reasoning text. When L4 unlocks → scan full response.
+- L6 (PostToolUse can't DENY): guard is COGNITIVE (warn only).
+  When L6 unlocks → upgrade A5 red-team-not-dispatched to QUALITY (deny).
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+from cc_cortex.core.state_store import StateStore
+from cc_cortex.guards.base import (
+    BaseGuard,
+    GuardCategory,
+    GuardContext,
+    GuardResult,
+)
+
+# ── Detection patterns ──────────────────────────────────────
+
+_B1_MARKERS = re.compile(
+    r"B1[_\s]*(根因|甜蜜點|策略|root|sweet|strategy)"
+    r"|根因.*甜蜜點.*策略",
+    re.IGNORECASE,
+)
+
+_C1_MARKERS = re.compile(
+    r"我知道.*我不知道.*我假設"
+    r"|known.*unknown.*assumed",
+    re.IGNORECASE,
+)
+
+_U1_MARKERS = re.compile(
+    r"反例|counter.?example|edge.?case|what.?if"
+    r"|失敗場景|failure.?mode",
+    re.IGNORECASE,
+)
+
+# A4: only match in Agent/conversational context, not code content
+_A4_ASK_PATTERNS = re.compile(
+    r"要做嗎|要不要繼續|需要我.*嗎|要繼續嗎",
+)
+
+_A5_REDTEAM = re.compile(
+    r"紅隊|red.?team|壓測|pressure.?test",
+    re.IGNORECASE,
+)
+
+_WIREDO_TABLE = re.compile(
+    r"W.*Wired.*I.*Inherited|WIREDO|W/I/R/E/D/O",
+    re.IGNORECASE,
+)
+
+# Delivery-phase signals: ONLY shell commands that actually ship.
+# Pure text keywords (完成/交付/ready/done) were removed because
+# documentation, comments, handoff files, even THIS docstring trigger
+# false positives — exactly the "事前查證六維 亂七八糟" failure mode.
+#
+# Implementation: we split the Bash command on shell separators
+# (&&, ||, ;, |, newline) and check each SEGMENT's leading token.
+# This avoids matching delivery verbs that appear inside quoted
+# arguments of meta-commands like `python -c "...git commit..."`,
+# which is exactly what burned us in smoke testing.
+_DELIVERY_SEPARATORS = re.compile(r"&&|\|\||;|\||\n")
+
+_DELIVERY_VERB = re.compile(
+    r"^\s*(?:git\s+commit(?!\s+--dry-run)"
+    r"|git\s+push(?!\s+--dry-run)"
+    r"|gh\s+pr\s+create"
+    r"|gh\s+release\s+create"
+    r"|twine\s+upload"
+    r"|npm\s+publish"
+    r"|cargo\s+publish"
+    r"|python\s+-m\s+build"
+    r"|docker\s+push"
+    r"|kubectl\s+apply"
+    r"|deploy\.py(?!\s+--dry-run)"
+    r"|rsync.*--delete"
+    r"|scp\s.*@"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_delivery_command(cmd: str) -> bool:
+    """True if any top-level segment of cmd starts with a delivery verb."""
+    if not cmd:
+        return False
+    for segment in _DELIVERY_SEPARATORS.split(cmd):
+        if _DELIVERY_VERB.match(segment):
+            return True
+    return False
+
+# StateStore namespace
+_NAMESPACE = "cbua_pipeline"
+
+
+class CbuaPipelineGuard(BaseGuard):
+    """PostToolUse: enforce CBUA pipeline steps via state tracking.
+
+    State persisted via StateStore.read_modify_write (atomic file lock).
+    Uses behavioral signals (edit/read count, agent dispatch) + text markers.
+    """
+
+    name = "cbua_pipeline"
+    category = GuardCategory.COGNITIVE
+
+    def check(self, ctx: GuardContext) -> Optional[GuardResult]:
+        """PreToolUse: no-op."""
+        return None
+
+    def on_post_tool(self, ctx: GuardContext) -> Optional[GuardResult]:
+        """PostToolUse: scan for CBUA compliance evidence.
+
+        All state mutations happen inside StateStore.read_modify_write
+        to prevent concurrent-subprocess data loss.
+        """
+        if not ctx.cache_dir:
+            return None
+
+        store = StateStore(ctx.cache_dir)
+        text = self._get_scannable_text(ctx)
+        # Mutable container to capture early-exit result from callback
+        early_result: list[Optional[GuardResult]] = [None]
+
+        def _update(state: dict) -> dict:
+            complexity = state.get("complexity", "")
+            redteam_required = state.get("redteam_required", False)
+
+            # C0: classify if not yet done or periodically reclassify
+            edit_count = state.get("edit_count", 0)
+            if not complexity or (edit_count > 0 and edit_count % 20 == 0):
+                complexity, redteam_required = self._classify(
+                    ctx.cache_dir, ctx.session_id,
+                )
+                state["complexity"] = complexity
+                state["redteam_required"] = redteam_required
+
+            # Simple → save and skip
+            if complexity == "simple":
+                return state
+
+            # Track behavioral signals
+            if ctx.tool_name in ("Edit", "Write", "NotebookEdit"):
+                state["edit_count"] = edit_count + 1
+                # Real work resets polling streak.
+                state["polling_streak"] = 0
+            if ctx.tool_name in ("Read", "Glob", "Grep"):
+                state["read_count"] = state.get("read_count", 0) + 1
+            if ctx.tool_name == "Agent":
+                state["agent_count"] = state.get("agent_count", 0) + 1
+
+            # Polling detection: same Bash command signature repeating
+            # without any Edit/Write between → operator is monitoring
+            # something (build, test, log tail, status check). During
+            # polling we suppress reminders so the hook doesn't spam
+            # B1/C1/U1 every tick when no real work is happening.
+            # Signature = first 3 tokens of the command, normalized.
+            if ctx.tool_name == "Bash" and isinstance(ctx.tool_input, dict):
+                raw_cmd = ctx.tool_input.get("command", "") or ""
+                if isinstance(raw_cmd, str):
+                    sig = " ".join(raw_cmd.strip().split()[:3])
+                    last_sig = state.get("last_bash_sig", "")
+                    if sig and sig == last_sig:
+                        state["polling_streak"] = (
+                            state.get("polling_streak", 0) + 1
+                        )
+                    else:
+                        state["polling_streak"] = 0
+                    state["last_bash_sig"] = sig
+
+            # Scan text markers (secondary signal)
+            if _B1_MARKERS.search(text):
+                state["b1_shown"] = True
+            if _C1_MARKERS.search(text):
+                state["c1_shown"] = True
+            if _U1_MARKERS.search(text):
+                state["u1_shown"] = True
+            if _WIREDO_TABLE.search(text):
+                state["wiredo_shown"] = True
+
+            self._behavioral_silent_ack(state)
+            # Delivery-phase signal: ONLY check shell commands, not
+            # arbitrary text. This gate prevents docstrings / handoff
+            # markdown / comments containing "完成/交付/done" from
+            # triggering a false delivery signal — the "事前查證六維
+            # 亂七八糟" failure mode the user called out.
+            if ctx.tool_name == "Bash" and isinstance(ctx.tool_input, dict):
+                cmd = ctx.tool_input.get("command", "")
+                if isinstance(cmd, str) and _is_delivery_command(cmd):
+                    state["delivery_keyword_seen"] = True
+            if ctx.tool_name == "Agent" and _A5_REDTEAM.search(text):
+                state["redteam_dispatched"] = True
+
+            # WIREDO one-shot trigger: fire once when delivery signal
+            # detected. wiredo_just_fired is a transient flag consumed
+            # by _generate_reminder this same tick; cleared next tick.
+            state["wiredo_just_fired"] = False
+            if not state.get("wiredo_reminded"):
+                fire_now = (
+                    state.get("edit_count", 0) >= 20
+                    or state.get("delivery_keyword_seen", False)
+                )
+                if fire_now:
+                    state["wiredo_reminded"] = True
+                    state["wiredo_just_fired"] = True
+
+            # A4: ask-user violation (Agent tool only)
+            if ctx.tool_name == "Agent" and _A4_ASK_PATTERNS.search(text):
+                state["ask_violations"] = state.get("ask_violations", 0) + 1
+                early_result[0] = GuardResult.allow_advisory(
+                    context="⛔ A4 違規：信心 ≥70% 直接做，<70% 升 B1/B2 自己決策。",
+                )
+
+            return state
+
+        try:
+            final_state = store.read_modify_write(
+                _NAMESPACE, ctx.session_id, _update,
+            )
+        except RuntimeError:
+            return None
+
+        if early_result[0] is not None:
+            return early_result[0]
+
+        # Polling suppression: if we've seen the same Bash command
+        # repeat 3+ times without any Edit/Write between, the operator
+        # is monitoring something (build, test, log, status). Skip
+        # reminders so we don't spam B1/C1/U1 every poll tick.
+        if final_state.get("polling_streak", 0) >= 3:
+            return None
+
+        return self._generate_reminder(
+            final_state,
+            final_state.get("complexity", "complicated"),
+            final_state.get("redteam_required", False),
+        )
+
+    def _classify(
+        self, cache_dir: str, session_id: str,
+    ) -> tuple[str, bool]:
+        """Load or reclassify C0. Fail-safe: complicated."""
+        try:
+            from cc_cortex.c0_router import C0Router
+            result = C0Router().load(cache_dir, session_id)
+            if result:
+                return result.complexity, result.redteam_required
+        except Exception:
+            pass
+        return "complicated", False
+
+    @staticmethod
+    def _behavioral_silent_ack(state: dict) -> None:
+        """Silently mark B1 as shown when the session is read-heavy.
+
+        CC L4 hides Claude's markdown reasoning from the hook, so a
+        text-only B1 scan never sees real "research-before-write"
+        sessions. When the read counter at least matches the edit
+        counter, the structural pattern the marker anchors is
+        already happening — silence the reminder instead of spamming
+        a session that's practicing what it preaches.
+
+        C1/U1 stay strict: intelligence inventory and counter-example
+        attack carry semantic weight a ratio cannot prove.
+        """
+        edits = state.get("edit_count", 0)
+        reads = state.get("read_count", 0)
+        if edits >= 3 and reads >= edits:
+            state["b1_shown"] = True
+
+    # Per-string truncation limit when scanning marker text. Long edits
+    # (docstrings, multi-section markdown) used to be skipped entirely
+    # via `len(v) < 2000`, which made every marker that lived inside a
+    # large Edit invisible to the scanner — the root cause of the
+    # permanent "B1 marker 未見" false positive on heavy-edit sessions.
+    # Truncating to a generous-but-bounded prefix keeps regex cost
+    # capped while letting the leading marker text actually count.
+    _SCAN_TEXT_CAP = 4000
+
+    @staticmethod
+    def _get_scannable_text(ctx: GuardContext) -> str:
+        """Extract text from tool input + result.
+
+        Long values are truncated (not skipped) so marker text inside
+        large edits still feeds the scanner. See `_SCAN_TEXT_CAP`.
+        """
+        parts: list[str] = []
+        if isinstance(ctx.tool_input, dict):
+            for v in ctx.tool_input.values():
+                if isinstance(v, str):
+                    parts.append(v[:CbuaPipelineGuard._SCAN_TEXT_CAP])
+        # GuardContext field is `tool_result`, not `tool_output`
+        if hasattr(ctx, "tool_result") and isinstance(ctx.tool_result, str):
+            parts.append(ctx.tool_result[:CbuaPipelineGuard._SCAN_TEXT_CAP])
+        return " ".join(parts)
+
+    @staticmethod
+    def _generate_reminder(
+        state: dict, complexity: str, redteam_required: bool,
+    ) -> Optional[GuardResult]:
+        """Generate reminders based on accumulated state.
+
+        2026-04-13 restore (用戶糾正「人性河床論」):
+        B1/C1/U1 marker warnings are restored. Rationale: even if L4
+        blocks hook from reading reasoning text and markers look like
+        Goodhart theater, the "未見" reminder still anchors cognition
+        toward the desired format. Cognition is fluid — context shapes
+        thinking direction, not just verifies it. The earlier Goodhart
+        concern (stuffing keywords into tool args) is accepted as the
+        cost of cognitive anchoring.
+
+        WIREDO keeps its upgraded D-dimension pointer (from commit
+        78711974). Ratio signal stays in ThinkingDepthGuard (single
+        source of truth, no duplication here).
+
+        Signals:
+        - B1 marker: "未見（根因→甜蜜點→策略）" once at 3+ edits
+        - C1 marker: "未見（我知道/不知道/假設）" once at 5+ edits (Complex+)
+        - U1 marker: "未見（反例攻擊）" once at 8+ edits (Complex+)
+        - A5 redteam-not-dispatched at 10+ edits (if required)
+        - WIREDO D-dimension delivery reminder at 5-edit multiples
+        """
+        edit_count = state.get("edit_count", 0)
+        missing: list[str] = []
+
+        # B1: structured thinking marker (after 3+ edits, all Complicated+)
+        if not state.get("b1_shown") and edit_count >= 3:
+            missing.append("B1 結構思考未見（根因→甜蜜點→策略）")
+
+        # C1: intelligence inventory marker (Complex+ only, 5+ edits)
+        if (
+            not state.get("c1_shown")
+            and edit_count >= 5
+            and complexity in ("complex", "chaotic")
+        ):
+            missing.append("C1 情報盤點未見（我知道/不知道/假設）")
+
+        # U1: counter-example attack marker (Complex+ only, 8+ edits)
+        if (
+            not state.get("u1_shown")
+            and edit_count >= 8
+            and complexity in ("complex", "chaotic")
+        ):
+            missing.append("U1 反例攻擊未見")
+
+        # A5: redteam required but not dispatched (Agent tool dispatch
+        # is observable via tool_name; this stays behavioral).
+        if (
+            redteam_required
+            and not state.get("redteam_dispatched")
+            and edit_count >= 10
+        ):
+            missing.append("⛔ A5 紅隊未派出")
+
+        # WIREDO delivery reminder: ONE-SHOT, fires only at delivery
+        # signals. 2026-04-13 fix (用戶糾正「時機判斷要正確 不然會
+        # 變成事前查證六維 亂七八糟」):
+        #   - removed every-5-edits trigger (was firing during work)
+        #   - now fires once via wiredo_just_fired flag set in _update
+        #   - trigger conditions (in _update):
+        #     (a) 20+ edits accumulated (heavy work session)
+        #     (b) delivery keyword in tool input
+        #         (commit/ship/done/release/部署/完成/PR)
+        # The actual six-dim ✓/✗ checklist runs at Stop event via
+        # prompt_hooks.WIREDO_JUDGE, not here. This is the "delivery
+        # is near, don't forget WIREDO" nudge — fires exactly once.
+        if state.get("wiredo_just_fired"):
+            missing.append(
+                "📐 WIREDO 六維（W:接線/I:母版/R:響應/E:可配置/"
+                "D:驗證/O:可觀測）— 交付時機到了。D 維最強：跑 "
+                "tests / build / 截圖才算驗證，tsc/lint 不算。"
+                "Stop event 會跑 WIREDO_JUDGE 強制六維打勾"
+            )
+
+        if not missing:
+            return None
+
+        severity = "⚠" if len(missing) <= 2 else "⛔"
+        return GuardResult.allow_advisory(
+            context=(
+                f"{severity} CBUA ({complexity}, {edit_count} edits):\n"
+                + "\n".join(f"  - {m}" for m in missing)
+            ),
+        )

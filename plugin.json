@@ -1,0 +1,69 @@
+{
+  "$schema": "https://claude.ai/schemas/plugin/v1.json",
+  "name": "cc-cortex",
+  "displayName": "CC Cortex — The Cognitive Layer for Claude Code",
+  "version": "0.9.0",
+  "description": "Safety guardrails, memory, multi-instance coordination, and cognitive architecture for Claude Code. Zero dependencies.",
+  "author": {
+    "name": "AI King (Chen-Xuan Wang)",
+    "email": "me@ai-king.dev"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/anthropics-community/cc-cortex",
+  "homepage": "https://github.com/anthropics-community/cc-cortex",
+  "engines": {
+    "claude-code": ">=1.0.0",
+    "python": ">=3.10"
+  },
+  "install": {
+    "pip": "pip install cc-cortex",
+    "init": "cc-cortex init"
+  },
+  "capabilities": {
+    "agents": 36,
+    "skills": 66,
+    "hooks": 14,
+    "guards": 44,
+    "categories": {
+      "safety": ["destruction_guard", "secret_scan", "git_safety", "dep_audit", "exfil_guard", "sentinel", "code_guard"],
+      "cognitive": ["awareness", "judgment", "three_layer", "first_principles", "prompt_select", "debug_loop", "learning_loop", "decision_journal", "pdca"],
+      "pipeline": ["think", "prd", "tdd", "review", "qa", "ship"],
+      "standards": ["coding-standards", "backend-patterns", "frontend-patterns", "database-patterns", "testing-patterns", "api-patterns"],
+      "devops": ["docker", "monitoring", "cicd", "infra"],
+      "security": ["security-hardening", "auth-patterns"],
+      "workflow": ["rfc", "changelog", "git-workflow", "incident", "postmortem", "architecture-decision"],
+      "data": ["data-pipeline", "ml-ops"],
+      "system": ["evolve", "handoff", "hook", "mode", "backup", "tidy", "status", "ps", "schedule", "sync", "collab", "locale", "ux"],
+      "research": ["last30days"],
+      "communication": ["onboarding"],
+      "knowledge": ["kb_cognition", "kb_rlhf_side_effects", "kb_benchmark", "kb_deploy", "kb_image", "kb_audio", "kb_dance", "kb_feed", "kb_word", "kb_media_sop", "kb_handoff", "kb-local-bridge", "claude-api", "kb_security", "kb_testing", "kb_performance"]
+    }
+  },
+  "hooks": {
+    "PreToolUse": "python -m cc_cortex.hooks.on_pre_tool",
+    "PostToolUse": "python -m cc_cortex.hooks.on_post_tool",
+    "SessionStart": "python -m cc_cortex.hooks.on_session_start",
+    "PromptSubmit": "python -m cc_cortex.hooks.on_prompt_submit",
+    "PreCompact": "python -m cc_cortex.hooks.on_pre_compact",
+    "PostCompact": "python -m cc_cortex.hooks.on_post_compact",
+    "Stop": "python -m cc_cortex.hooks.on_stop"
+  },
+  "keywords": [
+    "claude-code",
+    "anthropic",
+    "ai-safety",
+    "guardrails",
+    "cognitive-architecture",
+    "developer-tools",
+    "hooks",
+    "multi-instance"
+  ],
+  "differentiators": [
+    "Zero runtime dependencies — stdlib only",
+    "44 guards in unified ESLint-like pipeline",
+    "CBUA cognitive architecture (C0-C5 complexity routing)",
+    "Three-layer knowledge architecture (L0/L1/L2)",
+    "TCT: Tri-Theory Control Tensor — cross-domain adaptive framework",
+    "NIST AI RMF aligned governance"
+  ]
+}

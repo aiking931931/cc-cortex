@@ -1,0 +1,14 @@
+{
+  "id": "aiking9319/beir-scifact-star-t4",
+  "title": "beir-scifact-star-t4",
+  "code_file": "beir_ablation.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "keywords": ["beir", "retrieval", "benchmark", "rag"],
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}

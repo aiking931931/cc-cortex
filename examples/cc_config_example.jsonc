@@ -1,0 +1,159 @@
+// CC Cortex Configuration — Full Annotated Example
+// Copy this file to your project root as `cc_config.json` (remove comments)
+// or run `cc-cortex init` to generate a default config.
+{
+  // ═══════════════════════════════════════════════════════
+  // Hook Mode
+  // ═══════════════════════════════════════════════════════
+  // Controls which modules are active.
+  //
+  // Options:
+  //   "auto"     - (Default) Adapts based on context:
+  //                  - Multi-session active → "full"
+  //                  - Token usage ≥ 120K  → "minimal"
+  //                  - Otherwise           → "balanced"
+  //   "off"      - All hooks disabled except write conflict detection
+  //   "minimal"  - Only critical safety: sentinel + destruction_guard
+  //   "balanced" - Safety + memory + basic optimization
+  //   "full"     - All 24 modules active
+  "hook_mode": "auto",
+
+  // ═══════════════════════════════════════════════════════
+  // Per-Module Overrides
+  // ═══════════════════════════════════════════════════════
+  // Override the mode's default for individual modules.
+  //   true  = force enable (regardless of mode)
+  //   false = force disable (regardless of mode)
+  //   absent = follow the mode's default
+  //
+  // Module names (use these as keys):
+  //   Safety:       destruction_guard, sentinel, autonomy
+  //   Memory:       memory, evolution, knowledge_base, handoff
+  //   Coordination: instance_lock, task_pool, role_claim, session_id
+  //   Optimization: token_warning, char_limit, rules_bloat, equilibrium, agent_gate
+  "hook_overrides": {
+    // Example: always enable task_pool even in minimal mode
+    // "task_pool": true,
+
+    // Example: disable rules_bloat check in all modes
+    // "rules_bloat": false
+  },
+
+  // ═══════════════════════════════════════════════════════
+  // Thresholds
+  // ═══════════════════════════════════════════════════════
+  "thresholds": {
+    // --- Safety ---
+
+    // Number of consecutive same-tool-same-path calls before sentinel triggers
+    "sentinel_loop_count": 3,
+
+    // Number of identical edit diffs before brute-force detection triggers
+    "sentinel_bruteforce_count": 3,
+
+    // Number of consecutive reads without a write before analysis paralysis warning
+    "sentinel_paralysis_count": 5,
+
+    // --- Memory ---
+
+    // Maximum entries in knowledge base before auto-consolidation
+    "max_knowledge_entries": 200,
+
+    // Minimum occurrences of a pattern before promoting to a rule
+    "learning_promote_threshold": 3,
+
+    // Days before a knowledge entry is considered stale
+    "knowledge_stale_days": 90,
+
+    // --- Coordination ---
+
+    // Minutes of inactivity before a session is marked stale
+    "session_stale_minutes": 30,
+
+    // TTL (hours) for role claims before auto-expiration
+    "role_claim_ttl_hours": 2,
+
+    // --- Optimization ---
+
+    // Token count at which the first warning is issued
+    "token_warn_at": 60000,
+
+    // Token count at which handoff is strongly recommended
+    "token_handoff_at": 140000,
+
+    // Token count for emergency handoff
+    "token_emergency_at": 180000,
+
+    // Maximum lines per handoff file (shared)
+    "max_handoff_lines": 80,
+
+    // Maximum lines per handoff file (private/per-role)
+    "max_handoff_lines_private": 150,
+
+    // Maximum characters per line in handoff files
+    "max_handoff_chars_per_line": 120,
+
+    // Maximum sub-agents before warning
+    "max_subagents_warn": 2,
+
+    // Maximum sub-agents before deny
+    "max_subagents_deny": 4
+  },
+
+  // ═══════════════════════════════════════════════════════
+  // Paths (optional — auto-detected by default)
+  // ═══════════════════════════════════════════════════════
+  "paths": {
+    // Directory for handoff files
+    // Default: auto-detected from workspace
+    // "handoff_dir": "_AI_BRAIN/06_Handoffs/",
+
+    // Knowledge base file path
+    // Default: auto-detected from workspace
+    // "knowledge_base": "_AI_BRAIN/01_Memory/knowledge_base.md",
+
+    // Learnings file path
+    // "learnings": "_AI_BRAIN/01_Memory/evolution/learnings.json",
+
+    // Instance lock file path
+    // "instance_lock": "_AI_BRAIN/cognition_shared/instance_lock.json"
+  },
+
+  // ═══════════════════════════════════════════════════════
+  // Destruction Guard — Custom Patterns
+  // ═══════════════════════════════════════════════════════
+  "destruction_guard": {
+    // Additional patterns to block (regex strings)
+    "extra_deny_patterns": [
+      // Example: block any command touching production database
+      // "psql.*production",
+      // "mysql.*prod_db"
+    ],
+
+    // Patterns to explicitly allow (overrides built-in deny patterns)
+    "allowlist_patterns": [
+      // Example: allow rm in a specific temp directory
+      // "rm -rf /tmp/build-cache"
+    ],
+
+    // Protected git branches (force-push blocked on these)
+    "protected_branches": [
+      "main",
+      "master",
+      "production",
+      "release/*"
+    ]
+  },
+
+  // ═══════════════════════════════════════════════════════
+  // Session ID Format
+  // ═══════════════════════════════════════════════════════
+  "session": {
+    // Project prefix mapping for session IDs
+    // Format: PREFIX_XXXX_HHMM (e.g., PS_a3f1_0835)
+    "project_prefixes": {
+      // "my-project": "MP",
+      // "backend-api": "BA"
+    }
+  }
+}

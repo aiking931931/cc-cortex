@@ -1,0 +1,17 @@
+{
+  "messages": {},
+  "patterns": {
+    "correction_l1": [
+      "\\bno\\s+es\\b",
+      "\\bestá\\s+mal\\b",
+      "\\bincorrecto\\b",
+      "\\bcambia\\b",
+      "\\bno\\s+uses\\b",
+      "\\bestá\\s+equivocado\\b",
+      "\\bcorrige\\b",
+      "\\bno\\s+así\\b",
+      "\\bmal\\s+hecho\\b",
+      "\\barregla\\b"
+    ]
+  }
+}
