@@ -23,6 +23,8 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -275,6 +277,277 @@ def _record_block(session_id: str) -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Silent-turn-end detector (feedback_silent_turn_end_after_tool_chain)
+# ---------------------------------------------------------------------------
+#
+# Root cause: MEMORY #15 handoff-desync + WIREDO-D violation. When a turn
+# mutates state (Write / git commit / push / twine upload / ...) and ends
+# with zero assistant text after the last mutation, the user has no idea
+# what happened without grep-diffing the repo.
+#
+# Sweet spot: a pure function over the transcript that (a) classifies
+# every tool_use as mutating vs inspective, (b) finds the last mutating
+# index, (c) inspects anything after it for an assistant text block above
+# a minimum char threshold. Warn-only (CC L6 ceiling — PostToolUse can't
+# deny).
+
+_INSPECTIVE_TOOLS = frozenset({
+    "Read", "Grep", "Glob", "LS", "TodoWrite",
+    "WebFetch", "WebSearch", "NotebookRead",
+    "Task", "ExitPlanMode",
+})
+
+_MUTATING_TOOLS = frozenset({
+    "Write", "Edit", "MultiEdit", "NotebookEdit",
+})
+
+# Bash command classification. Read-only allowlist matched as first token
+# (or `git <subcommand>` as first two tokens). Anything not on the
+# allowlist and fitting a mutation signature is flagged.
+_BASH_INSPECTIVE_PREFIXES = (
+    "ls", "cat", "find", "wc", "head", "tail", "grep", "rg",
+    "echo", "pwd", "which", "whereis", "stat", "file",
+    "pytest", "npm test", "yarn test", "python -m pytest",
+    "python -c", "python3 -c", "node -e",
+    "git status", "git log", "git diff", "git show",
+    "git branch", "git config --get", "git rev-parse",
+    "git ls-files", "git remote -v", "git remote show",
+    "git blame", "git describe", "git stash list",
+)
+
+_BASH_MUTATING_PATTERNS = (
+    # git write operations
+    re.compile(r"\bgit\s+(commit|push|tag|merge|rebase|reset|"
+               r"cherry-pick|revert|checkout\s+-b|branch\s+-[Dd]|"
+               r"add|rm|restore\s+--staged|mv|clean|"
+               r"stash\s+(push|pop|drop)|am|apply)\b"),
+    # publishing / installing
+    re.compile(r"\btwine\s+upload\b"),
+    re.compile(r"\bnpm\s+publish\b"),
+    re.compile(r"\byarn\s+publish\b"),
+    re.compile(r"\bpip\s+install\b"),
+    re.compile(r"\bpipx\s+install\b"),
+    re.compile(r"\bpnpm\s+publish\b"),
+    re.compile(r"\bcargo\s+publish\b"),
+    # gh write operations
+    re.compile(r"\bgh\s+(pr|issue|release)\s+(create|comment|"
+               r"edit|merge|close|delete)\b"),
+    # docker write operations
+    re.compile(r"\bdocker\s+(build|push|run|rm|rmi|"
+               r"tag|compose\s+(up|down))\b"),
+    # filesystem mutation
+    re.compile(r"\brm\s+(-[rRfF]+\s+)?\S"),
+    re.compile(r"(^|[^\w/])mv\s+\S"),
+    re.compile(r"(^|[^\w/])cp\s+\S+\s+\S"),
+    re.compile(r"\bchmod\s+\S"),
+    re.compile(r"\bchown\s+\S"),
+    re.compile(r"\bmkdir\s+\S"),
+    re.compile(r"\btouch\s+\S"),
+    re.compile(r"\bln\s+-s\b"),
+    # network write
+    re.compile(r"\bcurl\s+(-[a-zA-Z]*X\s*|--request\s+)"
+               r"(POST|PUT|DELETE|PATCH)\b"),
+    re.compile(r"\bwget\s+.*--method=(POST|PUT|DELETE)\b"),
+    # shell redirects (write)
+    re.compile(r"(^|[^<>])>\s*\S"),
+    re.compile(r">>\s*\S"),
+    re.compile(r"\btee\s+(-a\s+)?\S"),
+    # python/node that may mutate
+    re.compile(r"\bpython[0-9]*\s+\S+\.py\b"),  # running scripts
+    re.compile(r"\bnode\s+\S+\.js\b"),
+)
+
+
+def _classify_bash(command: str) -> str:
+    """Classify a Bash command as 'mutating' or 'inspective'.
+
+    Default bias: **mutating**. A command is inspective only if it starts
+    with a known read-only prefix (and no dangerous operator is seen).
+    """
+    if not command:
+        return "inspective"
+
+    # Take the first meaningful segment — split on && / ; / | which could
+    # chain an inspective preamble into a mutation.
+    segments = re.split(r"\s*(?:&&|;|\|\|)\s*", command)
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        # Strip leading env assignments (FOO=bar cmd ...).
+        while re.match(r"^[A-Z_][A-Z0-9_]*=\S+\s+", seg):
+            seg = re.sub(r"^[A-Z_][A-Z0-9_]*=\S+\s+", "", seg)
+        if _segment_is_mutating(seg):
+            return "mutating"
+    return "inspective"
+
+
+def _segment_is_mutating(seg: str) -> bool:
+    """Decide if a single shell segment is mutating."""
+    seg_stripped = seg.strip()
+    if not seg_stripped:
+        return False
+    # Explicit mutation patterns win outright.
+    for pat in _BASH_MUTATING_PATTERNS:
+        if pat.search(seg_stripped):
+            return True
+    # Otherwise check if it starts with an inspective prefix.
+    lower = seg_stripped.lower()
+    for prefix in _BASH_INSPECTIVE_PREFIXES:
+        if lower == prefix or lower.startswith(prefix + " "):
+            return False
+    # Unknown command — default mutating (safe-failure bias: better to
+    # warn spuriously than miss a real silent turn end).
+    return True
+
+
+def _classify_tool_call(tool_name: str, tool_input: dict) -> str:
+    """Classify a single tool_use block as 'mutating' or 'inspective'."""
+    if tool_name in _MUTATING_TOOLS:
+        return "mutating"
+    if tool_name in _INSPECTIVE_TOOLS:
+        return "inspective"
+    if tool_name == "Bash":
+        command = ""
+        if isinstance(tool_input, dict):
+            command = str(tool_input.get("command", ""))
+        return _classify_bash(command)
+    # Unknown tools default inspective (conservative — only known
+    # mutations should drive the warning, not new/unfamiliar tools).
+    return "inspective"
+
+
+def _iter_transcript_blocks(hook_data: dict):
+    """Yield ``(msg_index, role, block)`` tuples for every content block.
+
+    Handles both string-content and list-content messages. Non-assistant
+    roles yield a synthetic single-block representation.
+    """
+    for i, msg in enumerate(hook_data.get("messages", [])):
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            yield i, role, {"type": "text", "text": content}
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    yield i, role, block
+
+
+def _find_last_mutation(hook_data: dict) -> tuple[int, str, dict] | None:
+    """Return (msg_index, tool_name, tool_input) for the last mutating
+    tool_use in the transcript, or None if none seen.
+    """
+    last: tuple[int, str, dict] | None = None
+    for idx, role, block in _iter_transcript_blocks(hook_data):
+        if role != "assistant":
+            continue
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") != "tool_use":
+            continue
+        tool_name = str(block.get("name", ""))
+        tool_input = block.get("input", {}) if isinstance(
+            block.get("input", {}), dict,
+        ) else {}
+        if _classify_tool_call(tool_name, tool_input) == "mutating":
+            last = (idx, tool_name, tool_input)
+    return last
+
+
+def _final_text_after(hook_data: dict, after_idx: int) -> str:
+    """Concatenate assistant text blocks appearing at or after message
+    index ``after_idx``. Tool results / user replies do not count.
+    """
+    chunks: list[str] = []
+    for idx, role, block in _iter_transcript_blocks(hook_data):
+        if idx < after_idx:
+            continue
+        if role != "assistant":
+            continue
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            chunks.append(str(block.get("text", "")))
+    return "\n".join(chunks).strip()
+
+
+def _silent_turn_min_chars() -> int:
+    """Read minimum final-text threshold from env (default 30)."""
+    raw = os.environ.get("CCC_SILENT_TURN_MIN_CHARS", "")
+    try:
+        v = int(raw)
+        return v if v >= 0 else 30
+    except (TypeError, ValueError):
+        return 30
+
+
+def _silent_turn_guard_enabled() -> bool:
+    """Power-user escape: ``CCC_SILENT_TURN_GUARD=0`` disables entirely."""
+    return os.environ.get("CCC_SILENT_TURN_GUARD", "1") != "0"
+
+
+def detect_silent_turn_end(
+    hook_data: dict,
+) -> tuple[bool, str]:
+    """Detect the 'silent turn end after mutating tool chain' antipattern.
+
+    Returns ``(fired, message)``. ``message`` is a human-readable warn
+    string when ``fired`` is True; empty otherwise.
+
+    Rules:
+        * Disabled entirely if ``CCC_SILENT_TURN_GUARD=0``.
+        * Passes when no mutating tool fired in the turn.
+        * Passes when final assistant text (strip) length >= threshold.
+        * Otherwise fires with a message naming the last mutating tool.
+    """
+    if not _silent_turn_guard_enabled():
+        return False, ""
+    if not hook_data:
+        return False, ""
+
+    last = _find_last_mutation(hook_data)
+    if last is None:
+        return False, ""
+
+    mut_idx, tool_name, tool_input = last
+    final_text = _final_text_after(hook_data, mut_idx + 1)
+    threshold = _silent_turn_min_chars()
+    if len(final_text) >= threshold:
+        return False, ""
+
+    # Build a hint describing what mutated
+    hint = tool_name
+    if tool_name == "Bash":
+        cmd = ""
+        if isinstance(tool_input, dict):
+            cmd = str(tool_input.get("command", ""))
+        # First 60 chars of the command — enough to be actionable.
+        hint = f"Bash: {cmd[:60]}" + ("…" if len(cmd) > 60 else "")
+
+    msg = (
+        f"[silent_turn_guard] mutating tool fired ({hint}) but final "
+        f"assistant text was {len(final_text)} chars (< {threshold}). "
+        f"Next turn add a WIREDO-D summary: what ran / pass-fail / "
+        f"next ⬜. Disable via CCC_SILENT_TURN_GUARD=0."
+    )
+    return True, msg
+
+
+def _emit_silent_turn_warning(hook_data: dict) -> None:
+    """Side-effect: write the silent-turn warning to stderr if fired."""
+    try:
+        fired, msg = detect_silent_turn_end(hook_data)
+    except Exception:
+        return  # Fail-open: never block stop on detector crash.
+    if fired and msg:
+        try:
+            print(msg, file=sys.stderr)
+        except Exception:
+            pass
+
+
 def on_stop(hook_data: dict) -> str | None:
     """Hook entry point.
 
@@ -282,7 +555,14 @@ def on_stop(hook_data: dict) -> str | None:
         - ``STOP_BLOCK:<reason>`` for continuation/declaration (max 1x/session)
         - warning string for pending stops (stderr only)
         - None for clean/question/unknown
+
+    Side-effect: silent-turn-end detector writes a warn to stderr
+    whenever the turn mutated state without a final text summary. The
+    warning is emitted regardless of the classify_stop() category so
+    that clean/question paths still catch silent-upload scenarios.
     """
+    _emit_silent_turn_warning(hook_data)
+
     result = classify_stop(hook_data)
     if not result.premature:
         return None

@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`SilentTurnEndGuard` stop-event detector** — catches the
+  "silent turn end after mutating tool chain" antipattern distilled
+  in `feedback_silent_turn_end_after_tool_chain.md`. When a turn
+  contains at least one mutating tool call (Write / Edit / MultiEdit /
+  NotebookEdit, or Bash running `git commit|push|tag|merge|rebase|
+  reset|cherry-pick|add`, `twine upload`, `pip install`, `gh pr|
+  release create`, `docker build|push`, `rm`, `mv`, `chmod`, write
+  redirects, etc.) and the assistant ends the turn without a final
+  text block above a minimum char threshold, `cc_cortex.stop_guard`
+  emits a `[silent_turn_guard]` warn to stderr pointing at the last
+  mutating tool and requesting a WIREDO-D summary next turn (what
+  ran / pass-fail / next ⬜). Warn-only per CC's L6 PostToolUse
+  ceiling — never denies the stop event. Bash classifier defaults
+  to mutating (safe-failure bias) and splits on `&&` / `;` / `||`
+  so a `git status && git commit` chain still trips. Two env vars:
+  `CCC_SILENT_TURN_GUARD=0` disables the detector entirely for
+  power users; `CCC_SILENT_TURN_MIN_CHARS` (default `30`) tunes the
+  final-text length threshold. Wired into `hooks/on_stop.py` as a
+  side-effect of the existing `stop_guard` module — no new pipeline
+  entry needed. 49 new tests in `test_silent_turn_guard.py` covering
+  Bash classification, tool classification, detector core cases,
+  env-var plumbing, on_stop stderr integration, and env-parsing
+  corner cases (bad int values fall back to default).
 - **`signal_patterns`, `persona_prompt`, `track_classifier`** — three
   new persona-domain building blocks, landing as part of the
   Aegis → CCC single-source-of-truth migration (master decision
