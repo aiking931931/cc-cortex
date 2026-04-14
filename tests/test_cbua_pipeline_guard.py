@@ -238,6 +238,35 @@ class TestMarkerDetection:
         )
         assert _state(tmp_path).get("b1_shown") is True
 
+    def test_dichotomy_detected_chinese(self, guard, tmp_path):
+        """二選一 pattern marks dichotomy_seen."""
+        _preseed_complexity(tmp_path, "complicated")
+        payload = "這個選擇是二選一：保留或改寫"
+        _run(
+            guard, tmp_path,
+            tool_input={"file_path": "x.py", "new_string": payload},
+        )
+        assert _state(tmp_path).get("dichotomy_seen") is True
+
+    def test_dichotomy_detected_english(self, guard, tmp_path):
+        _preseed_complexity(tmp_path, "complicated")
+        payload = "either A or B — we need to keep or switch"
+        _run(
+            guard, tmp_path,
+            tool_input={"file_path": "x.py", "new_string": payload},
+        )
+        assert _state(tmp_path).get("dichotomy_seen") is True
+
+    def test_integrative_silences_dichotomy(self, guard, tmp_path):
+        """A+B / 共存 / dual-mode marks integrative_shown."""
+        _preseed_complexity(tmp_path, "complicated")
+        payload = "dual-mode framework: zero-shot + non-zero-shot 共存"
+        _run(
+            guard, tmp_path,
+            tool_input={"file_path": "x.py", "new_string": payload},
+        )
+        assert _state(tmp_path).get("integrative_shown") is True
+
 
 # ── 4. Behavioural silent ack ─────────────────────────────────
 
@@ -322,6 +351,33 @@ class TestReminderGeneration:
         )
         assert reminder is not None
         assert "U1" in reminder.context
+
+    def test_dichotomy_reminder_fires(self):
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 3,
+                "b1_shown": True,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "Dichotomy" in reminder.context
+
+    def test_dichotomy_silenced_by_integrative(self):
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 3,
+                "b1_shown": True,
+                "dichotomy_seen": True,
+                "integrative_shown": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is None
 
     def test_a5_redteam_requires_flag_and_10_edits(self):
         # Not required → no fire

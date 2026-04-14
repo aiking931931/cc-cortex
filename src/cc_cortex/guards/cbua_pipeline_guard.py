@@ -66,6 +66,36 @@ _WIREDO_TABLE = re.compile(
     re.IGNORECASE,
 )
 
+# Dichotomy framing detector: catches A-vs-B language that often
+# hides a third option — "integrate A and B at a higher level."
+# RLHF-trained models tend to pattern-match to comparative analysis
+# templates and miss integrative synthesis. Example failure mode:
+# experiments disprove method A, model frames the fix as "keep A's
+# brand or switch to B" instead of "dual-mode framework where A is
+# zero-shot mode and B is non-zero-shot mode."
+#
+# Patterns target explicit binary choice language. Kept narrow to
+# avoid false positives on ordinary comparison tables.
+_DICHOTOMY_MARKERS = re.compile(
+    r"保留\s*or\s*改|保留\s*vs\s*改"
+    r"|(?:路線|方案|選項)\s*[AB1２2]\s*or\s*(?:路線|方案|選項)\s*[AB1２2]"
+    r"|選(?:一個|一邊|擇)"
+    r"|二選一|非\s*A\s*即\s*B"
+    r"|keep\s+or\s+(?:change|switch|replace)"
+    r"|either\s+A\s+or\s+B",
+    re.IGNORECASE,
+)
+
+# Integrative synthesis patterns — if present, silence the dichotomy
+# reminder because the model is already thinking integratively.
+_INTEGRATIVE_MARKERS = re.compile(
+    r"A\+B|A\s*\+\s*B"
+    r"|共存|融合|整合成|多模式|dual.?mode|multi.?mode|unified\s+framework"
+    r"|同一(?:個)?(?:框架|framework)(?:下|內|裡)?.*(?:兩|2)(?:個)?模式"
+    r"|higher\s+level",
+    re.IGNORECASE,
+)
+
 # Delivery-phase signals: ONLY shell commands that actually ship.
 # Pure text keywords (完成/交付/ready/done) were removed because
 # documentation, comments, handoff files, even THIS docstring trigger
@@ -193,6 +223,13 @@ class CbuaPipelineGuard(BaseGuard):
                 state["u1_shown"] = True
             if _WIREDO_TABLE.search(text):
                 state["wiredo_shown"] = True
+            # Dichotomy framing signal. Set dichotomy_seen when a
+            # binary-choice frame appears; integrative_shown is a
+            # permanent silencer once A+B synthesis is observed.
+            if _DICHOTOMY_MARKERS.search(text):
+                state["dichotomy_seen"] = True
+            if _INTEGRATIVE_MARKERS.search(text):
+                state["integrative_shown"] = True
 
             self._behavioral_silent_ack(state)
             # Delivery-phase signal: ONLY check shell commands, not
@@ -342,6 +379,23 @@ class CbuaPipelineGuard(BaseGuard):
         # B1: structured thinking marker (after 3+ edits, all Complicated+)
         if not state.get("b1_shown") and edit_count >= 3:
             missing.append("B1 結構思考未見（根因→甜蜜點→策略）")
+
+        # Dichotomy framing: fires when binary A-or-B frame appears
+        # without accompanying integrative synthesis language. RLHF
+        # bias — models pattern-match to comparative analysis and
+        # miss "A+B at higher level" as a third option. Anchor:
+        # force the model to ask the integration question before
+        # accepting the dichotomy.
+        if (
+            state.get("dichotomy_seen")
+            and not state.get("integrative_shown")
+            and edit_count >= 2
+        ):
+            missing.append(
+                "🔀 Dichotomy 框架偵測 — 先問「A+B 在更高層級共存？」"
+                "（RLHF bias: 偏好 comparative 而非 integrative synthesis；"
+                "多模式 framework / dual-mode / 融合 是常被跳過的第三選項）"
+            )
 
         # C1: intelligence inventory marker (Complex+ only, 5+ edits)
         if (
