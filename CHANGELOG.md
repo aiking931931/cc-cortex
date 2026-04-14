@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.4] - 2026-04-15
+
+### Added
+
+- **`signal_patterns`, `persona_prompt`, `track_classifier`** — three
+  new persona-domain building blocks, landing as part of the
+  Aegis → CCC single-source-of-truth migration (master decision
+  §16.5 M4/M5/M6). Each was previously duplicated inside
+  `persona-api`; these canonical copies let downstream consumers
+  (persona-api, Strategos, infinite-agent) share one impl.
+  - `signal_patterns.py` (114 LOC): pre-compiled regex
+    `GREETING_PATTERN` / `IDENTITY_PROBE_PATTERN` /
+    `CHARACTER_CHALLENGE_PATTERN` + helpers `is_greeting`,
+    `is_identity_probe`, `is_character_challenge`, `detect_signals`.
+    CJK patterns (`你好`, `你的過去`, `你是人工智能`, etc.)
+    preserved byte-exact from upstream persona-api router.
+  - `persona_prompt.py` (153 LOC): `DimBehavior` dataclass,
+    `pick_behavior(value, dim)` with <0.35 / >0.65 thresholds, six
+    OCEAN dim constants (`O_COMM`, `O_THINK`, `C_COMM`, `E_COMM`,
+    `A_COMM`, `N_COMM`), and `build_behavior_injection(ocean,
+    ocean_dims=5)` producing the `[Persona Behavior Profile]`
+    header text byte-identical to pre-migration output.
+  - `track_classifier.py` (125 LOC): `SAFETY_KW` / `CYBER_KW` /
+    `CODING_KW` / `PERSONA_KW` regex constants and
+    `classify_track(text)` with priority-order logic
+    (persona → coding → cyber → safety-default). `TRACKS` tuple
+    omits `"persona"` because persona routes into the safety track
+    by design (persona engine layers on top, not a sibling).
+- **57 new tests** across `test_signal_patterns.py` (15),
+  `test_persona_prompt.py` (21), `test_track_classifier.py` (21).
+  Pure stdlib, zero new dependencies. Direct submodule import only
+  (not re-exported at package top level), matching the
+  `cc_cortex.cache.append_only_log` pattern.
+- **`CbuaPipelineGuard` dichotomy framing detector** — anchors the
+  model away from RLHF's comparative-analysis bias. When agent output
+  contains binary A-or-B framing (`保留 or 改`, `二選一`, `either A
+  or B`, `keep or switch`, etc.) without any integrative synthesis
+  language (`A+B`, `共存`, `dual-mode`, `multi-mode`, `unified
+  framework`), the guard injects a reminder to ask "can A+B coexist
+  at a higher level?" first. Targets a real failure mode: experiments
+  disprove one method, the model frames the fix as A-vs-B instead of
+  finding the dual-mode framework that keeps both. Five new tests in
+  `test_cbua_pipeline_guard.py` cover the regex patterns and
+  reminder generation gates.
+
 ## [1.17.3] - 2026-04-15
 
 ### Added
