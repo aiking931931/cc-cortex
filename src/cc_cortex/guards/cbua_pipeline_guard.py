@@ -145,6 +145,13 @@ class CbuaPipelineGuard(BaseGuard):
 
     State persisted via StateStore.read_modify_write (atomic file lock).
     Uses behavioral signals (edit/read count, agent dispatch) + text markers.
+
+    Competition-mode bypass: when ``handoff_mode == "competition"``,
+    ``on_post_tool`` short-circuits BEFORE any state mutation or
+    reminder generation. No B1 / C1 / U1 / WIREDO chatter is emitted
+    and no state is persisted. See
+    ``cc_cortex.handoff_engine.HANDOFF_MODES`` for the full policy and
+    the warning that competition mode is benchmark/bounty-only.
     """
 
     name = "cbua_pipeline"
@@ -160,6 +167,16 @@ class CbuaPipelineGuard(BaseGuard):
         All state mutations happen inside StateStore.read_modify_write
         to prevent concurrent-subprocess data loss.
         """
+        # Competition mode: silence reminders and skip state bookkeeping.
+        # Benchmark/bounty iterations explicitly waive cognitive anchors;
+        # see handoff_engine.HANDOFF_MODES.
+        try:
+            from cc_cortex.handoff_engine import is_competition_mode
+            if is_competition_mode():
+                return None
+        except Exception:
+            pass
+
         if not ctx.cache_dir:
             return None
 

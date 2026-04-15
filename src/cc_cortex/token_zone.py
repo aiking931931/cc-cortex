@@ -414,8 +414,10 @@ def should_gate_tool(
     if persona_mode:
         return None
 
-    # Full mode: never hard-gate (write handoff via injection, but don't block)
-    if handoff_mode == "full":
+    # Full / competition mode: never hard-gate (write handoff via
+    # injection, but don't block). Competition is a strict superset
+    # of full's autonomy — see handoff_engine.HANDOFF_MODES.
+    if handoff_mode in ("full", "competition"):
         return None
 
     if zone in (Zone.YELLOW, Zone.ORANGE):

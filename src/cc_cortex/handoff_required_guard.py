@@ -20,6 +20,9 @@ Escape valves:
 - stop_hook_active=true (CC retry signal — same dispatch-level bypass)
 - feature_config: handoff_required_guard.enabled = false
 - feature_config: handoff_required_guard.min_files (default 3)
+- handoff_mode = "competition" (benchmark/bounty mode short-circuits
+  this guard so scoreboard iteration is not interrupted by handoff
+  requirements; see handoff_engine.HANDOFF_MODES docstring).
 
 Returns:
 - "HANDOFF_REQUIRED_BLOCK:<reason>" if handoff missing
@@ -203,6 +206,17 @@ def on_stop(hook_data: dict) -> Optional[str]:
     session_id = hook_data.get("session_id", "")
     if not session_id:
         return None
+
+    # Competition mode: short-circuit. Benchmark / bounty sessions
+    # explicitly waive the "handoff required at session end" rule
+    # so scoreboard iteration is not interrupted. See
+    # handoff_engine.HANDOFF_MODES for the full policy.
+    try:
+        from cc_cortex.handoff_engine import is_competition_mode
+        if is_competition_mode():
+            return None
+    except Exception:
+        pass
 
     # Feature toggle
     min_files = 3

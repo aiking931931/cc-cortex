@@ -212,7 +212,7 @@ def check_budget_gate(
     # seals the escape hatch.
     try:
         from cc_cortex.handoff_engine import get_handoff_mode
-        if get_handoff_mode() == "full":
+        if get_handoff_mode() in ("full", "competition"):
             return None
     except (ImportError, Exception):
         pass

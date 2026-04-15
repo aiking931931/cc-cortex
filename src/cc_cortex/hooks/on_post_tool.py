@@ -524,7 +524,7 @@ def _append_token_fragments(
     fragments.append(f"[SHOW USER VERBATIM] {token_msg}")
     # Full mode: display context usage but never inject
     # handoff guidance — user delegated autonomous execution.
-    if mode == "full":
+    if mode in ("full", "competition"):
         return
     if threshold >= 140_000:
         try:

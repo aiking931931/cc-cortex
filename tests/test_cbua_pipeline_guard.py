@@ -682,3 +682,87 @@ class TestSessionIsolation:
         _run(guard, tmp_path, session_id="sess-b")
         assert _state(tmp_path, "sess-a")["edit_count"] == 3
         assert _state(tmp_path, "sess-b")["edit_count"] == 1
+
+
+# ── 11. Competition Mode Bypass ───────────────────────────────
+
+
+class TestCompetitionMode:
+    """Competition mode silences ALL CBUA reminders + skips state."""
+
+    def test_competition_mode_silences_all_reminders(
+        self, guard, tmp_path, monkeypatch,
+    ):
+        """on_post_tool returns None under competition regardless of state."""
+        from cc_cortex import handoff_engine
+        _preseed_complexity(tmp_path, "complex")
+
+        # Pre-populate state that would normally trigger B1 reminder
+        # under any non-competition mode (3+ edits, no markers shown).
+        store = StateStore(str(tmp_path))
+        store.write(
+            _NAMESPACE,
+            "sess-test",
+            {
+                "complexity": "complex",
+                "edit_count": 12,
+                "read_count": 0,
+                "bash_count": 0,
+                "b1_shown": False,
+                "c1_shown": False,
+                "u1_shown": False,
+            },
+        )
+
+        monkeypatch.setattr(
+            handoff_engine, "get_handoff_mode", lambda: "competition",
+        )
+
+        result = _run(guard, tmp_path)
+        assert result is None
+
+    def test_competition_mode_suppresses_state_mutation(
+        self, guard, tmp_path, monkeypatch,
+    ):
+        """Competition mode short-circuits BEFORE state read_modify_write.
+
+        A single Edit under competition must not increment edit_count
+        because the early return happens before any StateStore write.
+        """
+        from cc_cortex import handoff_engine
+        _preseed_complexity(tmp_path, "complicated")
+
+        monkeypatch.setattr(
+            handoff_engine, "get_handoff_mode", lambda: "competition",
+        )
+
+        for _ in range(5):
+            _run(guard, tmp_path)
+
+        state = _state(tmp_path)
+        # Either no state recorded at all or edit_count never moved.
+        assert state.get("edit_count", 0) == 0
+
+    def test_full_mode_still_fires_reminders_unchanged(
+        self, guard, tmp_path, monkeypatch,
+    ):
+        """Regression: full mode does NOT receive the competition silencer.
+
+        Competition's bypass only fires when mode == 'competition'. Full
+        mode keeps the existing CBUA pipeline behaviour (reminders +
+        state mutation) so the change is strictly additive.
+        """
+        from cc_cortex import handoff_engine
+        _preseed_complexity(tmp_path, "complicated")
+
+        monkeypatch.setattr(
+            handoff_engine, "get_handoff_mode", lambda: "full",
+        )
+
+        # Drive enough edits to accumulate state. Full mode must still
+        # mutate state; only competition zeroes the bookkeeping.
+        for _ in range(3):
+            _run(guard, tmp_path)
+
+        state = _state(tmp_path)
+        assert state.get("edit_count", 0) == 3

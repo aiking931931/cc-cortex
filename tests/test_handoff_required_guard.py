@@ -257,3 +257,67 @@ def test_run_git_forces_utf8_encoding(monkeypatch, tmp_path):
     assert captured.get("encoding") == "utf-8"
     assert captured.get("errors") == "replace"
     assert captured.get("text") is True
+
+
+# ── Competition Mode Bypass ──────────────────────────────────
+
+
+def test_competition_mode_bypasses_handoff_require(
+    isolated_state, stub_config, monkeypatch,
+):
+    """Competition mode short-circuits the handoff-required guard.
+
+    Even when source-file count would normally trigger a block,
+    competition mode returns None so the session can stop freely.
+    """
+    files = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]
+    _patch_git(monkeypatch, files)
+
+    from cc_cortex import handoff_engine
+    monkeypatch.setattr(
+        handoff_engine, "get_handoff_mode", lambda: "competition",
+    )
+
+    assert hrg.on_stop({"session_id": "s-comp"}) is None
+
+
+def test_competition_mode_does_not_record_block_state(
+    isolated_state, stub_config, monkeypatch,
+):
+    """Competition bypass must not write the circuit-breaker state file.
+
+    Skipping the write keeps the breaker clean if the user later
+    switches back to phase / save-token mode within the same session.
+    """
+    files = ["a.py", "b.py", "c.py", "d.py", "e.py"]
+    _patch_git(monkeypatch, files)
+
+    from cc_cortex import handoff_engine
+    monkeypatch.setattr(
+        handoff_engine, "get_handoff_mode", lambda: "competition",
+    )
+
+    assert hrg.on_stop({"session_id": "s-comp-state"}) is None
+    # Block state file must not exist after competition bypass.
+    assert not os.path.isfile(str(isolated_state))
+
+
+def test_full_mode_still_blocks_when_no_handoff(
+    isolated_state, stub_config, monkeypatch,
+):
+    """Regression: 'full' mode does NOT receive the competition bypass.
+
+    Full mode keeps the existing handoff-required behaviour. Only
+    competition mode short-circuits this guard.
+    """
+    files = ["a.py", "b.py", "c.py", "d.py", "e.py"]
+    _patch_git(monkeypatch, files)
+
+    from cc_cortex import handoff_engine
+    monkeypatch.setattr(
+        handoff_engine, "get_handoff_mode", lambda: "full",
+    )
+
+    result = hrg.on_stop({"session_id": "s-full-still-blocks"})
+    assert result is not None
+    assert result.startswith("HANDOFF_REQUIRED_BLOCK:")

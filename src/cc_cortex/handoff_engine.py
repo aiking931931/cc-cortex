@@ -7,7 +7,9 @@
 @dependencies cc_cortex.constants
 @exports check_token_gate, check_handoff_reminder,
          generate_session_summary, reset_handoff_reminder_state,
-         get_handoff_mode, set_handoff_mode, HANDOFF_MODES
+         get_handoff_mode, set_handoff_mode, HANDOFF_MODES,
+         is_full_autonomous, is_competition_mode,
+         is_autonomous_or_competition
 """
 
 from __future__ import annotations
@@ -92,7 +94,28 @@ REMINDER_FILE_MIN = 3
 #   - Philosophy: the user has pre-authorised autonomous execution of
 #     the entire project flow. The agent's job is to judge and move.
 #
-HANDOFF_MODES = ("save-token", "phase", "full")
+# competition — Benchmark / bounty / short-horizon iteration mode.
+#   Strict superset of `full` autonomy with two extra silencers:
+#   - NO handoff-required block at session end
+#     (handoff_required_guard short-circuits to None)
+#   - NO CBUA cognitive reminders (B1 / C1 / U1 / WIREDO chatter
+#     is silenced — cbua_pipeline_guard returns None and skips
+#     state mutation entirely)
+#   - Inherits ALL `full`-mode behaviour: no token gating, no
+#     handoff reminders, no ask-user prompts, ZIQ / C0 routing
+#     still active and trusted.
+#   - Advertises the FieldRead / auto-compression hint flag for
+#     downstream consumers (no consumer wired in CCC core today —
+#     documented for future hookup).
+#   - ⛔ WARNING: Competition mode deliberately suppresses cognitive
+#     anchors. Reflective pacing is counter-productive when the
+#     user is rapid-fire iterating against a benchmark scoreboard.
+#     Do NOT use for production work or long-horizon architecture
+#     tasks — those still need B1/C1/U1/WIREDO friction.
+#   - Philosophy: trust ZIQ + the user's pre-flight strategy doc;
+#     remove every interruption that costs scoreboard cycles.
+#
+HANDOFF_MODES = ("save-token", "phase", "full", "competition")
 # Legacy constants — callers use _model_thresholds() at runtime
 _PHASE_GATE = 180_000
 _PHASE_REMINDER = 150_000
@@ -106,6 +129,28 @@ def is_full_autonomous() -> bool:
     ``HANDOFF_MODES`` block above for the full ``full``-mode policy.
     """
     return get_handoff_mode() == "full"
+
+
+def is_competition_mode() -> bool:
+    """Return True when the current handoff mode is 'competition'.
+
+    Competition mode is a superset of ``full`` with additional
+    cognitive-reminder suppression. Callers that want to short-
+    circuit BOTH full-autonomous AND competition should use this
+    in combination with :func:`is_full_autonomous`.
+    """
+    return get_handoff_mode() == "competition"
+
+
+def is_autonomous_or_competition() -> bool:
+    """Return True when either autonomous execution mode is active.
+
+    Convenience predicate for callers that only care that the
+    user has pre-authorised minimal-interruption execution (full
+    or competition). Use this in preference to
+    ``is_full_autonomous() or is_competition_mode()`` at call sites.
+    """
+    return get_handoff_mode() in ("full", "competition")
 
 
 def get_handoff_mode() -> str:
@@ -176,7 +221,7 @@ def check_token_gate(
 
     mode = get_handoff_mode()
 
-    if mode == "full":
+    if mode in ("full", "competition"):
         return None
 
     # Resolve model-aware thresholds
@@ -265,7 +310,7 @@ def check_handoff_reminder(
 
     mode = get_handoff_mode()
 
-    if mode == "full":
+    if mode in ("full", "competition"):
         return None
 
     mt = _model_thresholds()

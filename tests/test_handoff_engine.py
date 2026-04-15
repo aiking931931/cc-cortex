@@ -449,8 +449,8 @@ class TestHandoffMode:
         assert get_handoff_mode() == "phase"  # unchanged
 
     def test_valid_modes(self):
-        """All three modes are defined."""
-        assert HANDOFF_MODES == ("save-token", "phase", "full")
+        """All four modes are defined (save-token, phase, full, competition)."""
+        assert HANDOFF_MODES == ("save-token", "phase", "full", "competition")
 
     def test_full_mode_skips_gate(self, tmp_path, monkeypatch):
         """Full mode: no token gate at all."""
@@ -670,3 +670,100 @@ class TestHandoffLineBudget:
         """Nonexistent file should pass (fail-open)."""
         from cc_cortex.handoff_engine import check_handoff_line_budget
         assert check_handoff_line_budget("/nonexistent/交接.md") is None
+
+
+# ── Competition Mode Tests ──────────────────────────────────
+
+
+class TestCompetitionMode:
+    """`competition` mode is a strict superset of `full`."""
+
+    def test_competition_in_handoff_modes_tuple(self):
+        """HANDOFF_MODES exposes competition as the 4th valid mode."""
+        assert "competition" in HANDOFF_MODES
+        assert HANDOFF_MODES == ("save-token", "phase", "full", "competition")
+
+    def test_is_competition_mode_detection(self, monkeypatch):
+        """is_competition_mode True iff get_handoff_mode == 'competition'."""
+        from cc_cortex import handoff_engine
+        from cc_cortex.handoff_engine import is_competition_mode
+
+        for mode in ("save-token", "phase", "full"):
+            monkeypatch.setattr(
+                handoff_engine, "get_handoff_mode", lambda m=mode: m,
+            )
+            assert is_competition_mode() is False, (
+                f"{mode} must NOT be competition"
+            )
+
+        monkeypatch.setattr(
+            handoff_engine, "get_handoff_mode", lambda: "competition",
+        )
+        assert is_competition_mode() is True
+
+    def test_is_autonomous_or_competition_matches_full_and_competition(
+        self, monkeypatch,
+    ):
+        """Convenience predicate is True for full AND competition only."""
+        from cc_cortex import handoff_engine
+        from cc_cortex.handoff_engine import is_autonomous_or_competition
+
+        for mode in ("save-token", "phase"):
+            monkeypatch.setattr(
+                handoff_engine, "get_handoff_mode", lambda m=mode: m,
+            )
+            assert is_autonomous_or_competition() is False
+
+        for mode in ("full", "competition"):
+            monkeypatch.setattr(
+                handoff_engine, "get_handoff_mode", lambda m=mode: m,
+            )
+            assert is_autonomous_or_competition() is True
+
+    def test_competition_mode_bypasses_agent_token_gate(
+        self, tmp_path, monkeypatch,
+    ):
+        """Competition mode skips token gating just like full mode."""
+        from cc_cortex import handoff_engine
+
+        monkeypatch.setattr(
+            handoff_engine, "get_handoff_mode", lambda: "competition",
+        )
+
+        transcript = os.path.join(str(tmp_path), "session.jsonl")
+        entry = {"message": {"usage": {
+            "input_tokens": 200_000, "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0, "output_tokens": 1000,
+        }}}
+        with open(transcript, "w") as f:
+            f.write(json.dumps(entry) + "\n")
+        monkeypatch.setattr(
+            handoff_engine, "_find_transcript", lambda sid: transcript,
+        )
+
+        assert check_token_gate("sess-comp", "Agent") is None
+
+    def test_competition_mode_skips_handoff_reminder(self, monkeypatch):
+        """Competition mode silences handoff reminders the same as full."""
+        from cc_cortex import handoff_engine
+
+        reset_handoff_reminder_state()
+        monkeypatch.setattr(
+            handoff_engine, "get_handoff_mode", lambda: "competition",
+        )
+        result = check_handoff_reminder(
+            "sess-cr", token_usage=200_000, modified_count=10,
+        )
+        assert result is None
+
+    def test_set_handoff_mode_accepts_competition(self, tmp_path, monkeypatch):
+        """set_handoff_mode persists 'competition' as a valid value."""
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        cfg_dir = os.path.join(str(tmp_path), ".claude", "hooks")
+        os.makedirs(cfg_dir, exist_ok=True)
+        cfg_path = os.path.join(cfg_dir, "cc_config.json")
+        with open(cfg_path, "w") as f:
+            json.dump({"handoff_mode": "phase"}, f)
+
+        assert set_handoff_mode("competition") is True
+        assert get_handoff_mode() == "competition"
