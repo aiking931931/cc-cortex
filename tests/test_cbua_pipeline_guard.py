@@ -290,6 +290,53 @@ class TestBehaviouralSilentAck:
             _run(guard, tmp_path)
         assert _state(tmp_path).get("b1_shown") is not True
 
+    def test_few_reads_with_many_edits_still_silences(self, guard, tmp_path):
+        """3 reads + 50 edits should silence — old `reads>=edits`
+        permanently false-positive'd on heavy-edit sessions
+        (handoff/test/doc churn). New threshold respects that any
+        non-trivial session reads 3+ files at the start."""
+        _preseed_complexity(tmp_path, "complicated")
+        for _ in range(3):
+            _run(guard, tmp_path, tool_name="Read",
+                 tool_input={"file_path": "x.py"})
+        for _ in range(50):
+            _run(guard, tmp_path)
+        assert _state(tmp_path).get("b1_shown") is True
+
+    def test_bash_heavy_session_silences_b1(self, guard, tmp_path):
+        """8+ Bash calls + 3+ edits silences B1. Verification-heavy
+        sessions (running tests / smokes / git ops) accumulate Bash
+        instead of Read, but the iteration loop B1 anchors is the
+        same: observe -> adjust -> rerun."""
+        _preseed_complexity(tmp_path, "complicated")
+        for _ in range(3):
+            _run(guard, tmp_path)
+        for _ in range(8):
+            _run(guard, tmp_path, tool_name="Bash",
+                 tool_input={"command": "ls"})
+        assert _state(tmp_path).get("b1_shown") is True
+
+    def test_bash_below_threshold_does_not_silence(self, guard, tmp_path):
+        """7 Bash calls is below the 8-call threshold and should
+        stay loud — proves the threshold is intentional, not an
+        accidental off-by-one."""
+        _preseed_complexity(tmp_path, "complicated")
+        for _ in range(3):
+            _run(guard, tmp_path)
+        for _ in range(7):
+            _run(guard, tmp_path, tool_name="Bash",
+                 tool_input={"command": "ls"})
+        assert _state(tmp_path).get("b1_shown") is not True
+
+    def test_zero_edits_does_not_trigger_silent_ack(self, guard, tmp_path):
+        """edits >= 3 lower bound holds — pure read-only or
+        pure bash sessions don't get a free B1 silence pass."""
+        _preseed_complexity(tmp_path, "complicated")
+        for _ in range(10):
+            _run(guard, tmp_path, tool_name="Read",
+                 tool_input={"file_path": "x.py"})
+        assert _state(tmp_path).get("b1_shown") is not True
+
 
 # ── 5. Reminder generation ────────────────────────────────────
 

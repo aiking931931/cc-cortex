@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from typing import Optional
@@ -80,16 +81,105 @@ def _format_section(
     return f"{emoji} {label} ({len(items)}): {names}{extra}"
 
 
-_SECRET_PATTERNS = (
-    ".env", ".key", "credentials", "secret", ".pem", ".p12",
-    "id_rsa", "id_ed25519", "token.json", ".gpg",
+# Word-boundary tokens that mark a FILENAME (not a directory path) as
+# likely credential material. Matched against os.path.basename() only —
+# directory layout is intentionally ignored because "secret" appearing
+# in a directory name (e.g. src/services/secretScanner.ts) is almost
+# always a scanner / test fixture, not a real secret.
+#
+# History: the previous substring-on-whole-path matcher false-positived
+# on test_secret_scan.py, secretScanner.ts, teamMemSecretGuard.ts, and
+# any source file whose module name talks ABOUT secrets. Every false
+# positive was silently unstaged by auto_commit → lost work.
+_SECRET_BASENAME_TOKENS = re.compile(
+    r"(?:"
+    # High-signal compound tokens. "secret" alone is too noisy
+    # (secret_scan.py is a module name, not a credential), but
+    # "secret_key" / "secret_token" are unambiguous.
+    r"(?:^|[._-])credentials?(?:$|[._-])"
+    r"|(?:^|[._-])api[_-]?keys?(?:$|[._-])"
+    r"|(?:^|[._-])private[_-]?keys?(?:$|[._-])"
+    r"|(?:^|[._-])secret[_-]?keys?(?:$|[._-])"
+    r"|(?:^|[._-])secret[_-]?tokens?(?:$|[._-])"
+    r"|(?:^|[._-])service[_-]?accounts?(?:$|[._-])"
+    r"|(?:^|[._-])access[_-]?tokens?(?:$|[._-])"
+    # .env family — .env / .env.local / .env.production
+    r"|\.env(?:$|\.)"
+    # Binary key / cert extensions
+    r"|\.pem$|\.p12$|\.pfx$|\.gpg$|\.key$|\.keystore$"
+    # SSH private key names (exact match to avoid id_rsa_utils.py)
+    r"|^id_rsa(?:\.pub)?$"
+    r"|^id_dsa(?:\.pub)?$"
+    r"|^id_ecdsa(?:\.pub)?$"
+    r"|^id_ed25519(?:\.pub)?$"
+    # OAuth / auth artifacts
+    r"|^token\.json$"
+    r"|^\.pypirc$|^\.netrc$"
+    r")",
+    re.IGNORECASE,
 )
+
+# Directory components that mean "this is a scanner target / test
+# fixture, not a live credential". Any path containing one of these as
+# a full path segment is exempt from _is_secret.
+_TEST_DIR_MARKERS = frozenset({
+    "tests", "test", "__tests__", "spec", "specs", "fixtures",
+    "samples", "examples", "mocks", "__mocks__",
+})
+
+# Basename prefixes that mark a file as a test target by naming
+# convention (pytest / jest style) regardless of directory location.
+_TEST_BASENAME_PREFIXES = ("test_", "spec_")
+_TEST_BASENAME_SUFFIXES = ("_test.py", "_spec.py", ".test.ts", ".test.tsx",
+                            ".test.js", ".test.jsx", ".spec.ts", ".spec.tsx",
+                            ".spec.js", ".spec.jsx")
 
 
 def _is_secret(path: str) -> bool:
-    """Check if a file path looks like a secret/credential file."""
-    lower = path.lower()
-    return any(pat in lower for pat in _SECRET_PATTERNS)
+    """Return True iff *path*'s basename looks like a real credential file.
+
+    Matching is anchored to ``os.path.basename(path)`` with a
+    word-boundary-style regex (see ``_SECRET_BASENAME_TOKENS``), then
+    short-circuited by the test-fixture whitelists
+    (``_TEST_DIR_MARKERS``, ``_TEST_BASENAME_PREFIXES``,
+    ``_TEST_BASENAME_SUFFIXES``). This replaces the old
+    substring-on-whole-path scan which false-positived on any source
+    file containing "secret" / "credential" / "key" in its name — e.g.
+    ``tests/test_secret_scan.py`` or
+    ``services/teamMemorySync/secretScanner.ts``.
+
+    Pure, no I/O. Call sites pass path strings verbatim from
+    ``git status --short``.
+    """
+    if not path:
+        return False
+
+    parts = path.replace("\\", "/").split("/")
+    # Whitelist: anything living under a test/fixture/sample dir is
+    # explicitly not a live credential. Real secrets never live here.
+    if any(p in _TEST_DIR_MARKERS for p in parts):
+        return False
+
+    base = os.path.basename(path.replace("\\", "/"))
+    if not base:
+        return False
+
+    # Whitelist: pytest/jest naming convention at basename level.
+    # test_credentials.py and credentials.test.ts are NOT live secrets.
+    # Also catch leading underscore variants (_test_credentials.py) and
+    # infix markers (conftest_secret_fixture.py).
+    base_lower = base.lower()
+    if base_lower.startswith(_TEST_BASENAME_PREFIXES):
+        return False
+    if base_lower.endswith(_TEST_BASENAME_SUFFIXES):
+        return False
+    if "_test_" in base_lower or "_spec_" in base_lower:
+        return False
+    # Leading underscore variants: _test_credentials.py, _spec_...
+    if base_lower.startswith(("_test_", "_spec_")):
+        return False
+
+    return bool(_SECRET_BASENAME_TOKENS.search(base))
 
 
 # Pure hook-internal state. A working tree containing only these is

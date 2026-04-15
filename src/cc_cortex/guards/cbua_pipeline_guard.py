@@ -192,6 +192,8 @@ class CbuaPipelineGuard(BaseGuard):
                 state["polling_streak"] = 0
             if ctx.tool_name in ("Read", "Glob", "Grep"):
                 state["read_count"] = state.get("read_count", 0) + 1
+            if ctx.tool_name == "Bash":
+                state["bash_count"] = state.get("bash_count", 0) + 1
             if ctx.tool_name == "Agent":
                 state["agent_count"] = state.get("agent_count", 0) + 1
 
@@ -304,21 +306,44 @@ class CbuaPipelineGuard(BaseGuard):
 
     @staticmethod
     def _behavioral_silent_ack(state: dict) -> None:
-        """Silently mark B1 as shown when the session is read-heavy.
+        """Silently mark B1 as shown when the session shows research.
 
+        Two acknowledgement paths:
+
+        Path A — research-heavy sessions
+        --------------------------------
         CC L4 hides Claude's markdown reasoning from the hook, so a
         text-only B1 scan never sees real "research-before-write"
-        sessions. When the read counter at least matches the edit
-        counter, the structural pattern the marker anchors is
-        already happening — silence the reminder instead of spamming
-        a session that's practicing what it preaches.
+        sessions. As soon as the session has accumulated **at least
+        3 Read calls**, the structural pattern the marker anchors is
+        already happening (you cannot read 3 files without thinking
+        about which file to read next). Old condition was
+        ``reads >= edits``, which silently degenerated to "permanent
+        false positive" on heavy-edit sessions like handoff/test/doc
+        churn where edits run 50-200 but reads only 3-10. The new
+        threshold respects that any non-trivial session reads 3+
+        files at the start of work.
 
-        C1/U1 stay strict: intelligence inventory and counter-example
-        attack carry semantic weight a ratio cannot prove.
+        Path B — bash-heavy verification sessions
+        ------------------------------------------
+        Sessions that are mostly running tests / smokes / git ops
+        accumulate Bash calls instead of Reads. **8+ Bash calls** is
+        the same proof of structured iteration: you can't run 8
+        commands without observing → adjusting → running again,
+        which IS the loop B1 anchors. Without this, ratio drift on
+        verification-heavy sessions kept the reminder firing on
+        every edit even though the user was watching the model
+        actually iterate.
+
+        C1/U1 stay strict: intelligence inventory and counter-
+        example attack carry semantic weight a ratio cannot prove.
+        Only B1 (root-cause/sweet-spot/strategy) is silenced — the
+        other markers anchor harder cognitive moves.
         """
         edits = state.get("edit_count", 0)
         reads = state.get("read_count", 0)
-        if edits >= 3 and reads >= edits:
+        bashes = state.get("bash_count", 0)
+        if edits >= 3 and (reads >= 3 or bashes >= 8):
             state["b1_shown"] = True
 
     # Per-string truncation limit when scanning marker text. Long edits

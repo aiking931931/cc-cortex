@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from cc_cortex.git_assist import (
     _format_section,
     _gt,
@@ -199,6 +201,15 @@ class TestGenerateReport:
 
 
 class TestIsSecret:
+    """Basename + word-boundary secret detector.
+
+    Previous implementation was substring-on-whole-path, which
+    false-positived on test fixtures, scanner source files, and any
+    module whose name talked ABOUT secrets. The new matcher keys on
+    os.path.basename() with word-boundary tokens and explicit
+    test-dir / test-naming whitelists.
+    """
+
     def test_env_file(self):
         assert _is_secret(".env")
         assert _is_secret("path/to/.env.local")
@@ -220,13 +231,125 @@ class TestIsSecret:
         assert not _is_secret("README.md")
         assert not _is_secret("src/main.py")
 
-    def test_substring_match_is_aggressive(self):
-        # Known false positive: substring matching flags any path that
-        # contains a secret keyword anywhere, even legitimate source.
-        # Backlog: tighten to basename + word-boundary matching so files
-        # like test_secret_scan.py / secretScanner.ts stop being filtered.
-        assert _is_secret("test_secret_scan.py")
-        assert _is_secret("services/secretScanner.ts")
+    # ── parametrised true-positive suite ─────────────────
+    # Real credential files that MUST still be detected.
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # credential-word basenames
+            "_AI_BRAIN/00_System/keys/google_credentials.json",
+            "aws_credentials.json",
+            "~/.aws/credentials",
+            "config/credentials.yml",
+            # api_key / service_account / access_token variants
+            "secrets/api_key.json",
+            "service_account.json",
+            "google_service-account.json",
+            "access_token.txt",
+            "private_key.pem",
+            # classic key/secret file extensions
+            "server.pem",
+            "client.p12",
+            "release.pfx",
+            "secrets.gpg",
+            "deploy.key",
+            "app.keystore",
+            # SSH key pairs
+            "id_rsa",
+            ".ssh/id_rsa",
+            ".ssh/id_ed25519",
+            ".ssh/id_ecdsa",
+            ".ssh/id_dsa",
+            "id_rsa.pub",
+            # .env family
+            ".env",
+            ".env.local",
+            ".env.production",
+            # login / publish credentials
+            ".pypirc",
+            ".netrc",
+            "oauth/token.json",
+            # High-signal compound secret tokens
+            "jwt_secret_key.txt",
+            "app_secret_token.env",
+            "secret.key",
+            "my_secret_key.pem",
+        ],
+    )
+    def test_true_positive_still_detected(self, path):
+        assert _is_secret(path), f"expected secret: {path}"
+
+    # ── parametrised true-negative suite ─────────────────
+    # Source / test / scanner files that the OLD substring matcher
+    # mis-flagged. Each case is the regression root for a real-world
+    # false positive.
+    @pytest.mark.parametrize(
+        "path",
+        [
+            # Scanner source code — talks ABOUT secrets, is not one
+            "tests/test_secret_scan.py",
+            "projects/cc-cortex/tests/test_secret_scan.py",
+            "src/services/secretScanner.ts",
+            "web/src/scanners/secretScanner.ts",
+            "downloads/src/services/teamMemorySync/secretScanner.ts",
+            "downloads/src/services/teamMemorySync/teamMemSecretGuard.ts",
+            "projects/cc-cortex/src/cc_cortex/secret_scan.py",
+            # Test fixtures — NEVER real credentials
+            "__tests__/credentials.test.ts",
+            "tests/fixtures/fake_credentials.json",
+            "examples/api_key_example.json",
+            "samples/service_account_sample.json",
+            "mocks/mock_credentials.json",
+            "spec/token_spec.py",
+            # pytest / jest naming convention at basename level
+            "test_credentials.py",
+            "test_api_key.py",
+            "_test_credentials.py",
+            "credentials.test.ts",
+            "api_key.test.tsx",
+            "token.spec.js",
+            # Source files whose module talks ABOUT secrets
+            "cc_cortex/git_assist.py",
+            "src/cc_cortex/secret_scan.py",
+            "kb_security.md",
+            "docs/security-best-practices.md",
+            # camelCase scanner class — no word separator, no match
+            "SecretScanner.java",
+            "ApiKeyHandler.java",
+            # generic README / CHANGELOG
+            "README.md",
+            "CHANGELOG.md",
+            "src/main.py",
+        ],
+    )
+    def test_true_negative_not_flagged(self, path):
+        assert not _is_secret(path), f"false positive: {path}"
+
+    def test_empty_path(self):
+        assert not _is_secret("")
+
+    def test_windows_backslash_normalised(self):
+        # Windows separators should still resolve to the correct basename
+        assert _is_secret(r"C:\Users\me\.aws\credentials")
+        assert not _is_secret(r"projects\tests\test_secret_scan.py")
+
+    def test_case_insensitive(self):
+        assert _is_secret("AWS_CREDENTIALS.JSON")
+        assert _is_secret("ID_RSA")
+        assert not _is_secret("TESTS/TEST_SECRET_SCAN.PY")
+
+    def test_scanner_fixture_in_handoff(self):
+        """Exact paths from the handoff backlog — regression guards."""
+        # True positives the old matcher caught AND new matcher still catches
+        assert _is_secret("_AI_BRAIN/00_System/keys/google_calendar_credentials.json")
+        assert _is_secret("_AI_BRAIN/00_System/keys/aiking_line_credentials.txt")
+        assert _is_secret("_AI_BRAIN/00_System/keys/line_channel_credentials.txt")
+        assert _is_secret("_AI_BRAIN/00_System/keys/token.json")
+        # False positives the old matcher wrongly caught — now fixed
+        assert not _is_secret("projects/cc-cortex/tests/test_secret_scan.py")
+        assert not _is_secret(
+            "downloads/src/services/teamMemorySync/secretScanner.ts"
+        )
 
 
 # ── auto_commit ──────────────────────────────────────────
