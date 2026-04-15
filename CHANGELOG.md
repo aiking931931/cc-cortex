@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-04-16
+
+### Added
+
+- **Competition mode** — `HANDOFF_MODES = ("save-token", "phase", "full", "competition")`.
+  New fourth handoff mode tuned for benchmark / bounty autonomous execution.
+  Silences `handoff_required_guard` and `cbua_pipeline_guard` reminders so the
+  agent can run long experiment loops without reminder interrupts, and
+  documents a FieldRead hint flag for the competition Skill to eager-load
+  track SOPs. Other modes (save-token / phase / full) keep their existing
+  reminder semantics unchanged.
+
+### Changed
+
+- **`_behavioral_silent_ack` dual-path threshold** — the silent acknowledgment
+  heuristic in `cbua_pipeline_guard` now triggers on `reads >= 3 OR bashes >= 8`
+  (previously `reads >= edits` only, which never fired in heavy-edit sessions
+  like 135 edits / 6 reads and left the B1 reminder shouting forever).
+  A new `bash_count` state counter backs the second path. Behavioral
+  markers still required, but heavy-edit sessions no longer get stuck in
+  permanent reminder mode. See `feedback_cbua_markers_are_anchors.md`.
+
+### Refactored
+
+- **`cbua_pipeline_guard.on_post_tool` 146 → 53 lines** — extracted the
+  state `_update` closure so the post-tool path reads linearly. Pure
+  refactor, no behavior change; full test suite stays green.
+
+### Fixed
+
+- **`_is_secret` basename match** — the secret-file detector in
+  `git_assist` used to substring-match the full path, which falsely
+  flagged benign files whose parent directory happened to contain a
+  keyword (e.g. `secrets-docs/readme.md`). Now matches on basename
+  only, so `git add -A` + `git reset HEAD --` unstage path is tight.
+
 ## [1.17.4] - 2026-04-15
 
 ### Added
