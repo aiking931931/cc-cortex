@@ -21,7 +21,7 @@ CC ceiling notes:
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from cc_cortex.core.state_store import StateStore
 from cc_cortex.guards.base import (
@@ -136,6 +136,113 @@ def _is_delivery_command(cmd: str) -> bool:
             return True
     return False
 
+
+def _update_cbua_state(
+    state: dict,
+    *,
+    ctx: GuardContext,
+    text: str,
+    early_result: "list[Optional[GuardResult]]",
+    classify: "Callable[[str, str], tuple[str, bool]]",
+    silent_ack: "Callable[[dict], None]",
+) -> dict:
+    """Mutate CBUA state for one PostToolUse tick.
+
+    Extracted from ``CbuaPipelineGuard.on_post_tool``'s inner
+    closure so the dispatcher method stays under the structural
+    ``func_length`` budget. Callers inject ``classify`` and
+    ``silent_ack`` rather than importing the guard class here
+    to avoid a cycle.
+
+    Contract: returns the updated ``state`` dict. When an A4
+    ask-user violation is detected, populates ``early_result[0]``
+    with an advisory :class:`GuardResult` so the caller can
+    short-circuit before the reminder sweep fires.
+    """
+    complexity = state.get("complexity", "")
+    redteam_required = state.get("redteam_required", False)
+
+    # C0: classify if not yet done or periodically reclassify
+    edit_count = state.get("edit_count", 0)
+    if not complexity or (edit_count > 0 and edit_count % 20 == 0):
+        complexity, redteam_required = classify(ctx.cache_dir, ctx.session_id)
+        state["complexity"] = complexity
+        state["redteam_required"] = redteam_required
+
+    if complexity == "simple":
+        return state
+
+    # Behavioural counters
+    if ctx.tool_name in ("Edit", "Write", "NotebookEdit"):
+        state["edit_count"] = edit_count + 1
+        state["polling_streak"] = 0
+    if ctx.tool_name in ("Read", "Glob", "Grep"):
+        state["read_count"] = state.get("read_count", 0) + 1
+    if ctx.tool_name == "Bash":
+        state["bash_count"] = state.get("bash_count", 0) + 1
+    if ctx.tool_name == "Agent":
+        state["agent_count"] = state.get("agent_count", 0) + 1
+
+    # Polling detection: same Bash cmd repeating without Edit/Write
+    # between ticks → operator is monitoring a process. Signature =
+    # first 3 tokens of the command, normalised.
+    if ctx.tool_name == "Bash" and isinstance(ctx.tool_input, dict):
+        raw_cmd = ctx.tool_input.get("command", "") or ""
+        if isinstance(raw_cmd, str):
+            sig = " ".join(raw_cmd.strip().split()[:3])
+            last_sig = state.get("last_bash_sig", "")
+            if sig and sig == last_sig:
+                state["polling_streak"] = state.get("polling_streak", 0) + 1
+            else:
+                state["polling_streak"] = 0
+            state["last_bash_sig"] = sig
+
+    # Text markers (secondary signals)
+    if _B1_MARKERS.search(text):
+        state["b1_shown"] = True
+    if _C1_MARKERS.search(text):
+        state["c1_shown"] = True
+    if _U1_MARKERS.search(text):
+        state["u1_shown"] = True
+    if _WIREDO_TABLE.search(text):
+        state["wiredo_shown"] = True
+    if _DICHOTOMY_MARKERS.search(text):
+        state["dichotomy_seen"] = True
+    if _INTEGRATIVE_MARKERS.search(text):
+        state["integrative_shown"] = True
+
+    silent_ack(state)
+
+    # Delivery-phase signal: ONLY shell commands. Pure-text keywords
+    # would false-positive on docstrings / handoff markdown.
+    if ctx.tool_name == "Bash" and isinstance(ctx.tool_input, dict):
+        cmd = ctx.tool_input.get("command", "")
+        if isinstance(cmd, str) and _is_delivery_command(cmd):
+            state["delivery_keyword_seen"] = True
+    if ctx.tool_name == "Agent" and _A5_REDTEAM.search(text):
+        state["redteam_dispatched"] = True
+
+    # WIREDO one-shot trigger consumed by _generate_reminder this tick
+    state["wiredo_just_fired"] = False
+    if not state.get("wiredo_reminded"):
+        fire_now = (
+            state.get("edit_count", 0) >= 20
+            or state.get("delivery_keyword_seen", False)
+        )
+        if fire_now:
+            state["wiredo_reminded"] = True
+            state["wiredo_just_fired"] = True
+
+    # A4: ask-user violation (Agent tool only)
+    if ctx.tool_name == "Agent" and _A4_ASK_PATTERNS.search(text):
+        state["ask_violations"] = state.get("ask_violations", 0) + 1
+        early_result[0] = GuardResult.allow_advisory(
+            context="⛔ A4 違規：信心 ≥70% 直接做，<70% 升 B1/B2 自己決策。",
+        )
+
+    return state
+
+
 # StateStore namespace
 _NAMESPACE = "cbua_pipeline"
 
@@ -182,108 +289,15 @@ class CbuaPipelineGuard(BaseGuard):
 
         store = StateStore(ctx.cache_dir)
         text = self._get_scannable_text(ctx)
-        # Mutable container to capture early-exit result from callback
         early_result: list[Optional[GuardResult]] = [None]
 
         def _update(state: dict) -> dict:
-            complexity = state.get("complexity", "")
-            redteam_required = state.get("redteam_required", False)
-
-            # C0: classify if not yet done or periodically reclassify
-            edit_count = state.get("edit_count", 0)
-            if not complexity or (edit_count > 0 and edit_count % 20 == 0):
-                complexity, redteam_required = self._classify(
-                    ctx.cache_dir, ctx.session_id,
-                )
-                state["complexity"] = complexity
-                state["redteam_required"] = redteam_required
-
-            # Simple → save and skip
-            if complexity == "simple":
-                return state
-
-            # Track behavioral signals
-            if ctx.tool_name in ("Edit", "Write", "NotebookEdit"):
-                state["edit_count"] = edit_count + 1
-                # Real work resets polling streak.
-                state["polling_streak"] = 0
-            if ctx.tool_name in ("Read", "Glob", "Grep"):
-                state["read_count"] = state.get("read_count", 0) + 1
-            if ctx.tool_name == "Bash":
-                state["bash_count"] = state.get("bash_count", 0) + 1
-            if ctx.tool_name == "Agent":
-                state["agent_count"] = state.get("agent_count", 0) + 1
-
-            # Polling detection: same Bash command signature repeating
-            # without any Edit/Write between → operator is monitoring
-            # something (build, test, log tail, status check). During
-            # polling we suppress reminders so the hook doesn't spam
-            # B1/C1/U1 every tick when no real work is happening.
-            # Signature = first 3 tokens of the command, normalized.
-            if ctx.tool_name == "Bash" and isinstance(ctx.tool_input, dict):
-                raw_cmd = ctx.tool_input.get("command", "") or ""
-                if isinstance(raw_cmd, str):
-                    sig = " ".join(raw_cmd.strip().split()[:3])
-                    last_sig = state.get("last_bash_sig", "")
-                    if sig and sig == last_sig:
-                        state["polling_streak"] = (
-                            state.get("polling_streak", 0) + 1
-                        )
-                    else:
-                        state["polling_streak"] = 0
-                    state["last_bash_sig"] = sig
-
-            # Scan text markers (secondary signal)
-            if _B1_MARKERS.search(text):
-                state["b1_shown"] = True
-            if _C1_MARKERS.search(text):
-                state["c1_shown"] = True
-            if _U1_MARKERS.search(text):
-                state["u1_shown"] = True
-            if _WIREDO_TABLE.search(text):
-                state["wiredo_shown"] = True
-            # Dichotomy framing signal. Set dichotomy_seen when a
-            # binary-choice frame appears; integrative_shown is a
-            # permanent silencer once A+B synthesis is observed.
-            if _DICHOTOMY_MARKERS.search(text):
-                state["dichotomy_seen"] = True
-            if _INTEGRATIVE_MARKERS.search(text):
-                state["integrative_shown"] = True
-
-            self._behavioral_silent_ack(state)
-            # Delivery-phase signal: ONLY check shell commands, not
-            # arbitrary text. This gate prevents docstrings / handoff
-            # markdown / comments containing "完成/交付/done" from
-            # triggering a false delivery signal — the "事前查證六維
-            # 亂七八糟" failure mode the user called out.
-            if ctx.tool_name == "Bash" and isinstance(ctx.tool_input, dict):
-                cmd = ctx.tool_input.get("command", "")
-                if isinstance(cmd, str) and _is_delivery_command(cmd):
-                    state["delivery_keyword_seen"] = True
-            if ctx.tool_name == "Agent" and _A5_REDTEAM.search(text):
-                state["redteam_dispatched"] = True
-
-            # WIREDO one-shot trigger: fire once when delivery signal
-            # detected. wiredo_just_fired is a transient flag consumed
-            # by _generate_reminder this same tick; cleared next tick.
-            state["wiredo_just_fired"] = False
-            if not state.get("wiredo_reminded"):
-                fire_now = (
-                    state.get("edit_count", 0) >= 20
-                    or state.get("delivery_keyword_seen", False)
-                )
-                if fire_now:
-                    state["wiredo_reminded"] = True
-                    state["wiredo_just_fired"] = True
-
-            # A4: ask-user violation (Agent tool only)
-            if ctx.tool_name == "Agent" and _A4_ASK_PATTERNS.search(text):
-                state["ask_violations"] = state.get("ask_violations", 0) + 1
-                early_result[0] = GuardResult.allow_advisory(
-                    context="⛔ A4 違規：信心 ≥70% 直接做，<70% 升 B1/B2 自己決策。",
-                )
-
-            return state
+            return _update_cbua_state(
+                state,
+                ctx=ctx, text=text, early_result=early_result,
+                classify=self._classify,
+                silent_ack=self._behavioral_silent_ack,
+            )
 
         try:
             final_state = store.read_modify_write(
