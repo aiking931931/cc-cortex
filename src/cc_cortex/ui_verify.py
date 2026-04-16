@@ -121,7 +121,7 @@ def _get_screenshot_command() -> str:
 
     Priority:
     1. Playwright headless (non-intrusive, works in CI)
-    2. windows-mcp Screenshot (fallback for local GUI)
+    2. System screenshot tool (windows Skill / mss / platform native)
     """
     playwright_script = os.path.join(
         os.environ.get("CLAUDE_PROJECT_DIR", ""),
@@ -130,8 +130,8 @@ def _get_screenshot_command() -> str:
     if os.path.isfile(playwright_script):
         return f"node {playwright_script}"
     return (
-        "Use mcp__windows-mcp__Screenshot to capture the browser window, "
-        "or run a Playwright script targeting the deployed URL."
+        "Take a screenshot of the deployed UI using the best "
+        "available method: Playwright script or system screenshot tool."
     )
 
 
@@ -146,7 +146,7 @@ def _deny_verify_pending(ui_files: list[str]) -> GuardResult:
             f"  {cmd}\n"
             "截圖通過 → 解鎖 | 截圖失敗 → 進入修復模式\n\n"
             "Playwright 優先（不影響用戶），"
-            "windows-mcp 為 fallback（截桌面視窗）。"
+            "系統截圖工具為 fallback（截桌面視窗）。"
         ),
     )
 

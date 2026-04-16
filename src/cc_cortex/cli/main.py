@@ -977,6 +977,58 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
             print(f"      {d}")
 
 
+def cmd_evolve(args: argparse.Namespace) -> None:
+    """Weekly evolution digest — research + summarise recent AI/LLM/CC changes."""
+    from cc_cortex.tasks.weekly_evolve import TASK_CONFIG, render_prompt
+
+    if args.render_prompt:
+        print(render_prompt())
+        return
+
+    if args.install:
+        from cc_cortex.scheduler import install_schedule
+
+        work_dir = os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd()))
+        msg = install_schedule(
+            TASK_CONFIG["name"],
+            interval_minutes=TASK_CONFIG["min_interval_hours"] * 60,
+            work_dir=work_dir,
+        )
+        print(msg)
+        return
+
+    if args.run:
+        from cc_cortex.scheduler import TaskConfig, launch_task
+
+        work_dir = os.environ.get("CLAUDE_PROJECT_DIR", str(Path.cwd()))
+        hooks_dir = str(Path.home() / ".claude" / "hooks")
+        config_path = os.path.join(hooks_dir, "schedule_config.json")
+
+        # Write the prompt file if it doesn't exist.
+        prompt_path = os.path.join(hooks_dir, TASK_CONFIG["prompt_file"])
+        if not os.path.exists(prompt_path):
+            os.makedirs(hooks_dir, exist_ok=True)
+            with open(prompt_path, "w", encoding="utf-8") as f:
+                f.write(render_prompt())
+
+        tc = TaskConfig(**TASK_CONFIG)
+        result = launch_task(tc, work_dir, hooks_dir, config_path)
+
+        if result.skipped:
+            print(f"SKIP: {result.skip_reason}")
+        elif result.error:
+            print(f"FAIL: {result.error}")
+        else:
+            print(f"DONE ({result.duration_sec:.0f}s)")
+            if result.output_preview:
+                print(result.output_preview[-2000:])
+        return
+
+    # No flag → show help.
+    print("Usage: cc-cortex evolve [--install | --run | --render-prompt]")
+    print(f"  Task: {TASK_CONFIG['name']} (every {TASK_CONFIG['min_interval_hours']}h)")
+
+
 def cmd_uninstall(args: argparse.Namespace) -> None:
     """Remove cc-cortex hooks and config."""
     if not args.yes:
@@ -1320,6 +1372,25 @@ def main() -> None:
     p_clean.add_argument("--squash", action="store_true", help="Squash old auto-commits")
     p_clean.add_argument("--gc", action="store_true", help="Run aggressive git gc")
     p_clean.set_defaults(func=cmd_cleanup)
+
+    # evolve
+    p_evolve = sub.add_parser(
+        "evolve",
+        help="Weekly evolution digest — research + summarise recent AI/LLM/CC developments",
+    )
+    p_evolve.add_argument(
+        "--install", action="store_true",
+        help="Install recurring weekly schedule (platform-native)",
+    )
+    p_evolve.add_argument(
+        "--run", action="store_true",
+        help="Immediately run the weekly evolve task",
+    )
+    p_evolve.add_argument(
+        "--render-prompt", action="store_true",
+        help="Print the prompt template (debug)",
+    )
+    p_evolve.set_defaults(func=cmd_evolve)
 
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")

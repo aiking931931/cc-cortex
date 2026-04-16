@@ -282,7 +282,7 @@ TOOLS = [
         "description": (
             "Take a screenshot for WIREDO visual verification. "
             "Auto-detects method: Playwright headless (preferred) or "
-            "windows-mcp Screenshot fallback. Returns file path of screenshot."
+            "system screenshot fallback. Returns file path of screenshot."
         ),
         "inputSchema": {
             "type": "object",
@@ -1388,7 +1388,7 @@ def handle_weekly_evolution(arguments: dict | None = None) -> str:
 
 
 def handle_screenshot(arguments: dict | None = None) -> str:
-    """WIREDO visual verification via Playwright or windows-mcp."""
+    """WIREDO visual verification via Playwright or system screenshot."""
     args = arguments or {}
     url = args.get("url", "http://localhost:3000")
     viewport = args.get("viewport", "both")
@@ -1403,12 +1403,12 @@ def handle_screenshot(arguments: dict | None = None) -> str:
             "instruction": "Run this Bash command to take screenshots.",
         }, ensure_ascii=False)
 
-    # Fallback: windows-mcp
+    # Fallback: system screenshot tool
     return json.dumps({
-        "method": "windows-mcp",
+        "method": "system-screenshot",
         "instruction": (
-            "Use mcp__windows-mcp__Screenshot to capture the browser window. "
-            f"Navigate to {url} first."
+            "Take a screenshot of the browser window at "
+            f"{url} using the best available system screenshot tool."
         ),
     }, ensure_ascii=False)
 

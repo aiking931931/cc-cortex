@@ -73,6 +73,24 @@ DEFAULT_TASKS: dict[str, dict] = {
         "timeout_sec": 600,
         "min_interval_hours": 160,
     },
+    "weekly_evolve": {
+        "prompt_file": "weekly-evolve-prompt.txt",
+        "model": "claude-sonnet-4-6",
+        "log_name": "weekly-evolve.log",
+        "allowed_tools": "Read,Edit,Write,Glob,Grep,WebSearch,Bash",
+        "max_budget_usd": "2.00",
+        "timeout_sec": 900,
+        "min_interval_hours": 168,
+    },
+    "cleanup": {
+        "prompt_file": "cleanup-prompt.txt",
+        "model": "claude-sonnet-4-6",
+        "log_name": "cleanup.log",
+        "allowed_tools": "Read,Glob,Grep,Bash",
+        "max_budget_usd": "0.30",
+        "timeout_sec": 300,
+        "min_interval_hours": 24,
+    },
 }
 
 
