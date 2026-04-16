@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-04-16
+
+### Fixed
+
+- **`handoff_required_guard` second-layer structural gate** — a handoff file
+  appearing in `git diff` is no longer sufficient on its own. The diff must
+  also carry real structural content: at least 10 added lines AND at least 2
+  distinct structural signals from (`✅` / `⬜` / `⏸` / `★` status markers,
+  `next_step:` field, new H2 section, new `### Session` record, commit
+  hash, or Markdown doc link). A one-line `last_updated:` frontmatter bump
+  previously bypassed the guard — root cause of the "handoff file touched
+  but nothing written" bug (`feedback_handoff_guard_too_lenient.md`).
+
+### Added
+
+- **`CC_CORTEX_HANDOFF_MINIMAL=1` env escape** — explicit acknowledgment that
+  the handoff update is intentionally minimal (pointer-only bump, frontmatter
+  refresh). Skips the second-layer structural gate without disabling the
+  first-layer "handoff must exist" check.
+- **`feature_config.handoff_required_guard` params** — `structural_gate_enabled`
+  (default `True`), `min_added_lines` (default `10`), `min_signal_hits`
+  (default `2`). Fine-grained control without monkey-patching the guard.
+
 ## [1.18.0] - 2026-04-16
 
 ### Added

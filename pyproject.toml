@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cc-cortex"
-version = "1.18.0"
+version = "1.18.1"
 description = "AI behavior governance for Claude Code — 55+ guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"

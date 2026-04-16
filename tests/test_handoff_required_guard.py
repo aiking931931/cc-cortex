@@ -23,9 +23,16 @@ def isolated_state(tmp_path, monkeypatch):
 def stub_config(monkeypatch):
     """Stub cc_cortex.core.config.get_config() with adjustable feature()."""
     class _Cfg:
-        def __init__(self, enabled=True, min_files=3):
+        def __init__(
+            self, enabled=True, min_files=3,
+            structural_gate_enabled=True,
+            min_added_lines=10, min_signal_hits=2,
+        ):
             self._enabled = enabled
             self._min_files = min_files
+            self._structural_gate_enabled = structural_gate_enabled
+            self._min_added_lines = min_added_lines
+            self._min_signal_hits = min_signal_hits
 
         def feature(self, name, key):
             if name != "handoff_required_guard":
@@ -34,6 +41,12 @@ def stub_config(monkeypatch):
                 return self._enabled
             if key == "min_files":
                 return self._min_files
+            if key == "structural_gate_enabled":
+                return self._structural_gate_enabled
+            if key == "min_added_lines":
+                return self._min_added_lines
+            if key == "min_signal_hits":
+                return self._min_signal_hits
             return None
 
     cfg_holder = {"cfg": _Cfg()}
@@ -78,6 +91,9 @@ def test_handoff_present_returns_none(isolated_state, stub_config, monkeypatch):
         "06_Handoffs/king/交接_King.md",
     ]
     _patch_git(monkeypatch, files)
+    # Second-layer gate (1.18.1): also stub structural content so the
+    # diff has enough lines + signals to satisfy _has_structural_update.
+    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-ok"}) is None
 
 
@@ -122,6 +138,9 @@ def test_handoff_prefix_detection_chinese(isolated_state, stub_config, monkeypat
         "06_Handoffs/交接_test.md",
     ]
     _patch_git(monkeypatch, files)
+    # 1.18.1: minimal-update escape keeps the prefix-detection test
+    # focused on layer-1 logic without fighting the structural gate.
+    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-zh"}) is None
 
 
@@ -133,6 +152,7 @@ def test_handoff_prefix_detection_english(isolated_state, stub_config, monkeypat
     # Stub i18n patterns to include the English prefix even if not loaded
     monkeypatch.setattr(hrg, "_handoff_prefixes", lambda: ("交接_", "handoff_"))
     _patch_git(monkeypatch, files)
+    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-en"}) is None
 
 
@@ -321,3 +341,203 @@ def test_full_mode_still_blocks_when_no_handoff(
     result = hrg.on_stop({"session_id": "s-full-still-blocks"})
     assert result is not None
     assert result.startswith("HANDOFF_REQUIRED_BLOCK:")
+
+
+# ── Structural Gate (1.18.1) ─────────────────────────────────
+#
+# Second-layer gate: a handoff file in git diff is not enough — the
+# diff must also show structural content (status markers, next_step,
+# section headers, commit hashes, doc links). Frontmatter-only
+# `last_updated:` bumps no longer bypass the guard.
+# See feedback_handoff_guard_too_lenient.md.
+
+
+def _patch_added_lines(monkeypatch, per_file: dict[str, list[str]]):
+    """Replace _git_added_lines to return fixed added lines per path."""
+    def _fake(project_dir, path):
+        return list(per_file.get(path, []))
+    monkeypatch.setattr(hrg, "_git_added_lines", _fake)
+
+
+def _with_handoff(files_without_handoff, handoff_path):
+    return list(files_without_handoff) + [handoff_path]
+
+
+def test_structural_gate_passes_rich_handoff(
+    isolated_state, stub_config, monkeypatch,
+):
+    """20 added lines with ✅ + next_step signals → passes second gate."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    # 20 added lines with ✅ marker on one line and next_step on another.
+    added = ["+prose line " + str(i) for i in range(18)]
+    added += ["+- ✅ Session done", "+next_step: continue T2"]
+    _patch_added_lines(monkeypatch, {handoff: added})
+    assert hrg.on_stop({"session_id": "s-rich"}) is None
+
+
+def test_structural_gate_blocks_frontmatter_only(
+    isolated_state, stub_config, monkeypatch,
+):
+    """Only `last_updated:` bumped (1 line, no signals) → BLOCK."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    _patch_added_lines(
+        monkeypatch, {handoff: ["+last_updated: 2026-04-16"]},
+    )
+    result = hrg.on_stop({"session_id": "s-frontmatter"})
+    assert result is not None
+    assert result.startswith("HANDOFF_REQUIRED_BLOCK:")
+    assert "structure incomplete" in result
+
+
+def test_structural_gate_blocks_insufficient_lines(
+    isolated_state, stub_config, monkeypatch,
+):
+    """5 added lines with ✅ signal → still BLOCK (lines < 10)."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    added = [
+        "+- ✅ done",
+        "+- ⬜ pending",
+        "+next_step: foo",
+        "+line 4",
+        "+line 5",
+    ]
+    _patch_added_lines(monkeypatch, {handoff: added})
+    result = hrg.on_stop({"session_id": "s-short"})
+    assert result is not None
+    assert result.startswith("HANDOFF_REQUIRED_BLOCK:")
+    assert "only 5 added line" in result
+
+
+def test_structural_gate_blocks_no_signals(
+    isolated_state, stub_config, monkeypatch,
+):
+    """20 added lines but pure prose, no structural signals → BLOCK."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    added = ["+this is narrative line " + str(i) for i in range(20)]
+    _patch_added_lines(monkeypatch, {handoff: added})
+    result = hrg.on_stop({"session_id": "s-prose"})
+    assert result is not None
+    assert result.startswith("HANDOFF_REQUIRED_BLOCK:")
+    assert "distinct structural signal" in result
+
+
+def test_structural_gate_bypassed_by_minimal_env(
+    isolated_state, stub_config, monkeypatch,
+):
+    """CC_CORTEX_HANDOFF_MINIMAL=1 + frontmatter-only → pass."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    _patch_added_lines(
+        monkeypatch, {handoff: ["+last_updated: 2026-04-16"]},
+    )
+    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
+    assert hrg.on_stop({"session_id": "s-minimal-env"}) is None
+
+
+def test_structural_gate_bypassed_by_feature_config(
+    isolated_state, stub_config, monkeypatch,
+):
+    """structural_gate_enabled=False + frontmatter-only → pass."""
+    stub_config["cfg"]._structural_gate_enabled = False
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    _patch_added_lines(
+        monkeypatch, {handoff: ["+last_updated: 2026-04-16"]},
+    )
+    assert hrg.on_stop({"session_id": "s-cfg-disabled"}) is None
+
+
+def test_structural_gate_counts_signals_across_patterns(
+    isolated_state, stub_config, monkeypatch,
+):
+    """✅ + next_step = 2 distinct patterns → pass (with 10+ lines)."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    added = ["+filler " + str(i) for i in range(10)]
+    added += ["+- ✅ done", "+next_step: roll"]
+    _patch_added_lines(monkeypatch, {handoff: added})
+    assert hrg.on_stop({"session_id": "s-two-patterns"}) is None
+
+
+def test_structural_gate_rejects_duplicate_signal_same_pattern(
+    isolated_state, stub_config, monkeypatch,
+):
+    """Two ✅ lines = 1 distinct pattern → BLOCK (signals < 2)."""
+    handoff = "06_Handoffs/king/交接_King.md"
+    files = _with_handoff(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
+    )
+    _patch_git(monkeypatch, files)
+    added = ["+filler " + str(i) for i in range(10)]
+    added += ["+- ✅ task 1", "+- ✅ task 2"]  # same pattern twice
+    _patch_added_lines(monkeypatch, {handoff: added})
+    result = hrg.on_stop({"session_id": "s-dup-signal"})
+    assert result is not None
+    assert result.startswith("HANDOFF_REQUIRED_BLOCK:")
+    assert "distinct structural signal" in result
+
+
+def test_structural_gate_counts_multiple_handoff_files(
+    isolated_state, stub_config, monkeypatch,
+):
+    """Lines and signals accumulate across multiple handoff files."""
+    h1 = "06_Handoffs/king/交接_King.md"
+    h2 = "06_Handoffs/cc-cortex/交接_CCC.md"
+    files = list(
+        ["src/a.py", "src/b.py", "src/c.py", "src/d.py", h1, h2]
+    )
+    _patch_git(monkeypatch, files)
+    # Each file alone would fail (5 lines, 1 signal). Together they pass.
+    _patch_added_lines(monkeypatch, {
+        h1: ["+- ✅ done"] + ["+filler a " + str(i) for i in range(4)],
+        h2: ["+next_step: go"] + ["+filler b " + str(i) for i in range(4)],
+    })
+    # 10 total lines, 2 distinct signals → should pass.
+    assert hrg.on_stop({"session_id": "s-multi"}) is None
+
+
+def test_has_structural_update_helper_returns_reasons():
+    """_has_structural_update returns (False, [hints...]) when thin."""
+    # Stub _git_added_lines via direct call substitute
+    calls: dict[str, list[str]] = {"p": ["+only one line"]}
+
+    def _fake(project_dir, path):
+        return calls.get(path, [])
+
+    import cc_cortex.handoff_required_guard as mod
+    saved = mod._git_added_lines
+    try:
+        mod._git_added_lines = _fake  # type: ignore[assignment]
+        ok, reasons = mod._has_structural_update(
+            ".", ["p"], min_added_lines=10, min_signal_hits=2,
+        )
+        assert ok is False
+        assert any("added line" in r for r in reasons)
+        assert any("structural signal" in r for r in reasons)
+    finally:
+        mod._git_added_lines = saved  # type: ignore[assignment]

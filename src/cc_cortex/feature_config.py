@@ -255,6 +255,39 @@ FEATURE_META: dict[str, dict] = {
                 "risk_low_zh": "太激進 — 連微小 edit 都要寫交接",
                 "risk_high_zh": "太鬆 — 大改動可能跑掉",
             },
+            "structural_gate_enabled": {
+                "type": "bool",
+                "default": True,
+                "risk_off": "Frontmatter-only `last_updated:` bumps bypass the "
+                            "guard — root cause of 'handoff touched but empty' "
+                            "bug (feedback_handoff_guard_too_lenient.md)",
+                "risk_off_zh": "關掉第二層後，只改 `last_updated:` frontmatter 也能過關 — "
+                               "即 '交接動了但其實沒寫' 漏洞",
+            },
+            "min_added_lines": {
+                "type": "int",
+                "default": 10,
+                "min": 1,
+                "max": 200,
+                "recommended": 10,
+                "risk_low": "Tiny thresholds accept near-empty updates",
+                "risk_high": "Above 50 forces verbose handoff even for small sessions",
+                "risk_low_zh": "太低 — 近乎空白的更新也能過",
+                "risk_high_zh": "高於 50 — 連小 session 都被逼寫長交接",
+            },
+            "min_signal_hits": {
+                "type": "int",
+                "default": 2,
+                "min": 1,
+                "max": 6,
+                "recommended": 2,
+                "risk_low": "Only 1 signal accepts prose-only updates without "
+                            "status markers",
+                "risk_high": "Above 4 demands every handoff carry most signal "
+                             "types simultaneously",
+                "risk_low_zh": "只要 1 個信號 — 純文字更新也能過，沒狀態標記",
+                "risk_high_zh": "高於 4 — 每份交接都得同時帶多種信號",
+            },
         },
     },
     "insight_engine": {
