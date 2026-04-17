@@ -220,6 +220,34 @@ def _xml_escape(s: str) -> str:
     )
 
 
+def _win_toast_winrt(
+    title: str,
+    message: str,
+    app_id: str,
+    tag: str = "concinno",
+    group: str = "concinno",
+) -> bool:
+    """Windows toast via windows-toasts pip (in-process WinRT, zero PowerShell flash).
+
+    Optional dep: ``pip install windows-toasts``. Falls through to xmldoc
+    path when the package is not available, keeping the core library free
+    of mandatory runtime deps.
+    """
+    try:
+        from windows_toasts import InteractableWindowsToaster, Toast, ToastDuration
+    except ImportError:
+        return False
+    try:
+        toaster = InteractableWindowsToaster(title, app_id)
+        toast = Toast(text_fields=[title, message], duration=ToastDuration.Long)
+        toast.tag = tag
+        toast.group = group
+        toaster.show_toast(toast)
+        return True
+    except Exception:
+        return False
+
+
 def _win_toast_xmldoc(
     title: str,
     message: str,
@@ -360,9 +388,11 @@ def show_toast(
             pass
     try:
         if sys.platform == "win32":
-            if not _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
-                return _win_toast_balloon(title, message)
-            return True
+            if _win_toast_winrt(title, message, app_id, tag=tag, group=group):
+                return True
+            if _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
+                return True
+            return _win_toast_balloon(title, message)
         elif sys.platform == "darwin":
             subprocess.run(
                 ["osascript", "-e", f'display notification "{message}" with title "{title}"'],

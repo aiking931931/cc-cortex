@@ -16,6 +16,7 @@ Exports:
 
 from __future__ import annotations
 
+from .date_calc import DateCalcTool
 from .file_io import (
     BinaryFileError,
     FileEdit,
@@ -24,6 +25,7 @@ from .file_io import (
     MultipleMatchesError,
     ReadBeforeWriteError,
 )
+from .python_exec import PythonExecError, PythonExecTool
 from .search import EXCLUDED_DIRS, FileGlob, FileGrep
 from .shell import (
     Shell,
@@ -49,4 +51,9 @@ __all__ = [
     "EXCLUDED_DIRS",
     "FileGlob",
     "FileGrep",
+    # date_calc
+    "DateCalcTool",
+    # python_exec
+    "PythonExecError",
+    "PythonExecTool",
 ]

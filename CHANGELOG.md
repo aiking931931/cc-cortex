@@ -7,6 +7,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`concinno.tools.builtin.python_exec.PythonExecTool`** — sandboxed
+  Python expression evaluator. AST whitelist (no Attribute / Lambda /
+  Assign / Import) + builtin whitelist (no open / eval / exec /
+  getattr / __import__ / type) + size caps (8 KB source, 256 nodes).
+  Pure expression only; runtime errors surface as ``"error: ..."``
+  strings so agent loops observe rather than raise. 22 tests
+  covering happy path (arithmetic / comprehensions / sorted+zip),
+  AST reject paths (attribute escape, lambda, walrus, import),
+  builtin gating (open / eval / getattr / string-method-call),
+  statement rejection, size caps, and runtime error surfacing.
+- **`concinno.tools.builtin.date_calc.DateCalcTool`** — calendar
+  arithmetic without a generic Python sandbox. Three ops:
+  ``delta`` (total days + calendar-accurate years/months/days
+  breakdown), ``parse`` (strict strptime → ISO 8601), ``format``
+  (re-format ISO or format-matched input). stdlib-only, strict —
+  no natural-language date parsing. 14 tests.
+
+### Notes
+
+- Both tools target Sancio's GAIA / HAL benchmark runners
+  (MEMORY #52 "Benchmark 天花板升級屬 Concinno"). `python_exec`
+  replaces the "let the LLM do math in its head" footgun; `date_calc`
+  replaces the bulk of year / day / birthday questions that show
+  up in GAIA Level 1 & 2.
+- Version bump and PyPI publish deferred to user authorization
+  (MEMORY #48 Release Coordination / #50 付費不可逆必授權).
+
+## [2.4.1] - 2026-04-17
+
+### Changed
+
+- **Skills now ship under a `public/` subtree** (`src/concinno/skills/public/`)
+  with a sibling `private/` reserved for user-local Skills. The rule:
+  anything under `public/` is PyPI-shipped universal capability, anything
+  under `private/` is personal and never bundled. Removes the per-Skill
+  "should this be pip'd?" decision — the folder IS the answer.
+- **`concinno-skills` installer creates the same layout on the consumer
+  machine** at `~/.claude/skills/{public,private}/` plus directory
+  junctions (`mklink /J` on Windows, `os.symlink(target_is_directory=True)`
+  elsewhere) from the flat skills root to each `public/<name>/` so Claude
+  Code's flat-scan auto-discovery keeps working. Re-running the installer
+  is idempotent (stale junctions get replaced, real directories refuse
+  to be clobbered).
+- **Three legacy file-Skills** (`cortex-guard` / `cortex-schedule` /
+  `cortex-hooks`) also move under `public/` with matching junctions.
+
+### Added
+
+- **`installer._ensure_junction(link, target)`** helper — cross-platform
+  directory-junction primitive, no admin required on Windows.
+
+### Notes
+
+- User's local `~/.claude/skills/` was reorganized manually in the same
+  session; junctions at the skills root preserve existing Claude Code
+  auto-discovery with zero behavioral regression (verified via session
+  start skill-list before and after the move).
+
+## [2.4.0] - 2026-04-17
+
+### Added
+
+- **Three universal Skills bundled into the wheel**: `windows`, `browser`,
+  `agent`. These are full Claude Code Skills (SKILL.md + Python helpers
+  + tests + workflows), not just `.md` stubs — running
+  `python -m concinno.skills.installer` now copies the complete directory
+  tree into the user's `~/.claude/skills/` so consumers get the same
+  agent tool stack as the maintainer's local setup:
+  - **`windows`**: in-process Python Windows automation (UIA +
+    PrintWindow + hidden-desktop workers). Replaces `windows-mcp` with
+    zero MCP overhead and true-headless background operations.
+  - **`browser`**: Playwright Python daemon with session-persistent
+    pages. Replaces `playwright-cli`; DOM snapshot / click / fill /
+    screenshot / eval all in-process.
+  - **`agent`**: unified GUI/Web agent loop
+    (OBSERVE / PLAN / ACT / VERIFY / RETRY) that dispatches to the
+    `windows` and `browser` Skills.
+- **`installer.SKILL_DIRS` tracks directory-bundled Skills** alongside
+  the legacy single-file `SKILL_FILES` list. `install_skills()` now
+  handles both; re-install cleanly replaces any stale destination
+  directory before copying.
+
+### Notes
+
+- The Skills are installed into `~/.claude/skills/<name>/`, NOT
+  `~/.claude/skills/cortex-<name>/` — they use their own canonical
+  names because external tooling (e.g. MEMORY notes, documentation)
+  already refers to them by short name.
+- Consumers who only need the guard pipeline can skip the installer
+  entirely; the Skills are inert data inside the wheel until
+  `concinno-skills` runs.
+
+## [2.3.1] - 2026-04-17
+
+### Added
+
+- **`[api-anything]` optional extra** — `pip install "concinno[api-anything]"`
+  now also installs the sibling `api-anything[all]>=0.2.1` package so the
+  full AI-King Python toolchain lands in a single command. Pulled into
+  `[all]` (and therefore `[windows-full]`) so `pip install
+  "concinno[windows-full]"` is now a genuine one-shot for the complete
+  AI King stack on Windows. Anyone who only needs Concinno's guard
+  pipeline can skip the extra.
+
 ## [2.3.0] - 2026-04-17
 
 ### Fixed — red-team round 3 patch set (9 FATAL + HIGH items)

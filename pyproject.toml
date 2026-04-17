@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "2.3.0"
+version = "2.4.1"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
@@ -59,11 +59,19 @@ rag = [
     "sentence-transformers>=5.0",
     "bm25s>=0.2",
 ]
+# Sibling automation library — auto-generate Python APIs from any software.
+# Shipped as an optional extra so Concinno consumers who want the full
+# AI-King toolchain in one `pip install` can get it, while anyone who
+# just needs Concinno's guard pipeline can skip the download.
+api-anything = [
+    "api-anything[all]>=0.2.1",
+]
 # Bundles
 lite = []  # zero-dep, regex-only — explicitly named for clarity
 all = [
     "concinno[llm]",
     "concinno[rag]",
+    "concinno[api-anything]",
 ]
 # Windows-only: browser automation + desktop control
 windows = [
@@ -72,7 +80,7 @@ windows = [
     "mss>=9.0",
     "pyperclip>=1.8",
 ]
-# Windows full: everything
+# Windows full: everything (core + llm + rag + api-anything + windows)
 windows-full = [
     "concinno[all]",
     "concinno[windows]",
@@ -129,6 +137,10 @@ packages = ["src/concinno"]
 "src/concinno/skills/guard.md" = "concinno/skills/guard.md"
 "src/concinno/skills/schedule.md" = "concinno/skills/schedule.md"
 "src/concinno/skills/hooks.md" = "concinno/skills/hooks.md"
+# Directory-bundled universal Skills (2.4.0) — picked up automatically
+# by ``packages = ["src/concinno"]`` above. Listing them as force-include
+# causes hatchling to write each file twice into the wheel ZIP and PyPI
+# rejects the archive ("Duplicate filename in local headers").
 "src/concinno/_cognitive/__init__.py" = "concinno/_cognitive/__init__.py"
 "src/concinno/_cognitive/three_layer.md" = "concinno/_cognitive/three_layer.md"
 "src/concinno/_cognitive/first_principles.md" = "concinno/_cognitive/first_principles.md"
