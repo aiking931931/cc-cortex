@@ -224,9 +224,16 @@ next_action: |
   A2 2.0.0 歷史造假 / A3 ci.yml `--cov=tempero` 自 rename 以來 no-op /
   A4 mutable action tag 無 attestations。全修於 `<pending commit>`，升
   2.3.0 重建 artifacts
-- `2026-04-17 cc_op47_1637` target=`2.3.0` result=**PENDING publish** —
-  5086/5086 tests 綠 + 15 new red-team-lock tests，build `PYTHONUTF8=1`
-  METADATA U+FFFD clean，twine check PASSED
+- `2026-04-17 cc_op47_1637` target=`2.3.0` result=**ok** — PyPI LIVE
+  https://pypi.org/project/concinno/2.3.0/ . Commit `704731d` on branch
+  `feat/2.3.0-red-team-round-3` (pushed; PR create deferred by perms
+  gate), tag `v2.3.0` pushed to origin, `pip install --upgrade
+  concinno` verifies `__version__ == "2.3.0"`. 5086/5086 tests green
+  including 15 new red-team-lock tests. Yank of 2.0.0 / 2.1.0 skipped:
+  PyPI API tokens are scoped to upload only; yank requires web-UI
+  login + 2FA which is outside CLI scope. Not a blocker — 2.3.0
+  supersedes and its CHANGELOG honestly notes the back-fill of
+  earlier versions.
 
 ## 不可逆點（此專案）
 
