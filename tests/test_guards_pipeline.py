@@ -7,13 +7,13 @@ import tempfile
 
 import pytest
 
-from cc_cortex.guards.base import (
+from concinno.guards.base import (
     BaseGuard,
     GuardCategory,
     GuardContext,
     GuardResult,
 )
-from cc_cortex.guards.pipeline import GuardPipeline
+from concinno.guards.pipeline import GuardPipeline
 
 # ── Test Helpers ─────────────────────────────────────────────
 

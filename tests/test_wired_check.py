@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cc_cortex.delivery import (
+from concinno.delivery import (
     _find_unwired_files,
     _get_session_code_files,
     _is_wired,
@@ -93,7 +93,7 @@ class TestGetSessionCodeFiles:
     def test_filters_non_code_files(self, tmp_path):
         """Only code files (.py/.ts/.tsx/.js/.jsx) should be returned."""
         # Create sentinel state with mixed files
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         py_file = tmp_path / "test.py"
         py_file.write_text("x = 1\n")
@@ -120,7 +120,7 @@ class TestWiredCheck:
     def test_reports_orphans(self, tmp_path, monkeypatch):
         """Orphan files should appear in the report."""
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
 
         orphan = tmp_path / "orphan_module.py"
@@ -137,7 +137,7 @@ class TestWiredCheck:
     def test_includes_wired_summary(self, tmp_path, monkeypatch):
         """WIRED summary line should always be present when code files edited."""
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
 
         # Create a wired file (imported by another)

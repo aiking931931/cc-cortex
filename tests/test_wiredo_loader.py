@@ -1,9 +1,9 @@
-"""Tests for cc_cortex.wiredo_loader three-tier on-demand loader."""
+"""Tests for concinno.wiredo_loader three-tier on-demand loader."""
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.wiredo_loader import (
+from concinno.wiredo_loader import (
     ALPHA_COMPLEX_MAX,
     ALPHA_COMPLICATED_MAX,
     ALPHA_SIMPLE_MAX,
@@ -26,8 +26,9 @@ def test_dimensions_constant():
     assert DIMENSIONS == ("W", "I", "R", "E", "D", "O")
 
 
-def test_change_types_count_16():
-    assert len(CHANGE_TYPES) == 16
+def test_change_types_count_17():
+    assert len(CHANGE_TYPES) == 17
+    assert "vscode_extension" in CHANGE_TYPES
 
 
 def test_tier_boundaries():

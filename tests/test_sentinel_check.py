@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.sentinel module."""
+"""Tests for concinno.sentinel module."""
 
 from __future__ import annotations
 
 import os
 
-from cc_cortex.sentinel import (
+from concinno.sentinel import (
     DEFAULT_THRESHOLDS,
     check,
     gate_consecutive_fail,
@@ -308,7 +308,7 @@ def test_check_no_consecutive_fail_without_success_flag(tmp_path):
 
 
 def test_state_persistence_across_calls(tmp_path):
-    from cc_cortex.core.state_store import StateStore
+    from concinno.core.state_store import StateStore
     sid = "persist_test"
     state_dir = str(tmp_path)
 
@@ -366,7 +366,7 @@ def test_infer_success_empty_result():
 
 
 def test_record_outcome_writes_state(tmp_path):
-    from cc_cortex.core.state_store import StateStore
+    from concinno.core.state_store import StateStore
     sid = "rec_test"
     record_outcome(sid, "Edit", {"file_path": "/a.py"}, str(tmp_path), success=True)
     state = StateStore(str(tmp_path)).read("sentinel", sid, default=None)
@@ -376,7 +376,7 @@ def test_record_outcome_writes_state(tmp_path):
 
 
 def test_record_outcome_appends(tmp_path):
-    from cc_cortex.core.state_store import StateStore
+    from concinno.core.state_store import StateStore
     sid = "rec_append"
     d = str(tmp_path)
     record_outcome(sid, "Edit", {"file_path": "/a.py"}, d, success=True)

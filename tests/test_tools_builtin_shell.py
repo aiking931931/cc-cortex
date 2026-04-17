@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.tools.builtin.shell — Aegis P0.2 Bash tool wrapper.
+"""Tests for concinno.tools.builtin.shell — Aegis P0.2 Bash tool wrapper.
 
 Covers:
   * bash_validators stage → ShellSecurityError
@@ -23,8 +23,8 @@ from typing import Any
 
 import pytest
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.tools.builtin.shell import (
+from concinno.core.state_store import StateStore
+from concinno.tools.builtin.shell import (
     OUTPUT_TRUNCATION_CAP,
     Shell,
     ShellDestructionError,
@@ -49,8 +49,8 @@ def shell(tmp_path: Path) -> Shell:
 
 @pytest.fixture()
 def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Force CC_CORTEX_CACHE_DIR to a tmp dir for log-path helpers."""
-    monkeypatch.setenv("CC_CORTEX_CACHE_DIR", str(tmp_path))
+    """Force CONCINNO_CACHE_DIR to a tmp dir for log-path helpers."""
+    monkeypatch.setenv("CONCINNO_CACHE_DIR", str(tmp_path))
     return tmp_path
 
 
@@ -60,7 +60,7 @@ def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestToolContract:
-    """Shell must satisfy the cc_cortex Tool protocol."""
+    """Shell must satisfy the concinno Tool protocol."""
 
     def test_name_matches_cc_bashtool(self, shell: Shell) -> None:
         assert shell.name == "Bash"
@@ -134,7 +134,7 @@ class TestClassifyStage2:
         assert classify_stage2("anything goes here") == "unknown"
 
     def test_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="cc_cortex.tools.builtin.shell"):
+        with caplog.at_level(logging.WARNING, logger="concinno.tools.builtin.shell"):
             classify_stage2("python -c 'pass'")
         assert any(
             "stage2 classifier not yet wired" in rec.message for rec in caplog.records
@@ -188,7 +188,7 @@ class TestDestructionGuardGate:
         # always returns ok. The real BashValidator would also reject
         # `rm -rf /` but through a different class; we want to prove
         # destruction_guard is wired too.
-        from cc_cortex.security.bash_validators import ValidationResult
+        from concinno.security.bash_validators import ValidationResult
 
         class _PassingValidator:
             def validate(self, command: str) -> ValidationResult:
@@ -283,7 +283,7 @@ class TestOutputTruncation:
                 pass
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.shell.subprocess.Popen",
+            "concinno.tools.builtin.shell.subprocess.Popen",
             lambda *a, **kw: _FakeProc(),
         )
 
@@ -329,7 +329,7 @@ class TestTimeout:
                 self._killed = True
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.shell.subprocess.Popen",
+            "concinno.tools.builtin.shell.subprocess.Popen",
             lambda *a, **kw: _HangingProc(),
         )
 
@@ -352,13 +352,13 @@ class TestBackgroundExecution:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("CC_CORTEX_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("CONCINNO_CACHE_DIR", str(tmp_path))
 
         class _FakeProc:
             pid = 12345
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.shell.subprocess.Popen",
+            "concinno.tools.builtin.shell.subprocess.Popen",
             lambda *a, **kw: _FakeProc(),
         )
 
@@ -383,11 +383,11 @@ class TestBackgroundExecution:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A foreground command that hangs past 15s must flip to bg."""
-        monkeypatch.setenv("CC_CORTEX_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("CONCINNO_CACHE_DIR", str(tmp_path))
 
         # Shorten the flip threshold to keep the test fast.
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.shell.AUTO_BACKGROUND_SECONDS", 0.05
+            "concinno.tools.builtin.shell.AUTO_BACKGROUND_SECONDS", 0.05
         )
 
         class _SlowProc:
@@ -405,7 +405,7 @@ class TestBackgroundExecution:
                 pass
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.shell.subprocess.Popen",
+            "concinno.tools.builtin.shell.subprocess.Popen",
             lambda *a, **kw: _SlowProc(),
         )
 
@@ -466,11 +466,11 @@ class TestStage2AuditFlow:
                 pass
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.shell.subprocess.Popen",
+            "concinno.tools.builtin.shell.subprocess.Popen",
             lambda *a, **kw: _FakeProc(),
         )
 
-        with caplog.at_level(logging.WARNING, logger="cc_cortex.tools.builtin.shell"):
+        with caplog.at_level(logging.WARNING, logger="concinno.tools.builtin.shell"):
             result: dict[str, Any] = shell.call(
                 command=f'"{sys.executable}" -c "pass"',
             )

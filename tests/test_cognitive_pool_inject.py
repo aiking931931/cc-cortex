@@ -1,4 +1,4 @@
-"""Tests for ``cc_cortex.cognitive_pool_inject``.
+"""Tests for ``concinno.cognitive_pool_inject``.
 
 Closes the islanded-module gap: 1.16 introduced ``cache/cognitive_pool``
 but no consumer ever read from it. These tests verify the pool→inject
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.cache.cognitive_pool import CognitivePool, PoolSection
-from cc_cortex.cognitive_pool_inject import (
+from concinno.cache.cognitive_pool import CognitivePool, PoolSection
+from concinno.cognitive_pool_inject import (
     build_pool_context,
     score_section,
 )
@@ -85,7 +85,7 @@ def test_build_pool_context_default_pool_missing_is_failsafe(
     tmp_path: Path,
 ) -> None:
     """Default-rooted pool with no file on disk MUST return '' not raise."""
-    monkeypatch.setenv("CC_CORTEX_POOL_ROOT", str(tmp_path / "nope"))
+    monkeypatch.setenv("CONCINNO_POOL_ROOT", str(tmp_path / "nope"))
     # Pool dir does not exist; CognitivePool().read_all() should yield [].
     assert build_pool_context(task_prompt="x") == ""
 
@@ -241,7 +241,7 @@ def test_cognitive_inject_picks_up_pool_layer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """build_cognitive_context() must surface pool sections when present."""
-    monkeypatch.setenv("CC_CORTEX_POOL_ROOT", str(tmp_path))
+    monkeypatch.setenv("CONCINNO_POOL_ROOT", str(tmp_path))
     pool = CognitivePool(root=str(tmp_path))
     pool.upsert_section(
         title="integration_test_marker",
@@ -250,7 +250,7 @@ def test_cognitive_inject_picks_up_pool_layer(
     )
     pool.save()
 
-    from cc_cortex.cognitive_inject import build_cognitive_context
+    from concinno.cognitive_inject import build_cognitive_context
 
     ctx = build_cognitive_context(
         task_prompt="integration test marker",
@@ -266,9 +266,9 @@ def test_cognitive_inject_failsafe_when_pool_missing(
 ) -> None:
     """build_cognitive_context() must still return non-empty even
     when the pool layer is unreachable — pool inject is supplementary."""
-    monkeypatch.setenv("CC_CORTEX_POOL_ROOT", str(tmp_path / "no_such_dir"))
+    monkeypatch.setenv("CONCINNO_POOL_ROOT", str(tmp_path / "no_such_dir"))
 
-    from cc_cortex.cognitive_inject import build_cognitive_context
+    from concinno.cognitive_inject import build_cognitive_context
 
     ctx = build_cognitive_context(
         task_prompt="any task",

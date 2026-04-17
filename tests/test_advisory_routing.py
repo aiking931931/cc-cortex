@@ -10,7 +10,7 @@ Covers:
   7. Real CbuaPipelineGuard returns an advisory result.
   8. Real WiredoGuard returns an advisory result.
   9. Real ThinkingDepthGuard warning is advisory.
- 10. ``get_active_profile`` reads ``CC_CORTEX_PROFILE`` env var.
+ 10. ``get_active_profile`` reads ``CONCINNO_PROFILE`` env var.
  11. ``get_active_profile`` defaults to ``standard``.
  12. The ``/mode`` Skill is discoverable under the templates tree.
 """
@@ -22,15 +22,15 @@ from typing import Optional
 
 import pytest
 
-from cc_cortex.feature_config import PROFILES, get_active_profile
-from cc_cortex.guards.base import (
+from concinno.feature_config import PROFILES, get_active_profile
+from concinno.guards.base import (
     BaseGuard,
     GuardAction,
     GuardCategory,
     GuardContext,
     GuardResult,
 )
-from cc_cortex.guards.pipeline import GuardPipeline
+from concinno.guards.pipeline import GuardPipeline
 
 # ── Helpers ──────────────────────────────────────────────────
 
@@ -169,7 +169,7 @@ def test_audit_log_empty_in_standard(
 
 
 def test_cbua_pipeline_guard_uses_allow_advisory() -> None:
-    from cc_cortex.guards.cbua_pipeline_guard import CbuaPipelineGuard
+    from concinno.guards.cbua_pipeline_guard import CbuaPipelineGuard
 
     reminder = CbuaPipelineGuard._generate_reminder(
         state={"edit_count": 5, "b1_shown": False},
@@ -185,7 +185,7 @@ def test_wiredo_enforcement_guard_advisory_on_success() -> None:
     # Import check only — exercising the full happy path would require
     # a handoff file plus session state. The contract is: the success
     # branch returns an advisory result, the deny branch does NOT.
-    from cc_cortex.wiredo_guards import WiredoEnforcementGuard
+    from concinno.wiredo_guards import WiredoEnforcementGuard
 
     src = Path(WiredoEnforcementGuard.__module__.replace(".", "/"))
     text = (Path("src") / src.with_suffix(".py")).read_text(encoding="utf-8")
@@ -196,8 +196,8 @@ def test_wiredo_enforcement_guard_advisory_on_success() -> None:
 
 
 def test_read_edit_ratio_guard_advisory(tmp_path: Path) -> None:
-    from cc_cortex.core.state_store import StateStore
-    from cc_cortex.thinking_depth_guard import _NS, ThinkingDepthGuard
+    from concinno.core.state_store import StateStore
+    from concinno.thinking_depth_guard import _NS, ThinkingDepthGuard
 
     # Seed a degraded ratio: 1 read, 5 edits in the window.
     store = StateStore(str(tmp_path))
@@ -226,17 +226,17 @@ def test_read_edit_ratio_guard_advisory(tmp_path: Path) -> None:
 def test_get_active_profile_reads_env_var(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("CC_CORTEX_PROFILE", "competition")
+    monkeypatch.setenv("CONCINNO_PROFILE", "competition")
     assert get_active_profile() == "competition"
 
 
 def test_get_active_profile_defaults_to_standard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("CC_CORTEX_PROFILE", raising=False)
+    monkeypatch.delenv("CONCINNO_PROFILE", raising=False)
     # Also poison the config lookup so we land in the fallback branch.
     monkeypatch.setattr(
-        "cc_cortex.core.config.get_config",
+        "concinno.core.config.get_config",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no cfg")),
     )
     assert get_active_profile() == "standard"
@@ -245,9 +245,9 @@ def test_get_active_profile_defaults_to_standard(
 def test_get_active_profile_rejects_unknown_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("CC_CORTEX_PROFILE", "not-a-real-profile")
+    monkeypatch.setenv("CONCINNO_PROFILE", "not-a-real-profile")
     monkeypatch.setattr(
-        "cc_cortex.core.config.get_config",
+        "concinno.core.config.get_config",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no cfg")),
     )
     assert get_active_profile() == "standard"
@@ -265,7 +265,7 @@ def test_mode_skill_markdown_packaged_or_discoverable() -> None:
     """The /mode Skill ships under the templates tree."""
     here = Path(__file__).resolve().parent.parent
     candidates = [
-        here / "src" / "cc_cortex" / "templates" / "skills" / "mode" / "SKILL.md",
+        here / "src" / "concinno" / "templates" / "skills" / "mode" / "SKILL.md",
         here / ".claude" / "skills" / "mode" / "SKILL.md",
     ]
     found = [p for p in candidates if p.is_file()]

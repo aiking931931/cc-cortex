@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cc_cortex.cognitive.router import (
+from concinno.cognitive.router import (
     CognitiveLevel,
     CognitiveRoute,
     ComplexityDomain,

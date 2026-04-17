@@ -11,13 +11,13 @@ import sys
 
 import pytest
 
-# Ensure cc_cortex is importable
+# Ensure concinno is importable
 sys.path.insert(
     0,
     os.path.join(os.path.dirname(__file__), "..", "src"),
 )
 
-from cc_cortex.a2a.agent import GuardAgent
+from concinno.a2a.agent import GuardAgent
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.rag — Cognitive RAG (cognitive prosthesis, not Q&A).
+"""Tests for concinno.rag — Cognitive RAG (cognitive prosthesis, not Q&A).
 
 All tests mock chromadb and sentence-transformers so no heavy deps needed.
 """
@@ -9,7 +9,7 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-from cc_cortex.rag import (
+from concinno.rag import (
     NAMESPACES,
     RAGIndex,
     _file_hash,
@@ -620,7 +620,7 @@ class TestRAGIndexInit:
 
     def test_cache_dir_default(self, tmp_path):
         idx = RAGIndex(project_dir=str(tmp_path))
-        expected = os.path.join(str(tmp_path), ".cc_cortex_cache", "rag")
+        expected = os.path.join(str(tmp_path), ".concinno_cache", "rag")
         assert idx.cache_dir == expected
 
 
@@ -628,9 +628,9 @@ class TestRAGIndexInit:
 
 
 class TestCLI:
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_build(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["cc-rag", "build", "--project-dir", "/tmp"])
+        monkeypatch.setattr("sys.argv", ["concinno-rag", "build", "--project-dir", "/tmp"])
         mock_instance = MagicMock()
         mock_instance.build.return_value = {
             "files_scanned": 1,
@@ -640,42 +640,42 @@ class TestCLI:
         }
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.build.assert_called_once_with(force=False)
 
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_search(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["cc-rag", "search", "test query", "--project-dir", "/tmp"])
+        monkeypatch.setattr("sys.argv", ["concinno-rag", "search", "test query", "--project-dir", "/tmp"])
         mock_instance = MagicMock()
         mock_instance.search.return_value = [
             {"score": 0.9, "file": "kb/a.md", "heading": "Test", "text": "Content"}
         ]
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.search.assert_called_once()
 
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_stats(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["cc-rag", "stats", "--project-dir", "/tmp"])
+        monkeypatch.setattr("sys.argv", ["concinno-rag", "stats", "--project-dir", "/tmp"])
         mock_instance = MagicMock()
         mock_instance.stats.return_value = {"total_chunks": 42}
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.stats.assert_called_once()
 
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_stale(self, MockIdx, monkeypatch):
         monkeypatch.setattr(
             "sys.argv",
-            ["cc-rag", "stale", "--days", "30", "--project-dir", "/tmp"],
+            ["concinno-rag", "stale", "--days", "30", "--project-dir", "/tmp"],
         )
         mock_instance = MagicMock()
         mock_instance.stale_report.return_value = {
@@ -684,26 +684,26 @@ class TestCLI:
         }
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.stale_report.assert_called_once_with(days=30)
 
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_prune_dry_run(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["cc-rag", "prune", "--project-dir", "/tmp"])
+        monkeypatch.setattr("sys.argv", ["concinno-rag", "prune", "--project-dir", "/tmp"])
         mock_instance = MagicMock()
         mock_instance.prune.return_value = {"dry_run": True, "would_prune": [], "count": 0}
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.prune.assert_called_once_with(days=90, dry_run=True)
 
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_prune_execute(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["cc-rag", "prune", "--execute", "--project-dir", "/tmp"])
+        monkeypatch.setattr("sys.argv", ["concinno-rag", "prune", "--execute", "--project-dir", "/tmp"])
         mock_instance = MagicMock()
         mock_instance.prune.return_value = {
             "dry_run": False, "pruned": [], "count": 0,
@@ -711,19 +711,19 @@ class TestCLI:
         }
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.prune.assert_called_once_with(days=90, dry_run=False)
 
-    @patch("cc_cortex.rag.RAGIndex")
+    @patch("concinno.rag.RAGIndex")
     def test_cli_update(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["cc-rag", "update", "kb/new.md", "--project-dir", "/tmp"])
+        monkeypatch.setattr("sys.argv", ["concinno-rag", "update", "kb/new.md", "--project-dir", "/tmp"])
         mock_instance = MagicMock()
         mock_instance.update.return_value = {"chunks_indexed": 3, "duration_ms": 50}
         MockIdx.return_value = mock_instance
 
-        from cc_cortex.rag import cli_main
+        from concinno.rag import cli_main
 
         cli_main()
         mock_instance.update.assert_called_once_with("kb/new.md")

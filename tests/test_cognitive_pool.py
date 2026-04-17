@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cache.cognitive_pool — L3 shared markdown pool.
+"""Tests for concinno.cache.cognitive_pool — L3 shared markdown pool.
 
 These tests cover the stable section-hash contract (load-bearing for
 future microcompact cache-edit integration), the upsert/read/evict
@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cc_cortex.cache.cognitive_pool import (
+from concinno.cache.cognitive_pool import (
     DEFAULT_POOL_FILENAME,
     SECTION_FOOTER,
     SECTION_HEADER_PREFIX,

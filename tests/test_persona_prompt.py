@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.persona_prompt."""
+"""Tests for concinno.persona_prompt."""
 
 from __future__ import annotations
 
-from cc_cortex.persona_prompt import (
+from concinno.persona_prompt import (
     A_COMM,
     C_COMM,
     E_COMM,

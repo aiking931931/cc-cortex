@@ -21,12 +21,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Ensure cc_cortex is importable
+# Ensure concinno is importable
 _src = Path(__file__).resolve().parent.parent / "src"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from cc_cortex.destruction_guard import (  # noqa: E402
+from concinno.destruction_guard import (  # noqa: E402
     R0,
     R1,
     R2,
@@ -34,8 +34,8 @@ from cc_cortex.destruction_guard import (  # noqa: E402
     R4,
     classify_bash,
 )
-from cc_cortex.exfil_guard import check as exfil_check  # noqa: E402
-from cc_cortex.secret_scan import check as secret_check  # noqa: E402
+from concinno.exfil_guard import check as exfil_check  # noqa: E402
+from concinno.secret_scan import check as secret_check  # noqa: E402
 
 # ── Layer 1: Regex patterns (reuse from guardbench_adapter) ────────
 

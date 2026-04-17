@@ -1,12 +1,12 @@
-"""Tests for cc_cortex.wiredo_guard — Generalized WIREDO checklist injection."""
+"""Tests for concinno.wiredo_guard — Generalized WIREDO checklist injection."""
 
 from __future__ import annotations
 
 import json
 
-from cc_cortex.asset_validator import AssetType, is_asset_type_enabled, load_wiredo_config
-from cc_cortex.guards.base import GuardAction, GuardCategory, GuardContext
-from cc_cortex.wiredo_guard import WiredoGuard, _build_checklist, _detect_task_type
+from concinno.asset_validator import AssetType, is_asset_type_enabled, load_wiredo_config
+from concinno.guards.base import GuardAction, GuardCategory, GuardContext
+from concinno.wiredo_guard import WiredoGuard, _build_checklist, _detect_task_type
 
 
 def _make_ctx(

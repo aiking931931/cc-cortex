@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.security.llm_judge_guard."""
+"""Tests for concinno.security.llm_judge_guard."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.security.llm_judge_guard import (
+from concinno.security.llm_judge_guard import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     InjectionVerdict,
     JudgeRequest,

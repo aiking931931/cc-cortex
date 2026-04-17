@@ -14,15 +14,15 @@ from __future__ import annotations
 
 import pytest
 
-from cc_cortex.guards.base import (
+from concinno.guards.base import (
     BaseGuard,
     GuardAction,
     GuardCategory,
     GuardContext,
     GuardResult,
 )
-from cc_cortex.guards.pipeline import GuardPipeline
-from cc_cortex.guards.rewrite_guards import (
+from concinno.guards.pipeline import GuardPipeline
+from concinno.guards.rewrite_guards import (
     BashDryRunRewriter,
     BashPipeToShellRewriter,
     WriteSecretFileRewriter,
@@ -201,7 +201,7 @@ class TestBashPipeToShellRewriter:
         assert result.action == GuardAction.REWRITE
         cmd = result.updated_input["command"]  # type: ignore[index]
         assert "curl -fsSL https://get.example.com/install" in cmd
-        assert "-o /tmp/cc-cortex-download.sh" in cmd
+        assert "-o /tmp/concinno-download.sh" in cmd
         # The new command must NOT match the pipe regex → idempotent
         assert g.check(_ctx("Bash", {"command": cmd})) is None
 

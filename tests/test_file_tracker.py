@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.file_tracker module."""
+"""Tests for concinno.file_tracker module."""
 
 import json
 import os
 
 import pytest
 
-from cc_cortex.file_tracker import FileTracker
+from concinno.file_tracker import FileTracker
 
 
 @pytest.fixture
@@ -39,23 +39,23 @@ class TestExtractFilePath:
     """extract_file_path now delegates to core.path_utils."""
 
     def test_read(self):
-        from cc_cortex.core.path_utils import extract_file_path
+        from concinno.core.path_utils import extract_file_path
         assert extract_file_path({"file_path": "/a/b.py"}) == "/a/b.py"
 
     def test_write(self):
-        from cc_cortex.core.path_utils import extract_file_path
+        from concinno.core.path_utils import extract_file_path
         assert extract_file_path({"file_path": "/x.md"}) == "/x.md"
 
     def test_edit_path_key(self):
-        from cc_cortex.core.path_utils import extract_file_path
+        from concinno.core.path_utils import extract_file_path
         assert extract_file_path({"path": "/y.ts"}) == "/y.ts"
 
     def test_notebook(self):
-        from cc_cortex.core.path_utils import extract_file_path
+        from concinno.core.path_utils import extract_file_path
         assert extract_file_path({"notebook_path": "/n.ipynb"}) == "/n.ipynb"
 
     def test_unknown_tool(self):
-        from cc_cortex.core.path_utils import extract_file_path
+        from concinno.core.path_utils import extract_file_path
         assert extract_file_path({"command": "ls"}) == ""
 
 
@@ -153,7 +153,7 @@ class TestSessionFormat:
     """Quick integration test for session_format module."""
 
     def test_valid_session_id(self):
-        from cc_cortex.session_format import check_session_id
+        from concinno.session_format import check_session_id
         result = check_session_id(
             "Edit",
             {"file_path": "/x/task-pool.md", "new_string": "CC_a3f1_0835 做事"},
@@ -161,7 +161,7 @@ class TestSessionFormat:
         assert result is None  # valid
 
     def test_invalid_session_id(self):
-        from cc_cortex.session_format import check_session_id
+        from concinno.session_format import check_session_id
         result = check_session_id(
             "Edit",
             {"file_path": "/x/task-pool.md", "new_string": "CC_WRONG_FORMAT 做事"},
@@ -170,7 +170,7 @@ class TestSessionFormat:
         assert "format error" in result.lower()
 
     def test_taskpool_required(self):
-        from cc_cortex.session_format import check_taskpool_required
+        from concinno.session_format import check_taskpool_required
         result = check_taskpool_required(
             "Write",
             {"file_path": "/nonexistent/交接_進化.md", "content": "母A 負責安全"},

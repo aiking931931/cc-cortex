@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 os.environ["FORCE_COLOR"] = "1"
 os.environ.pop("NO_COLOR", None)
 
-from cc_cortex.ui.colors import reset_color_cache
+from concinno.ui.colors import reset_color_cache
 
 reset_color_cache()
 
@@ -60,7 +60,7 @@ def main() -> None:
     # Avoid circular; import demo scenes directly
     import importlib.util
 
-    from cc_cortex.ui.dashboard import render_dashboard
+    from concinno.ui.dashboard import render_dashboard
 
     demo_path = Path(__file__).resolve().parent / "demo.py"
     spec = importlib.util.spec_from_file_location("demo", demo_path)

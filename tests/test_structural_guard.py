@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.structural_guard — rules-based PRM."""
+"""Tests for concinno.structural_guard — rules-based PRM."""
 
 from __future__ import annotations
 
 import textwrap
 
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.structural_guard import (
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.structural_guard import (
     DEFAULT_THRESHOLDS,
     StructuralGuard,
     StructuralIssue,
@@ -25,7 +25,7 @@ def _ctx(tool_name="Write", file_path="/tmp/test.py", hook_event="PostToolUse"):
         tool_name=tool_name,
         tool_input={"file_path": file_path},
         session_id="test",
-        cache_dir="/tmp/.cc_cortex_cache",
+        cache_dir="/tmp/.concinno_cache",
         hook_event=hook_event,
     )
 

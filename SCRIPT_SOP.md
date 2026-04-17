@@ -6,16 +6,16 @@
 
 | Type | Location | Forbidden |
 | ---- | -------- | --------- |
-| CCC core modules | `src/cc_cortex/` root | No new subdirs unless subpackage |
-| Guard framework | `src/cc_cortex/guards/` | No BaseGuard subclasses here — put in root |
-| Guard implementations | `src/cc_cortex/<name>.py` | No new guard subdirs |
-| Hook entry points | `src/cc_cortex/hooks/` | No business logic — lifecycle only |
-| Infrastructure | `src/cc_cortex/core/` | No business logic — config/log/state/path only |
+| CCC core modules | `src/concinno/` root | No new subdirs unless subpackage |
+| Guard framework | `src/concinno/guards/` | No BaseGuard subclasses here — put in root |
+| Guard implementations | `src/concinno/<name>.py` | No new guard subdirs |
+| Hook entry points | `src/concinno/hooks/` | No business logic — lifecycle only |
+| Infrastructure | `src/concinno/core/` | No business logic — config/log/state/path only |
 | CC Hook wrappers | `.claude/hooks/` | Never copy CCC code (boundary rule) |
 | CC Skill definitions | `.claude/skills/<name>/SKILL.md` | No .py logic |
 | Personal scripts | `_AI_BRAIN/06_Monitor/` | Never mix into CCC |
-| Retired code | `src/cc_cortex/_recycled/` | Don't delete — keep README |
-| PowerShell scripts | `src/cc_cortex/scripts/` | Don't scatter in root |
+| Retired code | `src/concinno/_recycled/` | Don't delete — keep README |
+| PowerShell scripts | `src/concinno/scripts/` | Don't scatter in root |
 
 ## Naming Rules
 

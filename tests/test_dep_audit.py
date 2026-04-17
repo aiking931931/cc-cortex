@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.dep_audit — Typosquatting + scope spoofing + blocklist + poisoning."""
+"""Tests for concinno.dep_audit — Typosquatting + scope spoofing + blocklist + poisoning."""
 
 from __future__ import annotations
 
-from cc_cortex.dep_audit import check, check_poisoning
+from concinno.dep_audit import check, check_poisoning
 
 
 class TestDepAuditCheck:

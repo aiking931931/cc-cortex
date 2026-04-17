@@ -1,6 +1,6 @@
 # Token Zone
 
-`cc_cortex.token_zone` — Three-zone token management with per-model profiles.
+`concinno.token_zone` — Three-zone token management with per-model profiles.
 
 Classifies the current token count into `GREEN` / `YELLOW` / `RED` zones using
 absolute thresholds adapted per model (Opus/Sonnet 1M, Haiku 200K). Generates
@@ -18,7 +18,7 @@ UX display strings and handoff/compact injection text. Supports `persona_mode`
 
 ## API
 
-::: cc_cortex.token_zone
+::: concinno.token_zone
     options:
       show_root_heading: false
       members:

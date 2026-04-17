@@ -21,8 +21,8 @@
 ### Before (v0.5)
 
 ```python
-from cc_cortex import HookResult, Pipeline
-from cc_cortex.destruction_guard import evaluate
+from concinno import HookResult, Pipeline
+from concinno.destruction_guard import evaluate
 
 def my_guard(tool_name, tool_input, **ctx):
     if tool_name == "Bash" and "rm -rf" in tool_input.get("command", ""):
@@ -38,8 +38,8 @@ result = pipe.run("Bash", {"command": "rm -rf /"})
 ### After (v0.6+)
 
 ```python
-from cc_cortex import BaseGuard, GuardCategory, GuardContext, GuardResult
-from cc_cortex import create_default_pipeline
+from concinno import BaseGuard, GuardCategory, GuardContext, GuardResult
+from concinno import create_default_pipeline
 
 class MyGuard(BaseGuard):
     name = "my_guard"

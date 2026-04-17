@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-SKILLS_DIR = Path(__file__).parent.parent / "src" / "cc_cortex" / "templates" / "skills"
+SKILLS_DIR = Path(__file__).parent.parent / "src" / "concinno" / "templates" / "skills"
 
 EXPECTED_PERSONAS = {
     "persona-bizops-analyst",

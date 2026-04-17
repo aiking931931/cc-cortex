@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from cc_cortex.handoff_engine import (
+from concinno.handoff_engine import (
     check_handoff_reminder,
     check_token_gate,
     get_handoff_mode,
@@ -24,7 +24,7 @@ class TestCheckTokenGate:
     @pytest.fixture(autouse=True)
     def _force_save_token_mode(self, monkeypatch):
         """Force save-token mode so gate thresholds are predictable."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
         monkeypatch.setattr(handoff_engine, "get_handoff_mode", lambda: "save-token")
 
     def _make_transcript(self, context_tokens: int, tmp_path) -> str:
@@ -67,7 +67,7 @@ class TestCheckTokenGate:
         """Agent should be allowed when tokens below gate_agent."""
         transcript = self._make_transcript(100_000, tmp_path)
 
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "_find_transcript", lambda sid: transcript
@@ -83,7 +83,7 @@ class TestCheckTokenGate:
         """Agent should be DENIED when tokens >= gate_agent."""
         transcript = self._make_transcript(145_000, tmp_path)
 
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "_find_transcript", lambda sid: transcript
@@ -103,7 +103,7 @@ class TestCheckTokenGate:
         """Agent should be DENIED with critical message at gate_critical."""
         transcript = self._make_transcript(165_000, tmp_path)
 
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "_find_transcript", lambda sid: transcript
@@ -120,7 +120,7 @@ class TestCheckTokenGate:
 
     def test_no_transcript_allows(self, monkeypatch):
         """If transcript not found, allow (fail-open)."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(handoff_engine, "_find_transcript", lambda sid: "")
 
@@ -131,7 +131,7 @@ class TestCheckTokenGate:
         """Custom thresholds should work."""
         transcript = self._make_transcript(50_000, tmp_path)
 
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "_find_transcript", lambda sid: transcript
@@ -158,9 +158,9 @@ class TestHandoffGuidance:
     def test_zh_guidance(self, monkeypatch):
         """Chinese guidance when CC_UX_LANG=zh."""
         monkeypatch.setenv("CC_UX_LANG", "zh")
-        import cc_cortex.i18n as i18n
+        import concinno.i18n as i18n
         i18n.reload()
-        from cc_cortex.handoff_engine import _handoff_guidance
+        from concinno.handoff_engine import _handoff_guidance
 
         text = _handoff_guidance(142, 85, critical=False)
         assert "交接" in text or "handoff" in text.lower()
@@ -169,9 +169,9 @@ class TestHandoffGuidance:
     def test_zh_critical(self, monkeypatch):
         """Chinese critical guidance."""
         monkeypatch.setenv("CC_UX_LANG", "zh")
-        import cc_cortex.i18n as i18n
+        import concinno.i18n as i18n
         i18n.reload()
-        from cc_cortex.handoff_engine import _handoff_guidance
+        from concinno.handoff_engine import _handoff_guidance
 
         text = _handoff_guidance(165, 92, critical=True)
         assert "立即" in text or "now" in text.lower()
@@ -180,9 +180,9 @@ class TestHandoffGuidance:
     def test_en_guidance(self, monkeypatch):
         """English guidance (default)."""
         monkeypatch.setenv("CC_UX_LANG", "en")
-        import cc_cortex.i18n as i18n
+        import concinno.i18n as i18n
         i18n.reload()
-        from cc_cortex.handoff_engine import _handoff_guidance
+        from concinno.handoff_engine import _handoff_guidance
 
         text = _handoff_guidance(142, 85, critical=False)
         assert "handoff" in text.lower()
@@ -191,9 +191,9 @@ class TestHandoffGuidance:
     def test_en_critical(self, monkeypatch):
         """English critical guidance."""
         monkeypatch.setenv("CC_UX_LANG", "en")
-        import cc_cortex.i18n as i18n
+        import concinno.i18n as i18n
         i18n.reload()
-        from cc_cortex.handoff_engine import _handoff_guidance
+        from concinno.handoff_engine import _handoff_guidance
 
         text = _handoff_guidance(165, 92, critical=True)
         assert "stop" in text.lower()
@@ -222,7 +222,7 @@ class TestSessionSummary:
         with open(transcript, "w", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "_find_transcript", lambda sid: transcript
@@ -235,7 +235,7 @@ class TestSessionSummary:
 
     def test_summary_no_data(self, monkeypatch):
         """Empty summary when no data available."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(handoff_engine, "_find_transcript", lambda sid: "")
 
@@ -258,7 +258,7 @@ class TestSessionSummary:
         with open(transcript, "w", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "_find_transcript", lambda sid: transcript
@@ -282,7 +282,7 @@ class TestFindTranscript:
 
     def test_returns_empty_for_no_session(self):
         """No session_id → empty string."""
-        from cc_cortex.handoff_engine import _find_transcript
+        from concinno.handoff_engine import _find_transcript
 
         assert _find_transcript("") == ""
 
@@ -296,7 +296,7 @@ class TestFindTranscript:
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
 
         # Create cache
-        cache_dir = os.path.join(str(tmp_path), ".cc_cortex_cache")
+        cache_dir = os.path.join(str(tmp_path), ".concinno_cache")
         os.makedirs(cache_dir, exist_ok=True)
 
         # Create fake transcript — filename must contain the session_id
@@ -308,7 +308,7 @@ class TestFindTranscript:
         with open(os.path.join(cache_dir, "transcript_path.txt"), "w") as f:
             f.write(fake_transcript)
 
-        from cc_cortex.handoff_engine import _find_transcript
+        from concinno.handoff_engine import _find_transcript
 
         result = _find_transcript(session_id)
         assert result == fake_transcript
@@ -323,7 +323,7 @@ class TestHandoffReminder:
     @pytest.fixture(autouse=True)
     def _force_save_token_mode(self, monkeypatch):
         """Force save-token mode so reminder thresholds are predictable."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
         monkeypatch.setattr(handoff_engine, "get_handoff_mode", lambda: "save-token")
 
     def setup_method(self):
@@ -376,7 +376,7 @@ class TestHandoffReminder:
     def test_zh_locale(self, monkeypatch):
         """Chinese locale produces Chinese reminder text."""
         monkeypatch.setenv("CC_UX_LANG", "zh")
-        import cc_cortex.i18n as i18n
+        import concinno.i18n as i18n
         i18n.reload()
         result = check_handoff_reminder(
             "sess1", 90_000, modified_count=3, token_min=80_000,
@@ -388,7 +388,7 @@ class TestHandoffReminder:
     def test_en_locale(self, monkeypatch):
         """English locale produces English reminder text."""
         monkeypatch.setenv("CC_UX_LANG", "en")
-        import cc_cortex.i18n as i18n
+        import concinno.i18n as i18n
         i18n.reload()
         result = check_handoff_reminder(
             "sess1", 90_000, modified_count=4, token_min=80_000,
@@ -454,7 +454,7 @@ class TestHandoffMode:
 
     def test_full_mode_skips_gate(self, tmp_path, monkeypatch):
         """Full mode: no token gate at all."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(handoff_engine, "get_handoff_mode", lambda: "full")
 
@@ -472,7 +472,7 @@ class TestHandoffMode:
 
     def test_phase_mode_higher_threshold(self, tmp_path, monkeypatch):
         """Phase mode: allows below phase_gate but blocks at/above it."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(handoff_engine, "get_handoff_mode", lambda: "phase")
         # Mock _model_thresholds to use testable values
@@ -509,7 +509,7 @@ class TestHandoffMode:
 
     def test_full_mode_no_reminder(self, monkeypatch):
         """Full mode: no handoff reminder."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(handoff_engine, "get_handoff_mode", lambda: "full")
         reset_handoff_reminder_state()
@@ -519,7 +519,7 @@ class TestHandoffMode:
 
     def test_phase_mode_late_reminder(self, monkeypatch):
         """Phase mode: reminder only at phase_reminder+, ignoring file count."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(handoff_engine, "get_handoff_mode", lambda: "phase")
         monkeypatch.setattr(handoff_engine, "_model_thresholds", lambda: {
@@ -555,7 +555,7 @@ class TestEmergencyHandoff:
 
     def test_skips_less_than_3_files(self, tmp_path):
         """Skip if fewer than 3 modified files."""
-        from cc_cortex.handoff_engine import emergency_handoff
+        from concinno.handoff_engine import emergency_handoff
         hdir, _ = self._make_handoff_dir(tmp_path)
         result = emergency_handoff(
             "sess1", modified_files=["a.py", "b.py"],
@@ -565,7 +565,7 @@ class TestEmergencyHandoff:
 
     def test_skips_no_handoff_dir(self):
         """Skip if handoff_dir doesn't exist."""
-        from cc_cortex.handoff_engine import emergency_handoff
+        from concinno.handoff_engine import emergency_handoff
         result = emergency_handoff(
             "sess1", modified_files=["a.py", "b.py", "c.py"],
             reason="crash", handoff_dir="/nonexistent",
@@ -574,7 +574,7 @@ class TestEmergencyHandoff:
 
     def test_writes_emergency_snippet(self, tmp_path):
         """Should append emergency snippet to best-match handoff file."""
-        from cc_cortex.handoff_engine import emergency_handoff
+        from concinno.handoff_engine import emergency_handoff
         hdir, hfile = self._make_handoff_dir(tmp_path)
         files = ["evolution/a.py", "evolution/b.py", "evolution/c.py"]
         result = emergency_handoff(
@@ -591,7 +591,7 @@ class TestEmergencyHandoff:
 
     def test_no_duplicate_emergency(self, tmp_path):
         """Should not stack multiple emergency handoffs."""
-        from cc_cortex.handoff_engine import emergency_handoff
+        from concinno.handoff_engine import emergency_handoff
         hdir, _ = self._make_handoff_dir(tmp_path)
         files = ["evolution/a.py", "evolution/b.py", "evolution/c.py"]
         r1 = emergency_handoff(
@@ -607,7 +607,7 @@ class TestEmergencyHandoff:
 
     def test_caps_file_list_at_8(self, tmp_path):
         """File list in snippet should be capped at 8."""
-        from cc_cortex.handoff_engine import emergency_handoff
+        from concinno.handoff_engine import emergency_handoff
         hdir, hfile = self._make_handoff_dir(tmp_path)
         files = [f"evolution/file_{i}.py" for i in range(15)]
         result = emergency_handoff(
@@ -621,7 +621,7 @@ class TestEmergencyHandoff:
 
     def test_fallback_to_evolution(self, tmp_path):
         """Unmatched files should fallback to evolution handoff."""
-        from cc_cortex.handoff_engine import emergency_handoff
+        from concinno.handoff_engine import emergency_handoff
         hdir, hfile = self._make_handoff_dir(tmp_path)
         files = ["random/x.py", "random/y.py", "random/z.py"]
         result = emergency_handoff(
@@ -640,7 +640,7 @@ class TestHandoffLineBudget:
 
     def test_allows_within_budget(self, tmp_path):
         """Files within budget should pass."""
-        from cc_cortex.handoff_engine import check_handoff_line_budget
+        from concinno.handoff_engine import check_handoff_line_budget
         f = os.path.join(str(tmp_path), "交接_test.md")
         with open(f, "w") as fh:
             fh.write("\n".join([f"line {i}" for i in range(100)]))
@@ -648,7 +648,7 @@ class TestHandoffLineBudget:
 
     def test_denies_over_budget(self, tmp_path):
         """Files over budget should be denied."""
-        from cc_cortex.handoff_engine import check_handoff_line_budget
+        from concinno.handoff_engine import check_handoff_line_budget
         f = os.path.join(str(tmp_path), "交接_test.md")
         with open(f, "w") as fh:
             fh.write("\n".join([f"line {i}" for i in range(350)]))
@@ -659,7 +659,7 @@ class TestHandoffLineBudget:
 
     def test_custom_budget(self, tmp_path):
         """Custom budget threshold should work."""
-        from cc_cortex.handoff_engine import check_handoff_line_budget
+        from concinno.handoff_engine import check_handoff_line_budget
         f = os.path.join(str(tmp_path), "交接_test.md")
         with open(f, "w") as fh:
             fh.write("\n".join([f"line {i}" for i in range(200)]))
@@ -668,7 +668,7 @@ class TestHandoffLineBudget:
 
     def test_nonexistent_file(self):
         """Nonexistent file should pass (fail-open)."""
-        from cc_cortex.handoff_engine import check_handoff_line_budget
+        from concinno.handoff_engine import check_handoff_line_budget
         assert check_handoff_line_budget("/nonexistent/交接.md") is None
 
 
@@ -685,8 +685,8 @@ class TestCompetitionMode:
 
     def test_is_competition_mode_detection(self, monkeypatch):
         """is_competition_mode True iff get_handoff_mode == 'competition'."""
-        from cc_cortex import handoff_engine
-        from cc_cortex.handoff_engine import is_competition_mode
+        from concinno import handoff_engine
+        from concinno.handoff_engine import is_competition_mode
 
         for mode in ("save-token", "phase", "full"):
             monkeypatch.setattr(
@@ -705,8 +705,8 @@ class TestCompetitionMode:
         self, monkeypatch,
     ):
         """Convenience predicate is True for full AND competition only."""
-        from cc_cortex import handoff_engine
-        from cc_cortex.handoff_engine import is_autonomous_or_competition
+        from concinno import handoff_engine
+        from concinno.handoff_engine import is_autonomous_or_competition
 
         for mode in ("save-token", "phase"):
             monkeypatch.setattr(
@@ -724,7 +724,7 @@ class TestCompetitionMode:
         self, tmp_path, monkeypatch,
     ):
         """Competition mode skips token gating just like full mode."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         monkeypatch.setattr(
             handoff_engine, "get_handoff_mode", lambda: "competition",
@@ -745,7 +745,7 @@ class TestCompetitionMode:
 
     def test_competition_mode_skips_handoff_reminder(self, monkeypatch):
         """Competition mode silences handoff reminders the same as full."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
 
         reset_handoff_reminder_state()
         monkeypatch.setattr(

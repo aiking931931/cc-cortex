@@ -1,8 +1,8 @@
 """Tests for hallucination_guard — Detect unsourced assertions in written content."""
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.hallucination_guard import (
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.hallucination_guard import (
     HallucinationGuard,
     _is_code_file,
 )

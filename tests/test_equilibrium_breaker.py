@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.equilibrium_breaker import (
+from concinno.core.state_store import StateStore
+from concinno.equilibrium_breaker import (
     COOLDOWN_STEPS,
     PRESSURE_THRESHOLD,
     EquilibriumBreaker,
 )
-from cc_cortex.guards.base import GuardAction, GuardCategory, GuardContext
-from cc_cortex.milestone_gate import MilestoneGate
+from concinno.guards.base import GuardAction, GuardCategory, GuardContext
+from concinno.milestone_gate import MilestoneGate
 
 
 def _ctx(**kw) -> GuardContext:

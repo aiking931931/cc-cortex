@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.cache.autocompact import (
+from concinno.cache.autocompact import (
     AUTOCOMPACT_BUFFER_TOKENS,
     MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
     AutoCompactCircuitBreaker,

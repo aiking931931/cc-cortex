@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.process_guard."""
+"""Tests for concinno.process_guard."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from cc_cortex.process_guard import (
+from concinno.process_guard import (
     ClaudeProcess,
     Tier,
     _classify_processes,
@@ -198,7 +198,7 @@ class TestFindOrphanChildren:
         result = _find_orphan_children(procs)
         assert 200 in result
 
-    @patch("cc_cortex.process_guard.classifier._pid_alive", return_value=True)
+    @patch("concinno.process_guard.classifier._pid_alive", return_value=True)
     def test_skips_alive_mcp_server(self, mock_alive):
         procs = [
             _make_proc(200, ppid=50, name="python.exe",
@@ -208,7 +208,7 @@ class TestFindOrphanChildren:
         result = _find_orphan_children(procs)
         assert 200 not in result
 
-    @patch("cc_cortex.process_guard.classifier._pid_alive", return_value=True)
+    @patch("concinno.process_guard.classifier._pid_alive", return_value=True)
     def test_skips_alive_parent(self, mock_alive):
         procs = [
             _make_proc(100, ppid=50, name="bash.exe", cmdline="bash claude"),
@@ -238,14 +238,14 @@ class TestCleanupInstanceLock:
 
 
 class TestRunGuard:
-    @patch("cc_cortex.process_guard.guard._get_all_processes", return_value=[])
+    @patch("concinno.process_guard.guard._get_all_processes", return_value=[])
     def test_no_processes(self, mock_procs):
         result = run_guard(dry_run=True)
         assert result.scanned == 0
         assert result.killed == 0
 
-    @patch("cc_cortex.process_guard.guard._get_all_processes")
-    @patch("cc_cortex.process_guard.guard._kill_process", return_value=True)
+    @patch("concinno.process_guard.guard._get_all_processes")
+    @patch("concinno.process_guard.guard._kill_process", return_value=True)
     def test_dry_run_no_kills(self, mock_kill, mock_procs):
         mock_procs.return_value = [
             _make_proc(100, ppid=999, name="claude.exe"),
@@ -304,18 +304,18 @@ class TestGetChildTree:
 
 
 class TestEmergencyMemoryRelief:
-    @patch("cc_cortex.process_guard.classifier._get_system_memory_percent", return_value=50.0)
+    @patch("concinno.process_guard.classifier._get_system_memory_percent", return_value=50.0)
     def test_no_action_below_threshold(self, mock_mem):
         actions, killed, freed = _emergency_memory_relief([], [], "/fake", dry_run=True)
         assert killed == 0
         assert len(actions) == 0
 
     @patch(
-        "cc_cortex.process_guard.classifier._get_system_memory_percent",
+        "concinno.process_guard.classifier._get_system_memory_percent",
         side_effect=[96.0, 80.0],
     )
-    @patch("cc_cortex.process_guard.guard._kill_process", return_value=True)
-    @patch("cc_cortex.process_guard.classifier._pid_alive", return_value=False)
+    @patch("concinno.process_guard.guard._kill_process", return_value=True)
+    @patch("concinno.process_guard.classifier._pid_alive", return_value=False)
     def test_kills_orphans_first(self, mock_alive, mock_kill, mock_mem):
         procs = [
             # Orphan MCP server: parent 999 not in proc list
@@ -327,11 +327,11 @@ class TestEmergencyMemoryRelief:
         assert any("EMERGENCY KILL" in a for a in actions)
 
     @patch(
-        "cc_cortex.process_guard.classifier._get_system_memory_percent",
+        "concinno.process_guard.classifier._get_system_memory_percent",
         side_effect=[96.0, 96.0, 96.0, 80.0],
     )
-    @patch("cc_cortex.process_guard.classifier._kill_process", return_value=True)
-    @patch("cc_cortex.process_guard.classifier._pid_alive", return_value=True)
+    @patch("concinno.process_guard.classifier._kill_process", return_value=True)
+    @patch("concinno.process_guard.classifier._pid_alive", return_value=True)
     def test_preserves_mother_claude(self, mock_alive, mock_kill, mock_mem):
         """Wave 3 kills children but NOT the mother claude.exe."""
         procs = [

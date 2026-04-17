@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.subagent_identity — dynamic subagent identity assignment."""
+"""Tests for concinno.subagent_identity — dynamic subagent identity assignment."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.subagent_identity import (
+from concinno.subagent_identity import (
     Identity,
     IdentityProfile,
     assign_identity,

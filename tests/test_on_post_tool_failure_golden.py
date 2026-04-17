@@ -1,4 +1,4 @@
-"""Golden tests for ``cc_cortex.hooks.on_post_tool_failure``.
+"""Golden tests for ``concinno.hooks.on_post_tool_failure``.
 
 These tests pin the *observable* behavior of the patch-loop detector
 around the A2c migration. Burst tracking is delegated to
@@ -38,8 +38,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from cc_cortex.error_recovery import ErrorRecovery
-from cc_cortex.hooks import on_post_tool_failure as hook
+from concinno.error_recovery import ErrorRecovery
+from concinno.hooks import on_post_tool_failure as hook
 
 # ── Helpers ────────────────────────────────────────────────
 
@@ -91,13 +91,13 @@ def _run_hook(
 @pytest.fixture
 def project_dir(tmp_path):
     pd = tmp_path / "proj"
-    (pd / ".cc_cortex_cache").mkdir(parents=True)
+    (pd / ".concinno_cache").mkdir(parents=True)
     return str(pd)
 
 
 @pytest.fixture
 def cache_dir(project_dir):
-    return os.path.join(project_dir, ".cc_cortex_cache")
+    return os.path.join(project_dir, ".concinno_cache")
 
 
 # ── G1–G4: User-initiated denial no-ops ────────────────────
@@ -396,7 +396,7 @@ def test_g16_confidence_called_on_every_failure(
             "error_pattern": error_pattern,
         })
 
-    import cc_cortex.confidence_record as cr
+    import concinno.confidence_record as cr
     monkeypatch.setattr(cr, "update_confidence", fake_update)
 
     _run_hook(
@@ -419,7 +419,7 @@ def test_g17_confidence_skipped_on_user_denial(
     def fake_update(cache_dir, *, domain, success, error_pattern):
         calls.append({"domain": domain})
 
-    import cc_cortex.confidence_record as cr
+    import concinno.confidence_record as cr
     monkeypatch.setattr(cr, "update_confidence", fake_update)
 
     _run_hook(
@@ -434,10 +434,10 @@ def test_g17_confidence_skipped_on_user_denial(
 def test_g18_confidence_importerror_graceful(
     monkeypatch, capsys, project_dir, cache_dir,
 ):
-    # Force `from cc_cortex.confidence_record import update_confidence`
+    # Force `from concinno.confidence_record import update_confidence`
     # inside main() to raise ImportError by removing the attribute.
     # monkeypatch will restore it automatically at teardown.
-    import cc_cortex.confidence_record as cr
+    import concinno.confidence_record as cr
     monkeypatch.delattr(cr, "update_confidence")
     out = _run_hook(
         monkeypatch, capsys, project_dir,

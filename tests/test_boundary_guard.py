@@ -1,6 +1,6 @@
 """Tests for BoundaryGuard (boundary_guard module)."""
 
-from cc_cortex.boundary_guard import (
+from concinno.boundary_guard import (
     _count_business_lines,
     _has_hardcoded_cjk,
     _has_personal_paths,
@@ -20,18 +20,18 @@ class TestIsHookPath:
         assert _is_hook_path("C:\\Users\\x\\.claude\\hooks\\on-stop.py")
 
     def test_not_hook(self):
-        assert not _is_hook_path("src/cc_cortex/cognitive.py")
+        assert not _is_hook_path("src/concinno/cognitive.py")
 
     def test_session_cleanup(self):
         assert _is_hook_path(".claude/hooks/session_cleanup.py")
 
 
 class TestIsCortexPath:
-    def test_cc_cortex_src(self):
-        assert _is_cortex_path("projects/cc-cortex/src/cc_cortex/guard.py")
+    def test_concinno_src(self):
+        assert _is_cortex_path("projects/concinno/src/concinno/guard.py")
 
-    def test_cc_cortex_slash(self):
-        assert _is_cortex_path("cc_cortex/knowledge.py")
+    def test_concinno_slash(self):
+        assert _is_cortex_path("concinno/knowledge.py")
 
     def test_not_cortex(self):
         assert not _is_cortex_path(".claude/hooks/on-stop.py")
@@ -39,7 +39,7 @@ class TestIsCortexPath:
 
 class TestCountBusinessLines:
     def test_all_boilerplate(self):
-        content = "import json\nfrom cc_cortex import x\n# comment\nprint('hi')\n"
+        content = "import json\nfrom concinno import x\n# comment\nprint('hi')\n"
         assert _count_business_lines(content) == 0
 
     def test_mixed(self):
@@ -96,7 +96,7 @@ class TestGenBoundary:
         content = "\n".join([
             "import json",
             "import sys",
-            "from cc_cortex import guard",
+            "from concinno import guard",
             "data = json.load(sys.stdin)",
             "result = guard.check(data)",
             "print(json.dumps(result))",
@@ -109,7 +109,7 @@ class TestGenBoundary:
 
     def test_hook_fat_warns(self):
         """Hook with >20 business logic lines triggers warning."""
-        boilerplate = "import json\nimport sys\nfrom cc_cortex import x\n"
+        boilerplate = "import json\nimport sys\nfrom concinno import x\n"
         biz_lines = "\n".join(f"do_thing_{i}()" for i in range(25))
         content = boilerplate + biz_lines
         result = gen_boundary("Write", {
@@ -120,7 +120,7 @@ class TestGenBoundary:
         name, msg = result
         assert name == "boundary"
         assert "25 business logic lines" in msg
-        assert "cc_cortex module" in msg
+        assert "concinno module" in msg
 
     def test_hook_custom_threshold(self):
         biz_lines = "\n".join(f"action_{i}()" for i in range(8))
@@ -139,7 +139,7 @@ class TestGenBoundary:
 
     def test_cortex_with_personal_path(self):
         result = gen_boundary("Edit", {
-            "file_path": "cc_cortex/guard.py",
+            "file_path": "concinno/guard.py",
             "new_string": 'BASE = "E:\\Cursor\\projects"',
         })
         assert result is not None
@@ -147,7 +147,7 @@ class TestGenBoundary:
 
     def test_cortex_with_cjk(self):
         result = gen_boundary("Edit", {
-            "file_path": "projects/cc-cortex/src/cc_cortex/new.py",
+            "file_path": "projects/concinno/src/concinno/new.py",
             "new_string": 'msg = "阻擋操作"',
         })
         assert result is not None
@@ -155,7 +155,7 @@ class TestGenBoundary:
 
     def test_cortex_with_both_violations(self):
         result = gen_boundary("Write", {
-            "file_path": "cc_cortex/module.py",
+            "file_path": "concinno/module.py",
             "content": 'path = "_AI_BRAIN/x"\nmsg = "測試"',
         })
         assert result is not None
@@ -164,7 +164,7 @@ class TestGenBoundary:
 
     def test_cortex_clean_ok(self):
         result = gen_boundary("Write", {
-            "file_path": "cc_cortex/clean.py",
+            "file_path": "concinno/clean.py",
             "content": 'def check(x):\n    return x > 0\n',
         })
         assert result is None
@@ -179,7 +179,7 @@ class TestGenBoundary:
 
     def test_edit_tool_works(self):
         result = gen_boundary("Edit", {
-            "file_path": "cc_cortex/x.py",
+            "file_path": "concinno/x.py",
             "new_string": 'x = "/home/user/data"',
         })
         assert result is not None

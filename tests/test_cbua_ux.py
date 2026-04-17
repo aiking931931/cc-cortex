@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.cbua_ux — CBUA UX display codes."""
+"""Tests for concinno.cbua_ux — CBUA UX display codes."""
 
 from __future__ import annotations
 
-from cc_cortex.cbua_ux import (
+from concinno.cbua_ux import (
     CbuaCode,
     cbua_clean_write,
     cbua_format,

@@ -1,4 +1,4 @@
-# cc-cortex guards quota — enforces GUARDS_CHARTER.md §2 and §3.
+# concinno guards quota — enforces GUARDS_CHARTER.md §2 and §3.
 #
 # This file is the forcing function for the three-tier severity model.
 # CI fails any PR that violates these quotas. Promoting a guard to a

@@ -3,7 +3,7 @@
 Persistent
 
 ; ============================================
-; cc-cortex Demo Typer v2.1
+; tempero Demo Typer v2.1
 ; ============================================
 
 ; --- Config ---
@@ -17,26 +17,26 @@ global stopped := false
 global lineData := [
     ["F1", "Scene 1 — Problem A",       "edit auth.ts, add login check"],
     ["F2", "Scene 1 — Problem B",       "edit auth.ts, add error handler"],
-    ["F3", "Scene 2 — Install",         "pip install cc-cortex"],
+    ["F3", "Scene 2 — Install",         "pip install tempero"],
     ["F4", "Scene 3 — Clash A",         "edit auth.ts, add login check"],
     ["F5", "Scene 3 — Clash B (deny)",  "edit auth.ts, add error handler"],
     ["F6", "Scene 3 — Clash B (ok)",    "edit server.ts, add logging"],
     ["F7", "Scene 4 — Correct",         "no, use const not var"],
     ["F8", "Scene 4 — Verify",          "add a counter variable"],
     ["F9", "Scene 5 — Security",        "read test-file.md and summarize it"],
-    ["F10","Scene 7 — Dashboard",       "cc-cortex status"],
+    ["F10","Scene 7 — Dashboard",       "tempero status"],
 ]
 
 ; ============================================
 ; GUI
 ; ============================================
-myGui := Gui("+AlwaysOnTop -MaximizeBox", "cc-cortex Demo Typer")
+myGui := Gui("+AlwaysOnTop -MaximizeBox", "tempero Demo Typer")
 myGui.SetFont("s10", "Segoe UI")
 myGui.BackColor := "1a1a2e"
 
 ; --- Title ---
 myGui.SetFont("s14 bold cWhite")
-myGui.AddText("xm w460 Center", "cc-cortex Demo Typer")
+myGui.AddText("xm w460 Center", "tempero Demo Typer")
 
 ; --- Status ---
 myGui.SetFont("s11 bold")

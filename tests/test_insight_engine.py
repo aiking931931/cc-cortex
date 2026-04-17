@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.insight_engine — Proactive Insight Engine."""
+"""Tests for concinno.insight_engine — Proactive Insight Engine."""
 
 from __future__ import annotations
 
-from cc_cortex.insight_engine import (
+from concinno.insight_engine import (
     InsightRule,
     _builtin_rules,
     _find_best_match,

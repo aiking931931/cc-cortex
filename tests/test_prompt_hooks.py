@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.prompt_hooks — LLM-as-Judge installer.
+"""Tests for concinno.prompt_hooks — LLM-as-Judge installer.
 
 Covers:
   - PromptJudge dataclass: marker, rendered_prompt, build_spec
@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from cc_cortex.prompt_hooks import (
+from concinno.prompt_hooks import (
     ALL_JUDGES,
     CODE_QUALITY_JUDGE,
     DEFAULT_MODEL,
@@ -39,7 +39,7 @@ from cc_cortex.prompt_hooks import (
 
 class TestPromptJudge:
     def test_marker_includes_name(self):
-        assert HALLUCINATION_JUDGE.marker() == "[cc-cortex:hallucination_judge]"
+        assert HALLUCINATION_JUDGE.marker() == "[concinno:hallucination_judge]"
 
     def test_rendered_prompt_starts_with_marker(self):
         p = HALLUCINATION_JUDGE.rendered_prompt()

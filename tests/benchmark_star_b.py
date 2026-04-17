@@ -23,7 +23,7 @@ import os
 
 import pytest
 
-from cc_cortex.star import (
+from concinno.star import (
     ConfluenceRAG,
     MultiSourceRetriever,
     RetrievalTier,

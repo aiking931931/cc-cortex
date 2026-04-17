@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.cognitive module."""
+"""Tests for concinno.cognitive module."""
 
 from __future__ import annotations
 
-from cc_cortex.cognitive import (  # noqa: I001
+from concinno.cognitive import (  # noqa: I001
     DEFAULT_THRESHOLDS,
     THRESHOLD_BOUNDS,
     AdaptiveThresholds,

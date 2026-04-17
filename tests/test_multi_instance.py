@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.multi_instance — Multi-session coordination."""
+"""Tests for concinno.multi_instance — Multi-session coordination."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from cc_cortex.multi_instance import (
+from concinno.multi_instance import (
     WRITE_TOOLS,
     _is_abcd_mode,
     check_conflict,

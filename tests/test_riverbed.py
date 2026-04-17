@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from cc_cortex.riverbed import (
+from concinno.riverbed import (
     MIN_DEPTH,
     RecallResult,
     Riverbed,

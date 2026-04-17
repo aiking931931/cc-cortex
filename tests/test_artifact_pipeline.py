@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.delivery.artifact_pipeline — multi-type WIREDO verification.
+"""Tests for concinno.delivery.artifact_pipeline — multi-type WIREDO verification.
 
 Covers:
 - CheckState / CheckResult / TypeReport / ArtifactReport data models
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cc_cortex.asset_validator import AssetType, WiredoDimension
-from cc_cortex.delivery.artifact_pipeline import (
+from concinno.asset_validator import AssetType, WiredoDimension
+from concinno.delivery.artifact_pipeline import (
     ArtifactPipeline,
     ArtifactReport,
     CheckResult,
@@ -255,7 +255,7 @@ class TestCollectArtifacts:
         # has to know the on-disk filename — the previous hardcoded
         # `test_ses.json` path silently broke when state_store switched
         # from 8-char truncation to 16-hex blake2b digests.
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         cache = tmp_path / "cache"
         cache.mkdir()
         state = {"edited_files": edited, "calls": []}
@@ -306,7 +306,7 @@ class TestCollectArtifacts:
 
 class TestDetectMediaTasks:
     def _setup(self, tmp_path: Path, calls: list[dict]) -> str:
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         cache = tmp_path / "cache"
         cache.mkdir()
         state = {"calls": calls, "edited_files": []}
@@ -358,7 +358,7 @@ class TestValidateDocument:
         f = tmp_path / "doc.md"
         f.write_text("# Title\n\nContent here", encoding="utf-8")
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_document
+        from concinno.delivery.artifact_pipeline import _validate_document
         report = _validate_document([str(f)], str(tmp_path))
 
         assert report.asset_type == AssetType.DOCUMENT
@@ -369,7 +369,7 @@ class TestValidateDocument:
         f = tmp_path / "bad.md"
         f.write_text("no heading, no frontmatter", encoding="utf-8")
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_document
+        from concinno.delivery.artifact_pipeline import _validate_document
         report = _validate_document([str(f)], str(tmp_path))
 
         inherited = [c for c in report.checks
@@ -380,7 +380,7 @@ class TestValidateDocument:
         f = tmp_path / "huge.md"
         f.write_text("# OK\n" + "x" * 11_000_000, encoding="utf-8")
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_document
+        from concinno.delivery.artifact_pipeline import _validate_document
         report = _validate_document([str(f)], str(tmp_path))
 
         responsive = [c for c in report.checks
@@ -394,7 +394,7 @@ class TestValidateImage:
         f.parent.mkdir()
         f.write_bytes(b"\x89PNG" + b"\x00" * 2000)
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_image
+        from concinno.delivery.artifact_pipeline import _validate_image
         report = _validate_image([str(f)], str(tmp_path))
 
         assert report.asset_type == AssetType.IMAGE
@@ -408,7 +408,7 @@ class TestValidateImage:
         f.parent.mkdir(exist_ok=True)
         f.write_bytes(b"")
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_image
+        from concinno.delivery.artifact_pipeline import _validate_image
         report = _validate_image([str(f)], str(tmp_path))
 
         defended = [c for c in report.checks
@@ -419,7 +419,7 @@ class TestValidateImage:
         f = tmp_path / "random.png"
         f.write_bytes(b"\x89PNG" + b"\x00" * 2000)
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_image
+        from concinno.delivery.artifact_pipeline import _validate_image
         report = _validate_image([str(f)], str(tmp_path))
 
         wired = [c for c in report.checks
@@ -433,7 +433,7 @@ class TestValidateVideo:
         f.parent.mkdir()
         f.write_bytes(b"\x00" * 5000)
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_video
+        from concinno.delivery.artifact_pipeline import _validate_video
         report = _validate_video([str(f)], str(tmp_path))
 
         assert report.asset_type == AssetType.VIDEO
@@ -448,7 +448,7 @@ class TestValidateAudio:
         f.parent.mkdir()
         f.write_bytes(b"\xff\xfb\x90" + b"\x00" * 5000)
 
-        from cc_cortex.delivery.artifact_pipeline import _validate_audio
+        from concinno.delivery.artifact_pipeline import _validate_audio
         report = _validate_audio([str(f)], str(tmp_path))
 
         assert report.asset_type == AssetType.AUDIO
@@ -464,7 +464,7 @@ class TestArtifactPipeline:
     def _setup_state(self, tmp_path: Path, edited: list[str],
                      calls: list[dict] | None = None,
                      generated: list[str] | None = None) -> str:
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         cache = tmp_path / "cache"
         cache.mkdir(exist_ok=True)
         state: dict = {"edited_files": edited, "calls": calls or []}
@@ -590,7 +590,7 @@ class TestArtifactPipeline:
 
 class TestSentinelMediaTracking:
     def test_track_image_api(self):
-        from cc_cortex.sentinel import _track_media_artifacts
+        from concinno.sentinel import _track_media_artifacts
 
         state: dict = {}
         tool_input = {"command": "python gen.py --model fal-ai/flux-pro"}
@@ -598,7 +598,7 @@ class TestSentinelMediaTracking:
         assert "image" in state.get("media_tasks", [])
 
     def test_track_audio_api(self):
-        from cc_cortex.sentinel import _track_media_artifacts
+        from concinno.sentinel import _track_media_artifacts
 
         state: dict = {}
         tool_input = {"command": "python gen.py elevenlabs tts"}
@@ -606,7 +606,7 @@ class TestSentinelMediaTracking:
         assert "audio" in state.get("media_tasks", [])
 
     def test_extract_file_path(self, tmp_path: Path):
-        from cc_cortex.sentinel import _track_media_artifacts
+        from concinno.sentinel import _track_media_artifacts
 
         img = tmp_path / "output.png"
         img.write_bytes(b"\x89PNG" + b"\x00" * 100)
@@ -618,7 +618,7 @@ class TestSentinelMediaTracking:
         assert len(state.get("generated_artifacts", [])) == 1
 
     def test_no_track_nonexistent(self):
-        from cc_cortex.sentinel import _track_media_artifacts
+        from concinno.sentinel import _track_media_artifacts
 
         state: dict = {}
         tool_input = {"command": "python gen.py"}
@@ -627,7 +627,7 @@ class TestSentinelMediaTracking:
         assert len(state.get("generated_artifacts", [])) == 0
 
     def test_dedup(self, tmp_path: Path):
-        from cc_cortex.sentinel import _track_media_artifacts
+        from concinno.sentinel import _track_media_artifacts
 
         img = tmp_path / "out.png"
         img.write_bytes(b"\x89PNG" + b"\x00" * 100)
@@ -640,7 +640,7 @@ class TestSentinelMediaTracking:
         assert len(state.get("generated_artifacts", [])) == 1
 
     def test_media_task_dedup(self):
-        from cc_cortex.sentinel import _track_media_artifacts
+        from concinno.sentinel import _track_media_artifacts
 
         state: dict = {}
         tool_input = {"command": "python gen.py fal-ai/flux"}

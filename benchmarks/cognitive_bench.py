@@ -291,10 +291,10 @@ ROUTING_SCENARIOS = [
 def run_riverbed_suite(project_dir: str) -> list[dict]:
     """Execute Riverbed Memory benchmark."""
     import shutil
-    from cc_cortex.riverbed import RiverbedMemory, Stake
+    from concinno.riverbed import RiverbedMemory, Stake
 
     results = []
-    cache = os.path.join(project_dir, ".cc_cortex_cache", "bench_rb")
+    cache = os.path.join(project_dir, ".concinno_cache", "bench_rb")
     if os.path.isdir(cache):
         shutil.rmtree(cache)
     os.makedirs(cache, exist_ok=True)
@@ -377,7 +377,7 @@ def run_riverbed_suite(project_dir: str) -> list[dict]:
 
 def run_routing_suite(project_dir: str) -> list[dict]:
     """Execute AUTO Routing benchmark."""
-    from cc_cortex.star import AdaptiveRouter, RetrievalTier
+    from concinno.star import AdaptiveRouter, RetrievalTier
 
     router = AdaptiveRouter()
     results = []
@@ -428,7 +428,7 @@ def run_routing_suite(project_dir: str) -> list[dict]:
     })
 
     # A3: Confidence cap (unit test)
-    from cc_cortex.star import ConfidenceGate, SourceResult, RetrievalTier as RT
+    from concinno.star import ConfidenceGate, SourceResult, RetrievalTier as RT
     gate = ConfidenceGate()
     fake_result = SourceResult(
         text="test", file="test.md", heading="test",

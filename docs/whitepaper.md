@@ -264,7 +264,7 @@ Not knowledge-QA RAG — **Cognitive Prosthesis**. Indexes the AI's own correcti
 - **Model**: `paraphrase-multilingual-MiniLM-L12-v2` (Chinese 0.915 score)
 - **Anti-bloat**: top_k=3, min_score=0.5, 200 char cap ≈ 200 tokens/injection
 - **Knowledge pruning**: `hit_log.json` → `stale_report(90d)` → `prune()`
-- **Optional dependency**: `pip install cc-cortex[rag]` (chromadb + sentence-transformers)
+- **Optional dependency**: `pip install concinno[rag]` (chromadb + sentence-transformers)
 
 ### 3.8 Cognitive Offense Layer
 
@@ -356,7 +356,7 @@ The ConfigChange hook monitors settings modifications in real-time:
 
 ### 3.13 Semantic Intent Analysis (New in v3.1)
 
-Breaks through the regex pattern-matching ceiling. While guards like DestructionGuard use regex for known dangerous patterns, `cc-cortex-analyze-intent` provides **heuristic NLP analysis** for ambiguous commands:
+Breaks through the regex pattern-matching ceiling. While guards like DestructionGuard use regex for known dangerous patterns, `concinno-analyze-intent` provides **heuristic NLP analysis** for ambiguous commands:
 
 - **Destructive verb detection** — `rm`, `delete`, `drop`, `kill`, `destroy`, `wipe`, `purge`
 - **Scope amplifier analysis** — `-rf`, `--force`, `--hard`, `--all`, `*`, `--recursive`
@@ -373,17 +373,17 @@ Breaks through the passive-interception ceiling. Traditional hooks only fire whe
 
 | MCP Tool | Purpose |
 | --- | --- |
-| `cc-cortex-recommendations` | Session health analysis + actionable suggestions |
-| `cc-cortex-failure-patterns` | Recurring failure analysis with prescriptions |
-| `cc-cortex-guard-report` | Guard pipeline statistics and tuning insights |
-| `cc-cortex-analyze-intent` | Semantic command risk assessment (§3.13) |
-| `cc-cortex-sync-state` | Cross-machine state export/import (§3.15) |
+| `concinno-recommendations` | Session health analysis + actionable suggestions |
+| `concinno-failure-patterns` | Recurring failure analysis with prescriptions |
+| `concinno-guard-report` | Guard pipeline statistics and tuning insights |
+| `concinno-analyze-intent` | Semantic command risk assessment (§3.13) |
+| `concinno-sync-state` | Cross-machine state export/import (§3.15) |
 
 Total MCP surface: 4 resources + 9 tools. The agent no longer waits for hooks to fire — it can consult CCC at any decision point.
 
 ### 3.15 Cross-Machine State Sync (New in v3.1)
 
-Foundation for breaking through the single-machine ceiling. The `cc-cortex-sync-state` MCP tool provides:
+Foundation for breaking through the single-machine ceiling. The `concinno-sync-state` MCP tool provides:
 
 - **Export**: Portable JSON bundle containing session state, token usage, quality metrics, knowledge stats, guard config, and failure pattern summary
 - **Import** (dry-run): Preview what a remote state merge would affect
@@ -736,5 +736,5 @@ As Layer 0 in a multi-layer architecture, CC Cortex covers 19/28 known LLM-agent
 ---
 
 *CC Cortex is open source under the Apache-2.0 License.*
-*Source: [github.com/anthropics-community/cc-cortex](https://github.com/anthropics-community/cc-cortex)*
+*Source: [github.com/anthropics-community/concinno](https://github.com/anthropics-community/concinno)*
 *Documentation: [quickstart guide](quickstart.md) | [migration guide](migration-v05-v06.md)*

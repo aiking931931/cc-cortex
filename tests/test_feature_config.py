@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.feature_config module."""
+"""Tests for concinno.feature_config module."""
 
 from __future__ import annotations
 
-from cc_cortex.feature_config import (
+from concinno.feature_config import (
     FEATURE_META,
     get_feature,
     list_features,

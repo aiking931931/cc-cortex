@@ -18,8 +18,8 @@ Built around CBUA (Cognitive Behavior Unified Architecture) with complexity rout
 ## Quick Install
 
 ```bash
-pip install cc-cortex
-cc-cortex init
+pip install concinno
+concinno init
 ```
 
 See [Quickstart](quickstart.md) for full setup.

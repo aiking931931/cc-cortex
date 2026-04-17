@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cc_cortex.guards.base import (
+from concinno.guards.base import (
     BaseGuard,
     GuardAction,
     GuardCategory,

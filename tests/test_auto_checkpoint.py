@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.handoff_engine.auto_checkpoint.
+"""Tests for concinno.handoff_engine.auto_checkpoint.
 
 Covers the write-action upgrade of HandoffGuard:
   - No-op when cache/handoff dirs are missing
@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex import handoff_engine
-from cc_cortex.handoff_engine import (
+from concinno import handoff_engine
+from concinno.handoff_engine import (
     _find_best_handoff,
     _is_archive_path,
     auto_checkpoint,
@@ -364,15 +364,15 @@ class TestFindBestHandoff:
         component score that handoff +1 per match. With markers tied,
         the project_tag tiebreaker selects the right project.
         """
-        (tmp_path / "cc-cortex").mkdir()
+        (tmp_path / "concinno").mkdir()
         (tmp_path / "aegis").mkdir()
         cortex_handoff = _mk_handoff(
-            tmp_path / "cc-cortex", "交接_CC-Cortex.md", "⬜ pending",
+            tmp_path / "concinno", "交接_CC-Cortex.md", "⬜ pending",
         )
         _mk_handoff(tmp_path / "aegis", "交接_Aegis.md", "⬜ pending")
         modified = [
-            "/abs/path/projects/cc-cortex/src/cc_cortex/foo.py",
-            "/abs/path/projects/cc-cortex/tests/test_bar.py",
+            "/abs/path/projects/concinno/src/concinno/foo.py",
+            "/abs/path/projects/concinno/tests/test_bar.py",
         ]
         result = _find_best_handoff(str(tmp_path), modified)
         assert result == cortex_handoff
@@ -426,9 +426,9 @@ class TestIntegration:
         auto_checkpoint(
             "sess",
             100_000,
-            modified_files=["src/cc_cortex/foo.py"],
+            modified_files=["src/concinno/foo.py"],
             handoff_dir=str(tmp_path),
         )
         content = Path(target).read_text(encoding="utf-8")
         assert "foo.py" in content
-        assert os.sep + "cc_cortex" + os.sep not in content
+        assert os.sep + "concinno" + os.sep not in content

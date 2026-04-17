@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.stop_guard — premature stop detection."""
+"""Tests for concinno.stop_guard — premature stop detection."""
 
 from __future__ import annotations
 
-from cc_cortex.stop_guard import (
+from concinno.stop_guard import (
     _already_blocked_this_session,
     _extract_last_assistant_text,
     _has_pending_tool_use,
@@ -142,21 +142,21 @@ class TestClassifyStop:
 class TestCircuitBreaker:
     def test_record_and_check(self, tmp_path, monkeypatch):
         state_file = str(tmp_path / "block.json")
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_STATE_PATH", state_file)
         assert not _already_blocked_this_session("s1")
         _record_block("s1")
         assert _already_blocked_this_session("s1")
 
     def test_different_session_not_blocked(self, tmp_path, monkeypatch):
         state_file = str(tmp_path / "block.json")
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_STATE_PATH", state_file)
         _record_block("s1")
         assert not _already_blocked_this_session("s2")
 
     def test_expired_not_blocked(self, tmp_path, monkeypatch):
         state_file = str(tmp_path / "block.json")
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file)
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_COOLDOWN_S", 0.01)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_STATE_PATH", state_file)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_COOLDOWN_S", 0.01)
         _record_block("s1")
         import time
         time.sleep(0.02)
@@ -167,7 +167,7 @@ class TestCircuitBreaker:
 
     def test_empty_session_id_not_blocked(self, tmp_path, monkeypatch):
         state_file = str(tmp_path / "block.json")
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_STATE_PATH", state_file)
         _record_block("s1")
         assert not _already_blocked_this_session("")
 
@@ -181,7 +181,7 @@ class TestOnStop:
 
     def test_continuation_returns_block(self, tmp_path, monkeypatch):
         state_file = str(tmp_path / "block.json")
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_STATE_PATH", state_file)
         data = {
             "session_id": "test-cont",
             "messages": [
@@ -194,7 +194,7 @@ class TestOnStop:
 
     def test_continuation_second_time_downgrades_to_warn(self, tmp_path, monkeypatch):
         state_file = str(tmp_path / "block.json")
-        monkeypatch.setattr("cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file)
+        monkeypatch.setattr("concinno.stop_guard._BLOCK_STATE_PATH", state_file)
         data = {
             "session_id": "test-2nd",
             "messages": [
@@ -220,7 +220,7 @@ class TestOnStop:
         """Short declarative output + recent tool calls = premature."""
         state_file = str(tmp_path / "block.json")
         monkeypatch.setattr(
-            "cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file,
+            "concinno.stop_guard._BLOCK_STATE_PATH", state_file,
         )
         data = {
             "session_id": "test-decl",

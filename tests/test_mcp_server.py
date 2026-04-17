@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.mcp_server — MCP protocol, resources, tools, error handling."""
+"""Tests for concinno.mcp_server — MCP protocol, resources, tools, error handling."""
 
 import json
 import os
@@ -7,7 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from cc_cortex.mcp_server import (
+from concinno.mcp_server import (
     INVALID_PARAMS,
     INVALID_REQUEST,
     METHOD_NOT_FOUND,
@@ -75,7 +75,7 @@ class TestInitialize:
         assert resp["id"] == 1
         result = resp["result"]
         assert "protocolVersion" in result
-        assert result["serverInfo"]["name"] == "cc-cortex"
+        assert result["serverInfo"]["name"] == "concinno"
         assert "resources" in result["capabilities"]
         assert "tools" in result["capabilities"]
 
@@ -106,10 +106,10 @@ class TestResourcesList:
         req = {"jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": {}}
         resp = handle_request(req)
         uris = [r["uri"] for r in resp["result"]["resources"]]
-        assert "cc-cortex://session/status" in uris
-        assert "cc-cortex://metrics/quality" in uris
-        assert "cc-cortex://metrics/tokens" in uris
-        assert "cc-cortex://knowledge/stats" in uris
+        assert "concinno://session/status" in uris
+        assert "concinno://metrics/quality" in uris
+        assert "concinno://metrics/tokens" in uris
+        assert "concinno://knowledge/stats" in uris
 
 
 # ── Protocol: resources/read ──────────────────────────────
@@ -120,14 +120,14 @@ class TestResourcesRead:
         req = {
             "jsonrpc": "2.0", "id": 4,
             "method": "resources/read",
-            "params": {"uri": "cc-cortex://session/status"},
+            "params": {"uri": "concinno://session/status"},
         }
         resp = handle_request(req)
         assert resp is not None
         assert "error" not in resp
         contents = resp["result"]["contents"]
         assert len(contents) == 1
-        assert contents[0]["uri"] == "cc-cortex://session/status"
+        assert contents[0]["uri"] == "concinno://session/status"
         assert contents[0]["mimeType"] == "application/json"
         data = json.loads(contents[0]["text"])
         assert "session_id" in data
@@ -137,7 +137,7 @@ class TestResourcesRead:
         req = {
             "jsonrpc": "2.0", "id": 5,
             "method": "resources/read",
-            "params": {"uri": "cc-cortex://metrics/quality"},
+            "params": {"uri": "concinno://metrics/quality"},
         }
         resp = handle_request(req)
         assert resp is not None
@@ -150,7 +150,7 @@ class TestResourcesRead:
         req = {
             "jsonrpc": "2.0", "id": 6,
             "method": "resources/read",
-            "params": {"uri": "cc-cortex://metrics/tokens"},
+            "params": {"uri": "concinno://metrics/tokens"},
         }
         resp = handle_request(req)
         assert resp is not None
@@ -166,7 +166,7 @@ class TestResourcesRead:
         req = {
             "jsonrpc": "2.0", "id": 7,
             "method": "resources/read",
-            "params": {"uri": "cc-cortex://knowledge/stats"},
+            "params": {"uri": "concinno://knowledge/stats"},
         }
         resp = handle_request(req)
         assert resp is not None
@@ -179,7 +179,7 @@ class TestResourcesRead:
         req = {
             "jsonrpc": "2.0", "id": 8,
             "method": "resources/read",
-            "params": {"uri": "cc-cortex://nonexistent"},
+            "params": {"uri": "concinno://nonexistent"},
         }
         resp = handle_request(req)
         assert resp is not None
@@ -208,8 +208,8 @@ class TestToolsList:
         req = {"jsonrpc": "2.0", "id": 10, "method": "tools/list", "params": {}}
         resp = handle_request(req)
         names = [t["name"] for t in resp["result"]["tools"]]
-        assert "cc-cortex-status" in names
-        assert "cc-cortex-doctor" in names
+        assert "concinno-status" in names
+        assert "concinno-doctor" in names
 
 
 # ── Protocol: tools/call ──────────────────────────────────
@@ -220,7 +220,7 @@ class TestToolsCall:
         req = {
             "jsonrpc": "2.0", "id": 11,
             "method": "tools/call",
-            "params": {"name": "cc-cortex-status"},
+            "params": {"name": "concinno-status"},
         }
         resp = handle_request(req)
         assert resp is not None
@@ -228,13 +228,13 @@ class TestToolsCall:
         content = resp["result"]["content"]
         assert len(content) >= 1
         assert content[0]["type"] == "text"
-        assert "cc-cortex" in content[0]["text"].lower()
+        assert "concinno" in content[0]["text"].lower()
 
     def test_call_doctor(self):
         req = {
             "jsonrpc": "2.0", "id": 12,
             "method": "tools/call",
-            "params": {"name": "cc-cortex-doctor"},
+            "params": {"name": "concinno-doctor"},
         }
         resp = handle_request(req)
         assert resp is not None
@@ -295,7 +295,7 @@ class TestResourceProviders:
     def test_session_status_empty(self):
         """Session status returns valid structure even with no data."""
         with mock.patch(
-            "cc_cortex.mcp_server._read_json_file", return_value={},
+            "concinno.mcp_server._read_json_file", return_value={},
         ):
             result = read_session_status()
         assert result["session_id"] is None
@@ -317,7 +317,7 @@ class TestResourceProviders:
             },
         }
         with mock.patch(
-            "cc_cortex.mcp_server._read_json_file", return_value=lock_data,
+            "concinno.mcp_server._read_json_file", return_value=lock_data,
         ):
             result = read_session_status()
         assert result["session_id"] == "SESSION_1400_abc123def456"
@@ -326,7 +326,7 @@ class TestResourceProviders:
 
     def test_quality_metrics_empty(self):
         with mock.patch(
-            "cc_cortex.mcp_server._read_json_file", return_value={},
+            "concinno.mcp_server._read_json_file", return_value={},
         ):
             result = read_quality_metrics()
         assert result["overall_grade"] == "N/A"
@@ -342,7 +342,7 @@ class TestResourceProviders:
             ],
         }
         with mock.patch(
-            "cc_cortex.mcp_server._read_json_file", return_value=journal,
+            "concinno.mcp_server._read_json_file", return_value=journal,
         ):
             result = read_quality_metrics()
         assert result["scored_decisions"] == 3
@@ -350,12 +350,12 @@ class TestResourceProviders:
         assert result["overall_grade"] in ("A", "A+", "B+", "B", "C", "D", "F")
 
     def test_token_usage_defaults(self):
-        from cc_cortex.core.config import Config, reset_config
+        from concinno.core.config import Config, reset_config
 
         reset_config()
         mock_cfg = Config()  # no hooks_dir → defaults only
         with mock.patch(
-            "cc_cortex.mcp_server._cfg", return_value=mock_cfg,
+            "concinno.mcp_server._cfg", return_value=mock_cfg,
         ), mock.patch("os.path.isdir", return_value=False):
             result = read_token_usage()
         assert result["current_usage"] == 0
@@ -364,14 +364,14 @@ class TestResourceProviders:
         reset_config()
 
     def test_knowledge_stats_empty(self):
-        from cc_cortex.core.config import Config, reset_config
+        from concinno.core.config import Config, reset_config
 
         reset_config()
         mock_cfg = Config()
         with mock.patch(
-            "cc_cortex.mcp_server._cfg", return_value=mock_cfg,
+            "concinno.mcp_server._cfg", return_value=mock_cfg,
         ), mock.patch(
-            "cc_cortex.mcp_server._read_json_file", return_value={},
+            "concinno.mcp_server._read_json_file", return_value={},
         ):
             result = read_knowledge_stats()
         assert result["total_entries"] == 0
@@ -379,7 +379,7 @@ class TestResourceProviders:
         reset_config()
 
     def test_knowledge_stats_with_learnings(self):
-        from cc_cortex.core.config import Config, reset_config
+        from concinno.core.config import Config, reset_config
 
         reset_config()
         data = {
@@ -403,9 +403,9 @@ class TestResourceProviders:
         }
         mock_cfg = Config()
         with mock.patch(
-            "cc_cortex.mcp_server._cfg", return_value=mock_cfg,
+            "concinno.mcp_server._cfg", return_value=mock_cfg,
         ), mock.patch(
-            "cc_cortex.mcp_server._read_json_file", return_value=data,
+            "concinno.mcp_server._read_json_file", return_value=data,
         ):
             result = read_knowledge_stats()
         assert result["total_entries"] == 2
@@ -465,10 +465,10 @@ class TestHandleAnalyzeIntent:
 class TestHandleRecommendations:
     def test_healthy_session(self):
         with mock.patch(
-            "cc_cortex.mcp_server.read_token_usage",
+            "concinno.mcp_server.read_token_usage",
             return_value={"tier": "info", "percentage": 20},
         ), mock.patch(
-            "cc_cortex.mcp_server.read_knowledge_stats",
+            "concinno.mcp_server.read_knowledge_stats",
             return_value={"staleness_ratio": 0.1},
         ), mock.patch(
             "os.environ.get", return_value="",
@@ -478,10 +478,10 @@ class TestHandleRecommendations:
 
     def test_critical_tokens(self):
         with mock.patch(
-            "cc_cortex.mcp_server.read_token_usage",
+            "concinno.mcp_server.read_token_usage",
             return_value={"tier": "critical", "percentage": 85},
         ), mock.patch(
-            "cc_cortex.mcp_server.read_knowledge_stats",
+            "concinno.mcp_server.read_knowledge_stats",
             return_value={"staleness_ratio": 0.0},
         ), mock.patch(
             "os.environ.get", return_value="",
@@ -498,7 +498,7 @@ class TestHandleFailurePatterns:
         assert "No failure" in result
 
     def test_with_history(self, tmp_path):
-        fail_file = tmp_path / ".cc_cortex_cache" / "tool_failures.jsonl"
+        fail_file = tmp_path / ".concinno_cache" / "tool_failures.jsonl"
         fail_file.parent.mkdir(parents=True)
         entries = [
             '{"tool":"Bash","category":"timeout","error_preview":"timed out","ts":"2026-03-22"}',
@@ -520,7 +520,7 @@ class TestHandleGuardReport:
         assert "No guard deny" in result
 
     def test_with_data(self, tmp_path):
-        audit_dir = tmp_path / ".cc_cortex_cache" / "audit"
+        audit_dir = tmp_path / ".concinno_cache" / "audit"
         audit_dir.mkdir(parents=True)
         audit_file = audit_dir / "guard_denies.jsonl"
         entries = [
@@ -541,16 +541,16 @@ class TestHandleGuardReport:
 class TestHandleSyncState:
     def test_export(self):
         with mock.patch(
-            "cc_cortex.mcp_server.read_session_status",
+            "concinno.mcp_server.read_session_status",
             return_value={"session_id": "test"},
         ), mock.patch(
-            "cc_cortex.mcp_server.read_token_usage",
+            "concinno.mcp_server.read_token_usage",
             return_value={"current_usage": 5000},
         ), mock.patch(
-            "cc_cortex.mcp_server.read_knowledge_stats",
+            "concinno.mcp_server.read_knowledge_stats",
             return_value={"total_entries": 10},
         ), mock.patch(
-            "cc_cortex.mcp_server.read_quality_metrics",
+            "concinno.mcp_server.read_quality_metrics",
             return_value={"overall_grade": "A"},
         ), mock.patch(
             "os.environ.get", return_value="",
@@ -573,9 +573,9 @@ class TestHandleSyncState:
         assert "Failure patterns" in result
         assert "Guard config" in result
         # Verify files were created
-        fail_file = tmp_path / ".cc_cortex_cache" / "tool_failures.jsonl"
+        fail_file = tmp_path / ".concinno_cache" / "tool_failures.jsonl"
         assert fail_file.exists()
-        cfg_file = tmp_path / ".cc_cortex_cache" / "cc_config.json"
+        cfg_file = tmp_path / ".concinno_cache" / "cc_config.json"
         assert cfg_file.exists()
 
     def test_import_no_remote(self):
@@ -737,7 +737,7 @@ class TestTransport:
 class TestElicitFunction:
     def test_no_transport_raises(self):
         """elicit() without active transport raises ElicitationError."""
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         old = mod._active_transport
         mod._active_transport = None
         try:
@@ -750,7 +750,7 @@ class TestElicitFunction:
     def test_elicit_with_schema(self):
         import io
 
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         resp = json.dumps({
             "jsonrpc": "2.0", "id": "srv-1",
             "result": {"action": "accept", "content": {"name": "Alice"}},
@@ -770,7 +770,7 @@ class TestElicitFunction:
     def test_elicit_without_schema(self):
         import io
 
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         resp = json.dumps({
             "jsonrpc": "2.0", "id": "srv-1",
             "result": {"action": "dismiss"},
@@ -792,7 +792,7 @@ class TestElicitConfirm:
     def _setup_transport(self, response_result):
         import io
 
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         resp = json.dumps({
             "jsonrpc": "2.0", "id": "srv-1", "result": response_result,
         })
@@ -802,7 +802,7 @@ class TestElicitConfirm:
         return old
 
     def _teardown(self, old):
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         mod._active_transport = old
 
     def test_confirm_accept_true(self):
@@ -839,7 +839,7 @@ class TestElicitConfirm:
 
     def test_confirm_error_returns_false(self):
         """ElicitationError is caught and returns False."""
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         old = mod._active_transport
         mod._active_transport = None
         try:
@@ -854,7 +854,7 @@ class TestHandleConfirmAction:
         assert "error" in result
 
     def test_no_transport_returns_fallback(self):
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         old = mod._active_transport
         mod._active_transport = None
         try:
@@ -869,7 +869,7 @@ class TestHandleConfirmAction:
     def test_successful_confirm(self):
         import io
 
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         resp = json.dumps({
             "jsonrpc": "2.0", "id": "srv-1",
             "result": {"action": "accept", "content": {"confirmed": True}},
@@ -887,7 +887,7 @@ class TestHandleConfirmAction:
 
     def test_risk_levels(self):
         """All risk levels produce valid output (even without transport)."""
-        import cc_cortex.mcp_server as mod
+        import concinno.mcp_server as mod
         old = mod._active_transport
         mod._active_transport = None
         try:

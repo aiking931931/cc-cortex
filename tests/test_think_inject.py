@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.think_inject — ThinkInjectGuard."""
+"""Tests for concinno.think_inject — ThinkInjectGuard."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.think_inject import (
+from concinno.guards.base import GuardContext
+from concinno.think_inject import (
     ThinkInjectGuard,
     _count_deleted_lines,
     _is_architecture_file,
@@ -82,13 +82,13 @@ class TestIsNewModule:
 class TestIsArchitectureFile:
     def test_guards_dir(self):
         assert _is_architecture_file(
-            "src/cc_cortex/guards/base.py",
+            "src/concinno/guards/base.py",
             ["guards/", "core/"],
         ) is True
 
     def test_core_dir(self):
         assert _is_architecture_file(
-            "src/cc_cortex/core/state_store.py",
+            "src/concinno/core/state_store.py",
             ["guards/", "core/"],
         ) is True
 
@@ -100,7 +100,7 @@ class TestIsArchitectureFile:
 
     def test_regular_file(self):
         assert _is_architecture_file(
-            "src/cc_cortex/delivery.py",
+            "src/concinno/delivery.py",
             ["guards/", "core/"],
         ) is False
 
@@ -109,7 +109,7 @@ class TestIsArchitectureFile:
 
     def test_windows_path(self):
         assert _is_architecture_file(
-            "src\\cc_cortex\\guards\\pipeline.py",
+            "src\\concinno\\guards\\pipeline.py",
             ["guards/"],
         ) is True
 
@@ -203,7 +203,7 @@ class TestThinkInjectGuard:
             "architecture_patterns": ["guards/", "core/"],
         })
         ctx = _ctx("Edit", {
-            "file_path": "src/cc_cortex/guards/base.py",
+            "file_path": "src/concinno/guards/base.py",
             "old_string": "a",
             "new_string": "b",
         }, tmp_cache)

@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.core.config — Config singleton, update_file, config_file_path."""
+"""Tests for concinno.core.config — Config singleton, update_file, config_file_path."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cc_cortex.core.config import Config, reset_config
+from concinno.core.config import Config, reset_config
 
 
 @pytest.fixture(autouse=True)

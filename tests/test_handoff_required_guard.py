@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.handoff_required_guard."""
+"""Tests for concinno.handoff_required_guard."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from cc_cortex import handoff_required_guard as hrg
+from concinno import handoff_required_guard as hrg
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def isolated_state(tmp_path, monkeypatch):
 
 @pytest.fixture
 def stub_config(monkeypatch):
-    """Stub cc_cortex.core.config.get_config() with adjustable feature()."""
+    """Stub concinno.core.config.get_config() with adjustable feature()."""
     class _Cfg:
         def __init__(
             self, enabled=True, min_files=3,
@@ -55,7 +55,7 @@ def stub_config(monkeypatch):
         return cfg_holder["cfg"]
 
     # Patch the import-site lookup used inside on_stop()
-    import cc_cortex.core.config as core_config
+    import concinno.core.config as core_config
     monkeypatch.setattr(core_config, "get_config", _get_config)
     return cfg_holder
 
@@ -93,7 +93,7 @@ def test_handoff_present_returns_none(isolated_state, stub_config, monkeypatch):
     _patch_git(monkeypatch, files)
     # Second-layer gate (1.18.1): also stub structural content so the
     # diff has enough lines + signals to satisfy _has_structural_update.
-    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
+    monkeypatch.setenv("CONCINNO_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-ok"}) is None
 
 
@@ -140,7 +140,7 @@ def test_handoff_prefix_detection_chinese(isolated_state, stub_config, monkeypat
     _patch_git(monkeypatch, files)
     # 1.18.1: minimal-update escape keeps the prefix-detection test
     # focused on layer-1 logic without fighting the structural gate.
-    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
+    monkeypatch.setenv("CONCINNO_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-zh"}) is None
 
 
@@ -152,7 +152,7 @@ def test_handoff_prefix_detection_english(isolated_state, stub_config, monkeypat
     # Stub i18n patterns to include the English prefix even if not loaded
     monkeypatch.setattr(hrg, "_handoff_prefixes", lambda: ("交接_", "handoff_"))
     _patch_git(monkeypatch, files)
-    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
+    monkeypatch.setenv("CONCINNO_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-en"}) is None
 
 
@@ -293,7 +293,7 @@ def test_competition_mode_bypasses_handoff_require(
     files = ["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"]
     _patch_git(monkeypatch, files)
 
-    from cc_cortex import handoff_engine
+    from concinno import handoff_engine
     monkeypatch.setattr(
         handoff_engine, "get_handoff_mode", lambda: "competition",
     )
@@ -312,7 +312,7 @@ def test_competition_mode_does_not_record_block_state(
     files = ["a.py", "b.py", "c.py", "d.py", "e.py"]
     _patch_git(monkeypatch, files)
 
-    from cc_cortex import handoff_engine
+    from concinno import handoff_engine
     monkeypatch.setattr(
         handoff_engine, "get_handoff_mode", lambda: "competition",
     )
@@ -333,7 +333,7 @@ def test_full_mode_still_blocks_when_no_handoff(
     files = ["a.py", "b.py", "c.py", "d.py", "e.py"]
     _patch_git(monkeypatch, files)
 
-    from cc_cortex import handoff_engine
+    from concinno import handoff_engine
     monkeypatch.setattr(
         handoff_engine, "get_handoff_mode", lambda: "full",
     )
@@ -440,7 +440,7 @@ def test_structural_gate_blocks_no_signals(
 def test_structural_gate_bypassed_by_minimal_env(
     isolated_state, stub_config, monkeypatch,
 ):
-    """CC_CORTEX_HANDOFF_MINIMAL=1 + frontmatter-only → pass."""
+    """CONCINNO_HANDOFF_MINIMAL=1 + frontmatter-only → pass."""
     handoff = "06_Handoffs/king/交接_King.md"
     files = _with_handoff(
         ["src/a.py", "src/b.py", "src/c.py", "src/d.py"], handoff,
@@ -449,7 +449,7 @@ def test_structural_gate_bypassed_by_minimal_env(
     _patch_added_lines(
         monkeypatch, {handoff: ["+last_updated: 2026-04-16"]},
     )
-    monkeypatch.setenv("CC_CORTEX_HANDOFF_MINIMAL", "1")
+    monkeypatch.setenv("CONCINNO_HANDOFF_MINIMAL", "1")
     assert hrg.on_stop({"session_id": "s-minimal-env"}) is None
 
 
@@ -507,7 +507,7 @@ def test_structural_gate_counts_multiple_handoff_files(
 ):
     """Lines and signals accumulate across multiple handoff files."""
     h1 = "06_Handoffs/king/交接_King.md"
-    h2 = "06_Handoffs/cc-cortex/交接_CCC.md"
+    h2 = "06_Handoffs/concinno/交接_CCC.md"
     files = list(
         ["src/a.py", "src/b.py", "src/c.py", "src/d.py", h1, h2]
     )
@@ -529,7 +529,7 @@ def test_has_structural_update_helper_returns_reasons():
     def _fake(project_dir, path):
         return calls.get(path, [])
 
-    import cc_cortex.handoff_required_guard as mod
+    import concinno.handoff_required_guard as mod
     saved = mod._git_added_lines
     try:
         mod._git_added_lines = _fake  # type: ignore[assignment]

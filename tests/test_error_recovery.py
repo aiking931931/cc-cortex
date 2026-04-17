@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.error_recovery."""
+"""Tests for concinno.error_recovery."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from cc_cortex.error_recovery import ErrorRecovery
+from concinno.error_recovery import ErrorRecovery
 
 
 @pytest.fixture

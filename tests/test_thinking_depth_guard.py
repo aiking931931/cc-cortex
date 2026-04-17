@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.thinking_depth_guard — Read:Edit ratio monitor."""
+"""Tests for concinno.thinking_depth_guard — Read:Edit ratio monitor."""
 
 from __future__ import annotations
 
 import tempfile
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.thinking_depth_guard import (
+from concinno.core.state_store import StateStore
+from concinno.thinking_depth_guard import (
     MIN_EDITS,
     READ_EDIT_WARN,
     ThinkingDepthGuard,
@@ -100,7 +100,7 @@ class TestCheckReadEditRatio:
 class TestThinkingDepthGuard:
     def _make_ctx(self, tool_name, cache_dir, session_id="test"):
         """Create a minimal GuardContext-like object."""
-        from cc_cortex.guards.base import GuardContext
+        from concinno.guards.base import GuardContext
 
         return GuardContext(
             tool_name=tool_name,

@@ -1,5 +1,18 @@
 name: Publish to PyPI
 
+# Red-team v3 patches (2.3.0):
+#   - Actions pinned to specific tagged releases (Dependabot will
+#     convert to 40-char SHAs once this workflow lives on main;
+#     tag-pin is the interim contract).
+#   - `attestations: true` + `id-token: write` give consumers
+#     verifiable Sigstore-backed build provenance on PyPI.
+#   - PYTHONUTF8=1 on the build step prevents the METADATA
+#     Summary field from round-tripping through a non-UTF8
+#     Windows locale and producing U+FFFD replacement chars.
+#   - test job now runs the full guard + wiredo + token_counter
+#     suites (not just test_version_sync), so any regression in
+#     a red-team-fix area blocks publish at CI time.
+
 on:
   release:
     types: [published]
@@ -7,15 +20,18 @@ on:
 permissions:
   id-token: write
   contents: read
+  attestations: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
 
@@ -25,8 +41,13 @@ jobs:
       - name: Build package
         run: python -m build
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2.2.0
+        with:
+          subject-path: "dist/*"
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: dist
           path: dist/
@@ -35,15 +56,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
 
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: dist
           path: dist/
@@ -51,8 +72,33 @@ jobs:
       - name: Install from wheel
         run: pip install dist/*.whl
 
-      - name: Smoke test
-        run: python -c "import cc_cortex; print(cc_cortex.__version__)"
+      - name: Smoke test + version matches release tag
+        # Red-team F3 fix: assert wheel __version__ equals the
+        # stripped GITHUB_REF_NAME. Uses ``removeprefix('v')`` so
+        # only a single leading 'v' is trimmed (Red 2 H-R2-2:
+        # ``lstrip('v')`` would eat every leading 'v' and silently
+        # pass ``vv2.2.0`` or corrupt ``version-2.2.0``).
+        run: |
+          python -c "import os, concinno; \
+            ref = os.environ.get('GITHUB_REF_NAME', '').removeprefix('v'); \
+            assert concinno.__version__ == ref, \
+              f'wheel version {concinno.__version__!r} != release tag {ref!r}'; \
+            print(f'OK: concinno {concinno.__version__} matches tag v{ref}')"
+
+      - name: Install pytest + run red-team-fix guard suites
+        # Defense-in-depth: catch any regression in the specific
+        # areas recent red-team rounds have flagged. If any of
+        # these fail, the `publish` job (which `needs: test`)
+        # will not execute.
+        run: |
+          pip install pytest pytest-cov
+          pytest tests/test_version_sync.py \
+                 tests/test_version_sync_guard.py \
+                 tests/test_token_counter.py \
+                 tests/test_wiredo_change_type.py \
+                 tests/test_wiredo_loader.py \
+                 tests/test_autocompact.py \
+                 -q --tb=short
 
   publish:
     runs-on: ubuntu-latest
@@ -60,12 +106,15 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+      attestations: write
     steps:
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: dist
           path: dist/
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish to PyPI (with PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@v1.12.4
+        with:
+          attestations: true

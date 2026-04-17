@@ -1,4 +1,4 @@
-"""Tests for section-edit extension of cc_cortex.cache.microcompact.
+"""Tests for section-edit extension of concinno.cache.microcompact.
 
 Covers the v1.16 additive surface on top of ``microcompact.py``:
 
@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence, get_args
 
-from cc_cortex.cache.microcompact import (
+from concinno.cache.microcompact import (
     CacheEdit,
     CacheEditAction,
     Microcompactor,
@@ -251,7 +251,7 @@ def test_flush_sections_legacy_sink_warns_and_returns_zero(
 
     import logging as _logging
 
-    with caplog.at_level(_logging.WARNING, logger="cc_cortex.cache.microcompact"):
+    with caplog.at_level(_logging.WARNING, logger="concinno.cache.microcompact"):
         applied = mc.flush_sections()
 
     assert applied == 0
@@ -395,7 +395,7 @@ def test_load_legacy_state_without_section_edits_key(tmp_path) -> None:
     """A state file written by pre-1.16 must load cleanly."""
     # Manually write a v1.15-shaped payload directly to the state store
     # path so we exercise the defaulting branch in load().
-    from cc_cortex.core.state_store import StateStore
+    from concinno.core.state_store import StateStore
 
     store = StateStore(str(tmp_path))
     legacy_payload = {

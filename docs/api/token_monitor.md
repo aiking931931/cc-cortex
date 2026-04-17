@@ -1,6 +1,6 @@
 # Token Monitor
 
-`cc_cortex.token_monitor` — Read real token usage from transcript and enforce
+`concinno.token_monitor` — Read real token usage from transcript and enforce
 model-aware budget gates.
 
 Reads `usage` fields from the Claude transcript file directly (no estimation).
@@ -9,7 +9,7 @@ from `MODEL_PROFILES` in [`token_zone`](token_zone.md).
 
 ## API
 
-::: cc_cortex.token_monitor
+::: concinno.token_monitor
     options:
       show_root_heading: false
       members:

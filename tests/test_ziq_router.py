@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.ziq_router.ZIQFeatureRouter.
+"""Tests for concinno.ziq_router.ZIQFeatureRouter.
 
 These tests mock ZIQRetrieval and Config so they never touch real FTRL
 state, ChromaDB, or cc_config.json on disk.
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cc_cortex.ziq_router import (
+from concinno.ziq_router import (
     ALPHA_COMPLEX_MAX,
     ALPHA_COMPLICATED_MAX,
     ALPHA_SIMPLE_MAX,
@@ -80,7 +80,7 @@ def patched_meta(monkeypatch):
         },
     }
     monkeypatch.setattr(
-        "cc_cortex.feature_config.FEATURE_META", fake_meta,
+        "concinno.feature_config.FEATURE_META", fake_meta,
     )
     return fake_meta
 

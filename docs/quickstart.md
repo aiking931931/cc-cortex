@@ -11,14 +11,14 @@ Get up and running with CC Cortex in under 5 minutes.
 ## Step 1: Install
 
 ```bash
-pip install cc-cortex
+pip install concinno
 ```
 
 Verify installation:
 
 ```bash
-cc-cortex --version
-# cc-cortex 0.3.0
+concinno --version
+# concinno 0.3.0
 ```
 
 ## Step 2: Initialize
@@ -26,7 +26,7 @@ cc-cortex --version
 Navigate to your project workspace and run:
 
 ```bash
-cc-cortex init
+concinno init
 ```
 
 This will:
@@ -58,22 +58,22 @@ Done! CC Cortex is now active.
 
 ## Step 3: Enable Modules
 
-By default, `cc-cortex init` enables the most commonly used modules. To see all available modules:
+By default, `concinno init` enables the most commonly used modules. To see all available modules:
 
 ```bash
-cc-cortex list
+concinno list
 ```
 
 To enable a specific module:
 
 ```bash
-cc-cortex enable hook_task_pool
+concinno enable hook_task_pool
 ```
 
 To disable a module:
 
 ```bash
-cc-cortex disable hook_rules_bloat
+concinno disable hook_rules_bloat
 ```
 
 You can also configure modules via `cc_config.json`:
@@ -93,7 +93,7 @@ You can also configure modules via `cc_config.json`:
 Run the status dashboard to confirm everything is working:
 
 ```bash
-cc-cortex status
+concinno status
 ```
 
 You should see a table listing all active modules, their trigger counts, and the current hook mode.
@@ -117,7 +117,7 @@ CC Cortex supports five modes that control which modules are active:
 Set mode via CLI:
 
 ```bash
-cc-cortex mode balanced
+concinno mode balanced
 ```
 
 Or edit `cc_config.json`:
@@ -156,9 +156,9 @@ See [examples/cc_config_example.jsonc](../examples/cc_config_example.jsonc) for 
 
 ### Hooks not firing
 
-1. Make sure `.claude/hooks/` contains the CC Cortex entry points (re-run `cc-cortex init` if needed)
+1. Make sure `.claude/hooks/` contains the CC Cortex entry points (re-run `concinno init` if needed)
 2. Check that `cc_config.json` exists in your workspace root
-3. Verify hook mode is not `off`: `cc-cortex status`
+3. Verify hook mode is not `off`: `concinno status`
 
 ### Permission errors
 
@@ -171,6 +171,6 @@ chmod +x .claude/hooks/on-post-tool.py
 
 ### Module not loading
 
-Check `cc-cortex status` for error indicators. Common causes:
+Check `concinno status` for error indicators. Common causes:
 - Python version < 3.10 (f-string features required)
-- Corrupted `cc_config.json` (delete and re-run `cc-cortex init`)
+- Corrupted `cc_config.json` (delete and re-run `concinno init`)

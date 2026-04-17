@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.publish_scan — Pre-publish artifact scanner."""
+"""Tests for concinno.publish_scan — Pre-publish artifact scanner."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import tarfile
 import tempfile
 import zipfile
 
-from cc_cortex.publish_scan import (
+from concinno.publish_scan import (
     _check_content,
     _check_filename,
     check_breaking_changes,

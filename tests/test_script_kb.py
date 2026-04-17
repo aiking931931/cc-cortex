@@ -1,8 +1,8 @@
-"""Tests for cc-cortex Script KB awareness hook."""
+"""Tests for concinno Script KB awareness hook."""
 
 from __future__ import annotations
 
-from cc_cortex.hooks.script_kb import (
+from concinno.hooks.script_kb import (
     _is_scripts_dir,
     _match_sections,
     check_script_kb,

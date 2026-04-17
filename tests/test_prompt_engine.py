@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.prompt_engine — dynamic prompt assembly."""
+"""Tests for concinno.prompt_engine — dynamic prompt assembly."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 
-from cc_cortex.prompt_engine import (
+from concinno.prompt_engine import (
     DRIFT_INTERVAL,
     DriftTracker,
     DynamicSlots,
@@ -382,7 +382,7 @@ class TestFTRLHookDelegation:
     def test_delegates_to_prompt_engine(self):
         # When the default learnings path does not yield hits, the adapter
         # returns None without raising.
-        from cc_cortex.hooks.on_prompt_submit import _ftrl_learning_injection
+        from concinno.hooks.on_prompt_submit import _ftrl_learning_injection
 
         result = _ftrl_learning_injection(
             cache_dir="",

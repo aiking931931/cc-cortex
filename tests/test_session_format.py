@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.session_format — Session ID and task-pool validation."""
+"""Tests for concinno.session_format — Session ID and task-pool validation."""
 
 from __future__ import annotations
 
-from cc_cortex.session_format import (
+from concinno.session_format import (
     SESSION_CHECK_BASENAMES,
     WRITE_TOOLS,
     _build_session_patterns,

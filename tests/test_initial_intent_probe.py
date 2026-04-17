@@ -1,8 +1,8 @@
 """Tests for initial_intent_probe — Probe user's root purpose on first write."""
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.initial_intent_probe import InitialIntentProbe
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.initial_intent_probe import InitialIntentProbe
 
 
 def _ctx(

@@ -1,8 +1,8 @@
 """Tests for premise_gate — Verify external premises before execution."""
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.premise_gate import (
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.premise_gate import (
     PremiseGate,
     _has_external_constraints,
 )

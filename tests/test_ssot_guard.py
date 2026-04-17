@@ -1,12 +1,12 @@
-"""Tests for cc_cortex.ssot_guard — SSOT enforcement guard."""
+"""Tests for concinno.ssot_guard — SSOT enforcement guard."""
 
 from __future__ import annotations
 
 import json
 import os
 
-from cc_cortex.guards.base import GuardAction, GuardCategory, GuardContext
-from cc_cortex.ssot_guard import (
+from concinno.guards.base import GuardAction, GuardCategory, GuardContext
+from concinno.ssot_guard import (
     SSOTGuard,
     SSOTRule,
     SSOTViolation,

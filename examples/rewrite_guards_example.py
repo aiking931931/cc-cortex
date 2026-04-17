@@ -24,7 +24,7 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from cc_cortex import (
+from concinno import (
     BashDryRunRewriter,
     BashPipeToShellRewriter,
     GuardContext,
@@ -65,7 +65,7 @@ def _section(title: str, tool_name: str, tool_input: dict) -> None:
 
 
 def main() -> None:
-    print("cc-cortex 1.4.0 — PreToolUse rewrite examples")
+    print("concinno 1.4.0 — PreToolUse rewrite examples")
 
     _section(
         "1. rm -rf . → echo dry-run",

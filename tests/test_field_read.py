@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.field_read — selective field extraction."""
+"""Tests for concinno.field_read — selective field extraction."""
 
 from __future__ import annotations
 
 import os
 import tempfile
 
-from cc_cortex.field_read import (
+from concinno.field_read import (
     COMPRESS_BREAKEVEN_TOKENS,
     FieldReadConfig,
     MemoryEntry,

@@ -3,28 +3,28 @@
 ## Twitter/X
 
 ```
-cc-cortex: Production-grade hooks for Claude Code
+concinno: Production-grade hooks for Claude Code
 
 Run 4 sessions in parallel without conflicts. Auto-learn from corrections. Detect prompt injection (100% rate, 0% FP). Track tokens, enforce handoffs, score session quality.
 
 1090+ tests. Battle-tested on real multi-agent workflows.
 
-pip install cc-cortex
+pip install concinno
 
-github.com/anthropics-community/cc-cortex
+github.com/anthropics-community/concinno
 ```
 
 ---
 
 ## Reddit (r/ClaudeAI, r/ChatGPTCoding, r/LocalLLaMA)
 
-**Title:** cc-cortex — I ran 4 Claude Code sessions in parallel and built hooks to stop them from destroying each other
+**Title:** concinno — I ran 4 Claude Code sessions in parallel and built hooks to stop them from destroying each other
 
 **Body:**
 
 After months of running multiple Claude Code sessions on the same codebase, I kept hitting the same problems: sessions overwriting each other's files, repeating the same mistakes across conversations, and context windows filling up with no warning.
 
-So I built **cc-cortex** — a Python hook system that turns Claude Code into a production-grade multi-agent dev environment.
+So I built **concinno** — a Python hook system that turns Claude Code into a production-grade multi-agent dev environment.
 
 **What it does (24 modules, all optional):**
 
@@ -53,33 +53,33 @@ So I built **cc-cortex** — a Python hook system that turns Claude Code into a 
 **Quick start:**
 
 ```bash
-pip install cc-cortex
-cc-cortex init
+pip install concinno
+concinno init
 ```
 
 It copies hooks to `~/.claude/hooks/`, updates your Claude Code settings, and asks which modules to enable. Zero dependencies beyond Python 3.10+.
 
 Built for Claude Code but the hook architecture is framework-agnostic. PRs welcome.
 
-GitHub: github.com/anthropics-community/cc-cortex
+GitHub: github.com/anthropics-community/concinno
 
 ---
 
 ## Hacker News
 
-**Title:** Show HN: cc-cortex – Production hooks for Claude Code (multi-instance, auto-learning, security)
+**Title:** Show HN: concinno – Production hooks for Claude Code (multi-instance, auto-learning, security)
 
 **Body:**
 
-cc-cortex is a Python hook system for Claude Code that solves the problems you hit when running multiple AI coding sessions on the same codebase.
+concinno is a Python hook system for Claude Code that solves the problems you hit when running multiple AI coding sessions on the same codebase.
 
 Core problems it addresses:
 
-1. **File conflicts** — two sessions edit the same file silently. cc-cortex tracks file ownership per session and blocks concurrent writes.
+1. **File conflicts** — two sessions edit the same file silently. concinno tracks file ownership per session and blocks concurrent writes.
 
-2. **No memory** — each session starts from scratch. cc-cortex scans transcripts for corrections, extracts "wrong → right" patterns, and promotes them to a persistent knowledge base after 3+ occurrences.
+2. **No memory** — each session starts from scratch. concinno scans transcripts for corrections, extracts "wrong → right" patterns, and promotes them to a persistent knowledge base after 3+ occurrences.
 
-3. **Security blind spots** — cc-cortex includes a 14-module prompt injection scanner (100% detection, 0% FP on our test suite), command safety classification via AST parsing, and dependency typosquatting detection.
+3. **Security blind spots** — concinno includes a 14-module prompt injection scanner (100% detection, 0% FP on our test suite), command safety classification via AST parsing, and dependency typosquatting detection.
 
 4. **Context window death** — 4-tier token warning system + structured handoff files with auto-GC.
 
@@ -87,9 +87,9 @@ The hook architecture follows Claude Code's native event model (on-session-start
 
 1090 tests including red-team scenarios, stress tests (100-thread lock contention), fuzz testing, and system failure simulations.
 
-    pip install cc-cortex
-    cc-cortex init
+    pip install concinno
+    concinno init
 
 Python 3.10+, zero external dependencies. Apache 2.0.
 
-https://github.com/anthropics-community/cc-cortex
+https://github.com/anthropics-community/concinno

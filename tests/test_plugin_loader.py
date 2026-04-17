@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.plugin_loader — plugin discovery, loading, validation."""
+"""Tests for concinno.plugin_loader — plugin discovery, loading, validation."""
 
 import os
 import sys
@@ -8,8 +8,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from cc_cortex.guards.base import BaseGuard, GuardCategory, GuardContext
-from cc_cortex.plugin_loader import (
+from concinno.guards.base import BaseGuard, GuardCategory, GuardContext
+from concinno.plugin_loader import (
     PluginError,
     PluginMeta,
     discover_plugins,
@@ -87,7 +87,7 @@ class TestPluginMeta:
 class TestLoadGuardFile:
     def test_load_valid_plugin(self, tmp_path):
         path = _write_plugin(tmp_path, "my_guard.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
 
             class MyGuard(BaseGuard):
                 name = "my_plugin_guard"
@@ -104,7 +104,7 @@ class TestLoadGuardFile:
 
     def test_load_multiple_guards(self, tmp_path):
         path = _write_plugin(tmp_path, "multi.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
 
             class GuardA(BaseGuard):
                 name = "guard_a"
@@ -149,7 +149,7 @@ class TestLoadGuardFile:
 
     def test_instantiation_error(self, tmp_path):
         path = _write_plugin(tmp_path, "bad_init.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
 
             class BadGuard(BaseGuard):
                 name = "bad_guard"
@@ -166,7 +166,7 @@ class TestLoadGuardFile:
 
     def test_guard_with_empty_name(self, tmp_path):
         path = _write_plugin(tmp_path, "noname.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
 
             class NoNameGuard(BaseGuard):
                 name = ""
@@ -183,7 +183,7 @@ class TestLoadGuardFile:
         """Abstract classes without check() implementation are skipped."""
         path = _write_plugin(tmp_path, "abstract.py", """\
             from abc import abstractmethod
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
 
             class AbstractGuard(BaseGuard):
                 name = "abstract_guard"
@@ -211,7 +211,7 @@ class TestDiscoverPlugins:
 
     def test_file_path_discovery(self, tmp_path):
         path = _write_plugin(tmp_path, "disc.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
 
             class DiscGuard(BaseGuard):
                 name = "disc_guard"
@@ -227,14 +227,14 @@ class TestDiscoverPlugins:
 
     def test_duplicate_detection_across_files(self, tmp_path):
         path1 = _write_plugin(tmp_path, "g1.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
             class G(BaseGuard):
                 name = "same_name"
                 category = GuardCategory.QUALITY
                 def check(self, ctx): return None
         """)
         path2 = _write_plugin(tmp_path, "g2.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
             class G(BaseGuard):
                 name = "same_name"
                 category = GuardCategory.QUALITY
@@ -251,7 +251,7 @@ class TestDiscoverPlugins:
 
     def test_duplicate_with_existing_names(self, tmp_path):
         path = _write_plugin(tmp_path, "dup.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
             class G(BaseGuard):
                 name = "builtin_guard"
                 category = GuardCategory.QUALITY
@@ -285,7 +285,7 @@ class TestDiscoverPlugins:
 
 class TestCreateExtendedPipeline:
     def test_no_plugins(self):
-        from cc_cortex.guards.registry import create_extended_pipeline
+        from concinno.guards.registry import create_extended_pipeline
 
         pipe, metas = create_extended_pipeline(
             use_entrypoints=False, plugin_paths=[],
@@ -294,10 +294,10 @@ class TestCreateExtendedPipeline:
         assert metas == []
 
     def test_with_plugin_file(self, tmp_path):
-        from cc_cortex.guards.registry import create_extended_pipeline
+        from concinno.guards.registry import create_extended_pipeline
 
         path = _write_plugin(tmp_path, "ext.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
             class ExtGuard(BaseGuard):
                 name = "ext_test_guard"
                 category = GuardCategory.COGNITIVE
@@ -312,13 +312,13 @@ class TestCreateExtendedPipeline:
         assert metas[0].valid
 
     def test_invalid_plugin_not_registered(self, tmp_path):
-        from cc_cortex.guards.registry import (
+        from concinno.guards.registry import (
             create_default_pipeline,
             create_extended_pipeline,
         )
 
         path = _write_plugin(tmp_path, "bad.py", """\
-            from cc_cortex.guards.base import BaseGuard, GuardCategory
+            from concinno.guards.base import BaseGuard, GuardCategory
             class BadGuard(BaseGuard):
                 name = ""
                 category = GuardCategory.QUALITY

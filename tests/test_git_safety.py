@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.git_safety — Dangerous git operation detection."""
+"""Tests for concinno.git_safety — Dangerous git operation detection."""
 
 from __future__ import annotations
 
-from cc_cortex.git_safety import check
+from concinno.git_safety import check
 
 
 class TestGitSafetyCheck:

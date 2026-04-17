@@ -113,13 +113,13 @@
 ## Installation
 
 ```bash
-pip install cc-cortex
-cc-cortex init
+pip install concinno
+concinno init
 ```
 
 That's it. All 43 guards, 12 hook modules, and 9 MCP tools activate automatically.
 
-Optional: `pip install cc-cortex[rag]` for Cognitive RAG (cross-session memory).
+Optional: `pip install concinno[rag]` for Cognitive RAG (cross-session memory).
 
 ---
 
@@ -144,4 +144,4 @@ All 30 defects are addressed. 24 have dedicated guard/hook hardening. 6 are cove
 ---
 
 *CC Cortex is open source under the Apache-2.0 License.*
-*Source: [github.com/anthropics-community/cc-cortex](https://github.com/anthropics-community/cc-cortex)*
+*Source: [github.com/anthropics-community/concinno](https://github.com/anthropics-community/concinno)*

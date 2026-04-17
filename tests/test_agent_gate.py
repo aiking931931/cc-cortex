@@ -1,11 +1,11 @@
-"""Tests for cc-cortex agent_gate — research/execution split + spawn counting."""
+"""Tests for concinno agent_gate — research/execution split + spawn counting."""
 
 from __future__ import annotations
 
 import os
 import tempfile
 
-from cc_cortex.agent_gate import (
+from concinno.agent_gate import (
     _check_prompt_quality,
     check,
     gate_agent_cap,

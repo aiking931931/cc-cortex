@@ -11,7 +11,7 @@ import argparse
 import os
 import tempfile
 
-from cc_cortex.cli.main import (
+from concinno.cli.main import (
     cmd_rag_namespaces,
     cmd_rag_route,
     cmd_rag_weights,
@@ -90,11 +90,11 @@ class TestRagWeights:
         argument (``hits`` only moves when ``rerank()`` encounters the
         source, which we intentionally don't exercise here).
         """
-        from cc_cortex.ziq_retrieval import ZIQRetrieval
+        from concinno.ziq_retrieval import ZIQRetrieval
 
         tmp = tempfile.mkdtemp()
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", tmp)
-        cache_dir = os.path.join(tmp, ".cc_cortex_cache")
+        cache_dir = os.path.join(tmp, ".concinno_cache")
 
         ziq = ZIQRetrieval(cache_dir=cache_dir)
         ziq.feedback(["corrections/feedback_x.md"])

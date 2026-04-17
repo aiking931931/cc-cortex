@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.cost_tracker."""
+"""Tests for concinno.cost_tracker."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.cost_tracker import CostTracker
+from concinno.cost_tracker import CostTracker
 
 
 @pytest.fixture

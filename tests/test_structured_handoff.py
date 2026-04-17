@@ -1,9 +1,9 @@
-"""Tests for cc_cortex.structured_handoff — fixed-field handoff template."""
+"""Tests for concinno.structured_handoff — fixed-field handoff template."""
 
 from __future__ import annotations
 
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.structured_handoff import (
+from concinno.guards.base import GuardContext
+from concinno.structured_handoff import (
     CONTEXT_SUMMARY_MAX,
     NEXT_STEP_MAX,
     HandoffRecord,

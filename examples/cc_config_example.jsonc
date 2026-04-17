@@ -1,6 +1,6 @@
 // CC Cortex Configuration — Full Annotated Example
 // Copy this file to your project root as `cc_config.json` (remove comments)
-// or run `cc-cortex init` to generate a default config.
+// or run `tempero init` to generate a default config.
 {
   // ═══════════════════════════════════════════════════════
   // Hook Mode

@@ -1,13 +1,13 @@
-"""Tests for cc_cortex.confidence_gate — ConfidenceGate."""
+"""Tests for concinno.confidence_gate — ConfidenceGate."""
 
 from __future__ import annotations
 
-from cc_cortex.confidence_gate import (
+from concinno.confidence_gate import (
     ConfidenceGate,
     detect_uncertainty,
     is_irreversible,
 )
-from cc_cortex.guards.base import GuardContext
+from concinno.guards.base import GuardContext
 
 
 def _ctx(

@@ -9,7 +9,7 @@ Four guards targeting RLHF-induced biases:
 
 from __future__ import annotations
 
-from cc_cortex.guards.base import GuardAction, GuardContext
+from concinno.guards.base import GuardAction, GuardContext
 
 # ═══════════════════════════════════════════════════════════════════
 # Helpers
@@ -42,18 +42,18 @@ class TestOverflowGate:
     """B1: Attention overflow — block non-critical Agent spawns."""
 
     def test_non_agent_passes(self):
-        from cc_cortex.overflow_gate import OverflowGate
+        from concinno.overflow_gate import OverflowGate
 
         gate = OverflowGate()
         result = gate.check(_ctx(tool_name="Read"))
         assert result is None
 
     def test_critical_agent_always_passes(self, monkeypatch):
-        from cc_cortex.overflow_gate import OverflowGate
-        from cc_cortex.token_zone import Zone
+        from concinno.overflow_gate import OverflowGate
+        from concinno.token_zone import Zone
 
         monkeypatch.setattr(
-            "cc_cortex.overflow_gate._get_zone", lambda: Zone.RED
+            "concinno.overflow_gate._get_zone", lambda: Zone.RED
         )
         gate = OverflowGate()
         ctx = _ctx(
@@ -64,11 +64,11 @@ class TestOverflowGate:
         assert result is None
 
     def test_yellow_zone_blocks_exploratory_agent(self, monkeypatch):
-        from cc_cortex.overflow_gate import OverflowGate
-        from cc_cortex.token_zone import Zone
+        from concinno.overflow_gate import OverflowGate
+        from concinno.token_zone import Zone
 
         monkeypatch.setattr(
-            "cc_cortex.overflow_gate._get_zone", lambda: Zone.YELLOW
+            "concinno.overflow_gate._get_zone", lambda: Zone.YELLOW
         )
         gate = OverflowGate()
         ctx = _ctx(
@@ -81,11 +81,11 @@ class TestOverflowGate:
         assert "overflow" in result.reason.lower()
 
     def test_yellow_zone_blocks(self, monkeypatch):
-        from cc_cortex.overflow_gate import OverflowGate
-        from cc_cortex.token_zone import Zone
+        from concinno.overflow_gate import OverflowGate
+        from concinno.token_zone import Zone
 
         monkeypatch.setattr(
-            "cc_cortex.overflow_gate._get_zone", lambda: Zone.YELLOW
+            "concinno.overflow_gate._get_zone", lambda: Zone.YELLOW
         )
         gate = OverflowGate()
         ctx = _ctx(
@@ -97,11 +97,11 @@ class TestOverflowGate:
         assert result.action == GuardAction.DENY
 
     def test_green_zone_allows(self, monkeypatch):
-        from cc_cortex.overflow_gate import OverflowGate
-        from cc_cortex.token_zone import Zone
+        from concinno.overflow_gate import OverflowGate
+        from concinno.token_zone import Zone
 
         monkeypatch.setattr(
-            "cc_cortex.overflow_gate._get_zone", lambda: Zone.GREEN
+            "concinno.overflow_gate._get_zone", lambda: Zone.GREEN
         )
         gate = OverflowGate()
         ctx = _ctx(
@@ -112,11 +112,11 @@ class TestOverflowGate:
         assert result is None
 
     def test_burst_detection(self, tmp_path, monkeypatch):
-        from cc_cortex.overflow_gate import OverflowGate
-        from cc_cortex.token_zone import Zone
+        from concinno.overflow_gate import OverflowGate
+        from concinno.token_zone import Zone
 
         monkeypatch.setattr(
-            "cc_cortex.overflow_gate._get_zone", lambda: Zone.GREEN
+            "concinno.overflow_gate._get_zone", lambda: Zone.GREEN
         )
         gate = OverflowGate(burst_max=3, burst_window_s=60)
         cache = str(tmp_path)
@@ -143,7 +143,7 @@ class TestOverflowGate:
         assert "burst" in result.reason.lower()
 
     def test_guard_metadata(self):
-        from cc_cortex.overflow_gate import OverflowGate
+        from concinno.overflow_gate import OverflowGate
 
         gate = OverflowGate()
         assert gate.name == "overflow_gate"
@@ -160,21 +160,21 @@ class TestOrientationGate:
     """B2/B3: Action bias — force cost analysis before long ops."""
 
     def test_non_bash_passes(self):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         result = gate.check(_ctx(tool_name="Read"))
         assert result is None
 
     def test_short_command_passes(self):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         result = gate.check(_ctx(tool_input={"command": "ls -la"}))
         assert result is None
 
     def test_deploy_blocked_without_planning(self, tmp_path):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         ctx = _ctx(
@@ -187,7 +187,7 @@ class TestOrientationGate:
         assert "deploy" in result.reason.lower()
 
     def test_npm_install_blocked(self, tmp_path):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         ctx = _ctx(
@@ -199,7 +199,7 @@ class TestOrientationGate:
         assert result.action == GuardAction.DENY
 
     def test_docker_build_blocked(self, tmp_path):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         ctx = _ctx(
@@ -212,7 +212,7 @@ class TestOrientationGate:
 
     def test_background_command_still_denied_without_planning(self, tmp_path):
         """Background is resource management, not planning evidence."""
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         ctx = _ctx(
@@ -224,7 +224,7 @@ class TestOrientationGate:
         assert result.action == GuardAction.DENY
 
     def test_planning_evidence_clears_gate(self, tmp_path):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         cache = str(tmp_path)
@@ -250,7 +250,7 @@ class TestOrientationGate:
         assert result is None
 
     def test_git_clone_blocked(self, tmp_path):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         ctx = _ctx(
@@ -262,7 +262,7 @@ class TestOrientationGate:
         assert result.action == GuardAction.DENY
 
     def test_vite_build_blocked(self, tmp_path):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         ctx = _ctx(
@@ -274,7 +274,7 @@ class TestOrientationGate:
         assert result.action == GuardAction.DENY
 
     def test_guard_metadata(self):
-        from cc_cortex.orientation_gate import OrientationGate
+        from concinno.orientation_gate import OrientationGate
 
         gate = OrientationGate()
         assert gate.name == "orientation_gate"
@@ -290,14 +290,14 @@ class TestHonestyGate:
     """A5/C1: Loss aversion — detect euphemisms masking errors."""
 
     def test_non_write_passes(self):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         result = gate.check(_ctx(tool_name="Read"))
         assert result is None
 
     def test_no_euphemism_passes(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         ctx = _ctx(
@@ -312,7 +312,7 @@ class TestHonestyGate:
         assert result is None
 
     def test_euphemism_without_errors_passes(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         cache = str(tmp_path)
@@ -330,7 +330,7 @@ class TestHonestyGate:
         assert result is None
 
     def test_euphemism_with_recent_errors_denied(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         cache = str(tmp_path)
@@ -359,7 +359,7 @@ class TestHonestyGate:
         assert "euphemism" in result.reason.lower()
 
     def test_chinese_euphemism_detected(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         cache = str(tmp_path)
@@ -387,7 +387,7 @@ class TestHonestyGate:
         assert result.action == GuardAction.DENY
 
     def test_errors_decay_after_clean_calls(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         cache = str(tmp_path)
@@ -424,7 +424,7 @@ class TestHonestyGate:
         assert result is None
 
     def test_edit_also_checked(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         cache = str(tmp_path)
@@ -452,7 +452,7 @@ class TestHonestyGate:
         assert result.action == GuardAction.DENY
 
     def test_short_content_skipped(self, tmp_path):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         cache = str(tmp_path)
@@ -476,7 +476,7 @@ class TestHonestyGate:
         assert result is None
 
     def test_guard_metadata(self):
-        from cc_cortex.honesty_gate import HonestyGate
+        from concinno.honesty_gate import HonestyGate
 
         gate = HonestyGate()
         assert gate.name == "honesty_gate"
@@ -492,14 +492,14 @@ class TestMultiPathGate:
     """B4/B5: Premature convergence — force ≥3 alternatives."""
 
     def test_non_write_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         result = gate.check(_ctx(tool_name="Read"))
         assert result is None
 
     def test_non_planning_file_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         ctx = _ctx(
@@ -514,7 +514,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_planning_file_without_alternatives_denied(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -537,7 +537,7 @@ class TestMultiPathGate:
         assert "alternative" in result.reason.lower()
 
     def test_planning_with_options_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -559,7 +559,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_comparison_table_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -582,7 +582,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_pros_cons_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -602,7 +602,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_numbered_list_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -624,7 +624,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_short_content_exempt(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         ctx = _ctx(
@@ -638,7 +638,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_no_decision_language_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -658,7 +658,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_chinese_decision_file(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -678,7 +678,7 @@ class TestMultiPathGate:
         assert result.action == GuardAction.DENY
 
     def test_three_options_chinese_passes(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -700,7 +700,7 @@ class TestMultiPathGate:
         assert result is None
 
     def test_edit_also_checked(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         content = (
@@ -720,7 +720,7 @@ class TestMultiPathGate:
         assert result.action == GuardAction.DENY
 
     def test_guard_metadata(self):
-        from cc_cortex.multipath_gate import MultiPathGate
+        from concinno.multipath_gate import MultiPathGate
 
         gate = MultiPathGate()
         assert gate.name == "multipath_gate"
@@ -737,7 +737,7 @@ class TestRLHFGatesRegistration:
     """Verify all 4 RLHF gates are registered in default pipeline."""
 
     def test_all_four_registered(self):
-        from cc_cortex.guards.registry import create_default_pipeline
+        from concinno.guards.registry import create_default_pipeline
 
         pipe = create_default_pipeline()
         names = {g.name for g in pipe._guards}
@@ -747,7 +747,7 @@ class TestRLHFGatesRegistration:
         assert "multipath_gate" in names
 
     def test_guard_count_increased(self):
-        from cc_cortex.guards.registry import create_default_pipeline
+        from concinno.guards.registry import create_default_pipeline
 
         pipe = create_default_pipeline()
         # Was 39, +4 RLHF gates +1 MilestoneGate = 44, actual 42 (some merged)

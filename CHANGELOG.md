@@ -7,6 +7,260 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-04-17
+
+### Fixed — red-team round 3 patch set (9 FATAL + HIGH items)
+
+This release is the post-mortem of the 2.2.0 candidate: 3 Opus red-team
+agents and 1 Opus blue-team defender reviewed the 2.2.0 artifacts; 9
+FATAL items were accepted by the commander, patched, and re-verified.
+2.2.0 was built but never published — 2.3.0 supersedes it.
+
+- **Project URLs repointed away from `anthropics-community` namespace**
+  (Red 3 A1 — trademark / PEP 541 takedown risk). `pyproject.toml`,
+  `src/concinno/__init__.py` docstring, and `src/concinno/a2a/server.py`
+  Agent Card now reference `github.com/aiking931931/concinno` (the
+  publishing account's own namespace). The previous URLs did not
+  exist as a GitHub organization and implied Anthropic endorsement
+  via name-prefix — unsafe ground for a library with `anthropic` as
+  a hard dependency.
+- **CI coverage gate points at the correct package** (Red 3 A3).
+  `.github/workflows/ci.yml` previously ran
+  `pytest --cov=tempero --cov-fail-under=80`; the `tempero → concinno`
+  rename left the `--cov` flag pointing at a non-existent package, so
+  coverage reported 0% or no-op-passed, rendering every red-team fix
+  CI-unverified since the rename. Now `--cov=concinno`.
+- **Publish workflow hardened** (Red 3 A4, Red 2 H-R2-2):
+  - GitHub Actions pinned to specific tagged releases (Dependabot
+    will convert to full 40-char SHAs once this workflow lives on
+    main); `pypa/gh-action-pypi-publish@release/v1` replaced with
+    `@v1.12.4` + `attestations: true`, emitting PEP 740 Sigstore
+    attestations on PyPI for consumer verification.
+  - `actions/attest-build-provenance@v2.2.0` added so consumers can
+    verify the wheel was built from this commit on a GitHub runner.
+  - Build step sets `PYTHONUTF8=1` so the `Summary` metadata field
+    does not round-trip through a non-UTF8 locale and ship with
+    U+FFFD replacement characters on PyPI (Red 3 A8).
+  - Smoke test switched from `lstrip('v')` to `removeprefix('v')` —
+    the former would eat every leading `v` (corrupting `vv2.2.0`
+    or `version-2.2.0` and silently passing the wrong tag).
+  - Test job now runs the guard + wiredo + token_counter + autocompact
+    suites (not just `test_version_sync`), so any regression in a
+    red-team-fix area blocks publish at CI time (Red 1 H6).
+- **`DEFAULT_MODEL_BUDGETS` default lowered from 1M to 200K** for
+  Opus 4.7 / Opus 4.6 / Sonnet 4.6 (Red 1 F5). The 1M window is a
+  beta-gated Anthropic feature requiring `context-1m-2025-08-07`
+  plus tier ≥4 rate limits; library consumers without beta access
+  would silently miss their real 200K ceiling (auto-compaction
+  would not trigger, user's call would hit Anthropic's 400
+  "prompt too long"). Opt-in via new `CONCINNO_OPUS_1M_BETA=1`
+  env var bumps Opus/Sonnet to 1M for consumers who actually
+  have beta access. Haiku 4.5 unchanged at 200K.
+- **`opus47` fast-mode tokenizer profile removed** (Red 1 F4). The
+  ratio constants (`cjk * 2.0 + ascii / 3`) could not be anchored
+  to a published Anthropic source and are now demonstrably wrong
+  as a generic char-ratio approximation of a BPE tokenizer. Callers
+  that need 4.7-accurate counts should use `mode='accurate'` or
+  `mode='hybrid'` so the real Anthropic `count_tokens` API is
+  authoritative. `_tokenizer_for()` now always returns `legacy`;
+  passing `tokenizer='opus47'` to `_estimate_fast` raises
+  `ValueError` rather than silently substituting.
+- **`VersionSyncGuard` NotebookEdit branch actually wired up**
+  (Red 2 F-R2-2). 2.2.0 added `NotebookEdit` to `_WATCHED_TOOLS`
+  but the code had no explicit branch for it, so NotebookEdit
+  bumps fell through the `else: MultiEdit` parse that reads
+  `tool_input['edits']` — NotebookEdit uses `new_source` /
+  `cell_source`, so drift was silently ALLOWed. Explicit branch
+  added + 3 new tests (`new_source` drift, legacy `cell_source`
+  drift, no-version quiet-allow). Unknown write tools in the
+  watch set now return an explicit `"unhandled write tool"`
+  advisory instead of silent ALLOW.
+- **`VersionSyncGuard` audit log has an actual test** (Red 2 H-R2-3).
+  The H2 fix (JSONL audit on `CONCINNO_SKIP_VERSION_GATE=1`) had
+  no test coverage — 2 new tests exercise the write path end to
+  end. Fallback order for the log destination now prefers
+  `cache_dir`, then `<workspace>/.concinno/logs/` (was
+  `_AI_BRAIN/logs/`, a CC-private path violating the library
+  boundary per `CLAUDE.md:Hard Rules #1`), then XDG cache, then
+  `~/.cache/concinno/`. Library-neutral fallback chain.
+- **A2A Agent Card reads `concinno.__version__`** (Red 3 A14).
+  `src/concinno/a2a/server.py:42` hard-coded `"version": "1.5.1"`,
+  7 minor versions behind the package. Now imported from
+  `concinno.__version__` so remote peers fingerprinting the
+  server see the actual shipped version.
+- **`vscode_extension` WIREDO recipe written tooling-neutrally**
+  (Red 1 F6). The 2.2.0 recipe hard-coded `windows` agent-Skill
+  API calls (`w.window_list()`, `w.screenshot_window(hwnd=…)`)
+  which are CC-private to the publishing workspace — consumers
+  running `pip install concinno` do not have that Skill and
+  would be stuck in Tier 1 + waiver. Recipe now describes Tier 2
+  UI verification abstractly: "any headless-capable UI automation
+  stack" with the `windows` Skill as one example among pywinauto /
+  AppleScript / Linux accessibility.
+- **CHANGELOG 2.0.0/2.1.0 back-fill language honest** (Red 2
+  F-R2-1, Red 3 A2). 2.2.0's back-fill paragraph cited commit
+  hashes `fd781b11` and `17f097ca` as "archaeology from git log" —
+  those hashes do not exist in this repo's history (`git log --all`
+  earliest is `b7b2d777`); they were outer-workspace commits not
+  reachable from the package repo. Language rewritten to own this
+  up: the entries are authorial back-fill from the wheel diff and
+  session logs, not archaeological retrieval.
+
+### Note on PyPI 2.0.0 / 2.1.0
+
+Both versions shipped to PyPI before `VersionSyncGuard` existed and
+before the red-team review cycle was applied. The publishing account
+intends to yank both via the PyPI web UI (yank, not delete — pins
+still resolve but pip emits a warning). The yank reasons will point
+to this 2.3.0 entry. This 2.3.0 release is the first version built
+against the hardened publish pipeline above.
+
+## [2.2.0] - 2026-04-17
+
+### Added
+
+- **WIREDO `vscode_extension` change_type** — UI-asset delivery recipe for
+  `.vsix` files. Required dims: `W I D E O` (R is N/A). D-dim recipe
+  forces two-tier evidence:
+  - Tier 1 (static) — unzip the vsix, assert `package.json` version /
+    `contributes.commands` / `contributes.keybindings` / `contributes.
+    configuration.properties` all present, `dist/extension.js` bundle
+    string grep for every new mode/slash literal, CHANGELOG entry exists.
+  - Tier 2 (background UI) — `code --new-window --user-data-dir=<tmp>
+    --extensions-dir=<tmp>` isolated profile install → `--list-extensions`
+    confirms `publisher.name@version` → launch detached VSCode on the
+    workspace → `windows` Skill `w.window_list()` + `w.screenshot_window
+    (hwnd=…)` PrintWindow capture without stealing foreground focus →
+    screenshot file > 10 KB + HWND title matches workspace name →
+    `taskkill /PID <pid> /T /F` cleanup.
+  - If `windows` Skill is unavailable this recipe degrades to Tier 1
+    only; declaring delivery without Tier 2 evidence needs explicit
+    operator waiver.
+- **Auto-classification wiring**: `wiredo_change_type._EXT_MAP[".vsix"]
+  = "vscode_extension"` + new `_VSCE_CMD` regex catching `vsce package`,
+  `vsce publish`, `@vscode/vsce package` → `detect_from_command` picks
+  the new recipe on `.vsix` writes or `vsce` invocations.
+- **`token_counter._estimate_fast(text, tokenizer="opus47")`** — Opus 4.7
+  ships a new tokenizer that fits the same text into ≈1.0–1.35x more
+  tokens (per Anthropic v2 release notes). Worst-case +35% on ASCII,
+  +33% on CJK. `TokenCounter(model="claude-opus-4-7")` auto-picks the
+  `opus47` ratio via `_tokenizer_for(model)`; default `claude-opus-4-6`
+  keeps legacy `cjk*1.5 + ascii/4`. Prevents late hybrid-escalation-cliff
+  surprises on 4.7 sessions.
+- **`DEFAULT_MODEL_BUDGETS["claude-opus-4-7"] = 1_000_000`** in
+  `cache/autocompact.py` so AutoCompactor no longer falls back to the
+  200K unknown-model ceiling when running under Opus 4.7.
+
+### Changed
+
+- **`CHANGE_TYPES` 16 → 17** with new `vscode_extension` slot, mirrored
+  in `wiredo_change_type.py` and `wiredo_loader.py` `ROUTING` map
+  (`"vscode_extension": ("W","I","D","E","O")`).
+  `templates/wiredo/routing.md` gained the corresponding row.
+
+### Tests
+
+- **+3 opus47-tokenizer tests** in `test_token_counter.py`:
+  `test_fast_mode_opus47_ascii_higher_than_legacy`,
+  `test_fast_mode_opus47_cjk_higher_than_legacy`,
+  `test_fast_mode_opus47_via_tokencounter_model`. Token counter: 20/20.
+- **`test_change_types_count_16 → _17`** with `"vscode_extension" in
+  CHANGE_TYPES` assertion. `test_wiredo_loader` + `test_wiredo_change_type`
+  groups: 78/78.
+- **Full suite: 4990 passed** (single pre-existing fail is
+  `test_version_sync`; fixed by this bump).
+
+### Fixed
+
+- **`test_version_sync` drift** — `concinno.__version__` / `pyproject.toml`
+  / `CHANGELOG.md` latest entry were out of alignment (2.0.0 / 2.1.0 /
+  1.18.1). All three now point at 2.2.0.
+- **Historical gap back-filled** — 2.0.0 and 2.1.0 versions had been bumped
+  in `pyproject.toml` / `__init__.py` without CHANGELOG entries (shipped
+  via `auto: update` commits in an outer workspace repository; those
+  commits are not reachable from this package's own git history and
+  cannot be cited by SHA here). The entries below reconstruct intent
+  from the wheel diff and outer-workspace session logs — treat them as
+  authorial back-fill, not archaeological retrieval. Going forward the
+  new `VersionSyncGuard` (see Added) makes this class of drift
+  impossible, and `test_version_sync` in `publish.yml` will block any
+  future release with a CHANGELOG / `__version__` / `pyproject.toml`
+  mismatch from reaching PyPI.
+
+### Added — root-cause fix for version drift
+
+- **`VersionSyncGuard` PreToolUse gate** — any Edit / Write / MultiEdit
+  that mutates the version line in `pyproject.toml` or `__init__.py` now
+  triggers a cross-check: the new version must match the latest non-
+  `[Unreleased]` heading in the same project's `CHANGELOG.md`. Mismatch
+  returns ALLOW with a visible step-back warning listing exactly which
+  of the three sources still disagree and how to align them. Policy is
+  ASK (not DENY) so legitimate in-progress multi-edit flows work, but
+  the agent can no longer silently ship a bump without touching the
+  changelog. Env escape `CONCINNO_SKIP_VERSION_GATE=1` for archaeology
+  sessions that intentionally backfill history. Test coverage locks
+  the three drift patterns (py-only, init-only, changelog-missing).
+- **CI `test_version_sync` gate in `publish.yml`** — the PyPI publish
+  workflow now runs `pytest tests/test_version_sync.py` before the
+  `publish` job; a three-source mismatch blocks upload. Pairs with the
+  edit-time guard for defense-in-depth: guard catches at write time,
+  CI catches at publish time.
+
+## [2.1.0] - 2026-04-17
+
+### Added
+
+- **Opus 4.7 as default escalation tier** — `CONCINNO_OPUS_MODEL`
+  defaults to `claude-opus-4-7` (previously `claude-opus-4-6`). The
+  `CONCINNO_OPUS_MODEL` env var still overrides for pinning to an
+  older model. Scored +12pp CursorBench vs 4.6 in Anthropic's own
+  evaluations.
+- **`_is_opus_4_7_plus(model_id)` helper** — centralised detector for
+  Opus 4.7+ behavioural differences. Treats `claude-opus-4-7`,
+  `claude-opus-4-7-<date>`, `claude-opus-4-8`, `claude-opus-5-0`, … as
+  4.7+; `claude-opus-4-6` and earlier, plus all Sonnet/Haiku, as
+  legacy.
+
+### Changed
+
+- **`LLMEscalator._call_anthropic` omits `temperature` on Opus 4.7+** —
+  Opus 4.7 returns a 400 error when `temperature` / `top_p` / `top_k`
+  are set to any non-default value. The helper now strips
+  `temperature` from kwargs when the target model is 4.7+, while
+  keeping the parameter intact for 4.6/Sonnet/Haiku (which still
+  accept it). Callers pass the same `temperature` argument; the
+  wrapper decides whether it reaches the API.
+- **`LLMEscalator.escalate` default `max_tokens` raised 2048 → 4096** —
+  Opus 4.7's new tokenizer uses up to ~1.35x more tokens for the same
+  text, so the previous default left very little headroom. The
+  kwarg is still overridable per call.
+
+## [2.0.0] - 2026-04-16
+
+### Changed — SemVer major bump, no code-level breaking change
+
+- **Version jumped 1.18.1 → 2.0.0** for PyPI namespace alignment with the
+  `concinno` brand. The local Python package path was already `concinno`
+  before this bump; no `tempero → concinno` rename diff exists in this
+  release — the source tree migration happened in earlier unrecorded
+  commits. This entry is the honest attribution after the fact.
+- **No public API surface change vs 1.18.1.** Downstream consumers can
+  upgrade `concinno>=1.18,<3` → `concinno>=2,<3` with no import edits.
+- **PyPI project-name migration is the only real breaking signal:** an
+  older `tempero` project (if any downstream still pinned it) is
+  orphaned from this release onward. If such a pin exists in the wild,
+  re-point the requirements file at `concinno` and keep the version
+  constraint. No automatic shim package is published.
+
+### Historical attribution — back-filled 2026-04-17
+
+The 2.0.0 entry was missing from the CHANGELOG at release time; it
+shipped via an `auto:` commit on the outer workspace repo (not reachable
+from this package's wheel or from `cd site-packages/concinno && git log`
+on the downstream install). The 2.2.0 release adds `VersionSyncGuard` +
+`publish.yml` `test_version_sync` gate so this class of drift — shipping
+a version bump without a matching CHANGELOG section — cannot recur.
+
 ## [1.18.1] - 2026-04-16
 
 ### Fixed
@@ -22,7 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`CC_CORTEX_HANDOFF_MINIMAL=1` env escape** — explicit acknowledgment that
+- **`CONCINNO_HANDOFF_MINIMAL=1` env escape** — explicit acknowledgment that
   the handoff update is intentionally minimal (pointer-only bump, frontmatter
   refresh). Skips the second-layer structural gate without disabling the
   first-layer "handoff must exist" check.
@@ -78,7 +332,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reset|cherry-pick|add`, `twine upload`, `pip install`, `gh pr|
   release create`, `docker build|push`, `rm`, `mv`, `chmod`, write
   redirects, etc.) and the assistant ends the turn without a final
-  text block above a minimum char threshold, `cc_cortex.stop_guard`
+  text block above a minimum char threshold, `concinno.stop_guard`
   emits a `[silent_turn_guard]` warn to stderr pointing at the last
   mutating tool and requesting a WIREDO-D summary next turn (what
   ran / pass-fail / next ⬜). Warn-only per CC's L6 PostToolUse
@@ -121,7 +375,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_persona_prompt.py` (21), `test_track_classifier.py` (21).
   Pure stdlib, zero new dependencies. Direct submodule import only
   (not re-exported at package top level), matching the
-  `cc_cortex.cache.append_only_log` pattern.
+  `concinno.cache.append_only_log` pattern.
 - **`CbuaPipelineGuard` dichotomy framing detector** — anchors the
   model away from RLHF's comparative-analysis bias. When agent output
   contains binary A-or-B framing (`保留 or 改`, `二選一`, `either A
@@ -138,7 +392,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`cc_cortex.cache.append_only_log`** — lossless cross-session
+- **`concinno.cache.append_only_log`** — lossless cross-session
   event log targeting CC's L9 ceiling (compact is a single LLM
   summary; events not in the top-5 files × 5K + top-skills × 5K
   are lost forever, see `services/compact/compact.ts:122-131`).
@@ -158,7 +412,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Schema-versioned: `schema_version` field for future migration.
   - Size-bounded replay: `read_session(limit=N)` for safety.
   - Log dir overridable via `CCC_APPEND_LOG_DIR` env var;
-    defaults to `~/.cc_cortex_cache/append_only_log/`.
+    defaults to `~/.concinno_cache/append_only_log/`.
   - Zero new dependencies — stdlib only (json / time / uuid /
     pathlib / os). Keeps CCC core zero-dep rule intact.
   - ZIQ index hook left as future work (comment-tagged in source)
@@ -207,7 +461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - This closes the SessionStart prune gap identified in the v5.5
   Phase 1 roadmap. Per-session JSON state files under
-  `.cc_cortex_cache/<namespace>/` were accumulating because each guard
+  `.concinno_cache/<namespace>/` were accumulating because each guard
   module knew how to write its own state but no entry point swept the
   whole cache. The library now owns the sweep so consumer hooks stay
   thin (one import + one call).
@@ -240,7 +494,7 @@ coverage backfill on `CbuaPipelineGuard` and `auto_checkpoint`.
   handoff directory against the modified file path (always the
   handoff root, never inside it) so prefix scoring was always 0 in
   practice and projects could not be routed. The new logic uses
-  `os.path.basename(root)` (the project tag, e.g. `cc-cortex`) and
+  `os.path.basename(root)` (the project tag, e.g. `concinno`) and
   matches it against the modified file's `os.sep`-split components
   to avoid single-letter substring false positives.
 
@@ -270,7 +524,7 @@ retrieval or rerank internals. 26 new tests, 4301 total passing.
 
 ### Added
 
-- **`cc_cortex.agent.retrieve_pipeline`** — new module exposing
+- **`concinno.agent.retrieve_pipeline`** — new module exposing
   `ZIQCascadePipeline` orchestrator and `CascadePipelineResult`
   dataclass. Composes `IterativeRetriever` (L3→L2→L1 cascade) with
   `ZIQRetrieval` (FTRL source-weight rerank). Runs the cascade and
@@ -278,7 +532,7 @@ retrieval or rerank internals. 26 new tests, 4301 total passing.
   cache-only results pass through unreranked because FTRL source-type
   classification depends on file path structure that in-memory pool
   sections do not cleanly expose. 6 new tests.
-- **`cc_cortex.agent` facade re-exports** — `IterativeRetriever`,
+- **`concinno.agent` facade re-exports** — `IterativeRetriever`,
   `CascadeConfig`, `CascadeStats`, `RetrievalResult`, `L1Retriever`,
   `EvolutionScheduler`, `CascadePipelineResult`, `ZIQCascadePipeline`.
 
@@ -360,7 +614,7 @@ routing. 171 new tests, 4256 total passing.
 ## [1.15.0] - 2026-04-13
 
 CC parity sweep: ports Claude Code's prompt cache, fork-subagent context,
-parallel dispatch, permission FSM, and bash validator pipeline into cc-cortex
+parallel dispatch, permission FSM, and bash validator pipeline into concinno
 so downstream projects (aegis, persona-api) inherit the three core CC pillars
 — tiered caching, security FSM, parallel subagents — that CCC previously
 lacked. 282 new tests, 4085 total passing.
@@ -393,7 +647,7 @@ lacked. 282 new tests, 4085 total passing.
   rollover when today's file hits 200 lines / 25k bytes. Keyword `find_relevant`
   search over a bounded age window, `read_day` / `read_window` retrieval,
   `MemoryEntry.parse_md_line` round-trip. Default root respects
-  `CC_CORTEX_MEMDIR` env var. 642 lines, 32 tests.
+  `CONCINNO_MEMDIR` env var. 642 lines, 32 tests.
 
 ### Added — Pillar 2: parallel subagents (previously BEHIND)
 
@@ -444,11 +698,11 @@ lacked. 282 new tests, 4085 total passing.
 
 ### Added — top-level re-exports
 
-- `cc_cortex.cache` subpackage re-exports all 10 P0/P1/P2 classes +
+- `concinno.cache` subpackage re-exports all 10 P0/P1/P2 classes +
   constants + sinks.
-- `cc_cortex.agent` subpackage extends with fork_context + parallel_dispatch
+- `concinno.agent` subpackage extends with fork_context + parallel_dispatch
   symbols + `COORDINATOR_PROMPT_SNIPPET` constant.
-- `cc_cortex.security` subpackage with permission_mode + bash_validators
+- `concinno.security` subpackage with permission_mode + bash_validators
   re-exports (≈44 public symbols).
 
 ### Added — WIREDO three-tier loader (from earlier 1.14.0 tail)
@@ -471,7 +725,7 @@ lacked. 282 new tests, 4085 total passing.
 
 - Three pillars are now at parity with CC source leaked 2026-04; prior
   audit classified all three as BEHIND / FAR BEHIND. Strangers who
-  `pip install cc-cortex` now get the same fork-cache / bash-validator /
+  `pip install concinno` now get the same fork-cache / bash-validator /
   permission-mode machinery CC uses internally, with the additional
   ZIQ/CBUA guards CCC already had.
 - The `dual_mind` proposal from the earlier red/blue team review
@@ -487,7 +741,7 @@ Multi-tier LLM gateway + few-shot retrieve + multi-step tool loop + 17 skill tem
 - **`escalation` module** (`LLMEscalator`, `escalate`) — auto-fallback chain
   `gemma → haiku → sonnet → opus`. Per-tier circuit breaker persisted via
   `StateStore`, single retry on transient errors, lazy `httpx`/`anthropic`
-  imports so `import cc_cortex.escalation` stays cheap. Claude tiers silently
+  imports so `import concinno.escalation` stays cheap. Claude tiers silently
   skipped when `ANTHROPIC_API_KEY` unset. 28 tests.
 - **`fewshot` module** (`FewshotBank`, `FewshotCase`) — generic solved-case
   store with Jaccard similarity retrieve. Pure stdlib, zero deps. Extracted
@@ -664,17 +918,17 @@ Install tiers: default full-power, opt-in lite.
 
 ### Changed
 
-- **Default install now includes LLM deps** — `pip install cc-cortex`
+- **Default install now includes LLM deps** — `pip install concinno`
   gives you regex guards + LLM semantic guards out of the box.
   No more guessing which extra to pick.
 - **Install tiers**:
-  - `pip install cc-cortex` — full power (LLM included, ~5MB extra)
-  - `pip install cc-cortex[all]` — everything (LLM + RAG)
-  - `pip install cc-cortex[rag]` — adds RAG retrieval (~2GB)
-  - `pip install cc-cortex[llm]` — LLM only (same as default now)
-  - `pip install cc-cortex[lite]` — zero-dep, regex only
+  - `pip install concinno` — full power (LLM included, ~5MB extra)
+  - `pip install concinno[all]` — everything (LLM + RAG)
+  - `pip install concinno[rag]` — adds RAG retrieval (~2GB)
+  - `pip install concinno[llm]` — LLM only (same as default now)
+  - `pip install concinno[lite]` — zero-dep, regex only
 - Existing users can upgrade tiers seamlessly:
-  `pip install --upgrade cc-cortex[all]` adds missing deps without
+  `pip install --upgrade concinno[all]` adds missing deps without
   reinstalling.
 
 ## [1.7.0] - 2026-04-12
@@ -683,7 +937,7 @@ Break the zero-dep ceiling: LLM-backed semantic guards.
 
 ### Added
 
-- **`cc-cortex[llm]` optional dependency** — `pip install cc-cortex[llm]`
+- **`concinno[llm]` optional dependency** — `pip install concinno[llm]`
   adds `anthropic` + `openai` SDK. Core remains zero-dep.
 - **`LLMGuard` abstract base class** — subclass it, set `judge_prompt`,
   get LLM-level semantic judgment with fail-open fallback. If no LLM
@@ -693,12 +947,12 @@ Break the zero-dep ceiling: LLM-backed semantic guards.
   language injection, indirect injection in data, social engineering,
   role-play injection. Goes beyond what regex can catch.
 - Supports Anthropic (Haiku default) and OpenAI (gpt-4o-mini fallback).
-  Model configurable via `CC_CORTEX_LLM_MODEL` env var.
+  Model configurable via `CONCINNO_LLM_MODEL` env var.
 
 ### Notes
 
-- `pip install cc-cortex` still zero-dep (regex-only, 0ms).
-- `pip install cc-cortex[llm]` adds semantic depth (~500ms per check).
+- `pip install concinno` still zero-dep (regex-only, 0ms).
+- `pip install concinno[llm]` adds semantic depth (~500ms per check).
 - Two layers work together: regex catches obvious attacks instantly,
   LLM catches sophisticated attacks that regex misses.
 - 12 new tests (all mocked, no real LLM calls in CI).
@@ -718,7 +972,7 @@ integration + evolution plan.
   destruction_guard → BLOCKED via L1_ccc_pipeline.
 - **Aegis integration** — `persona-api/guards.py` `classify_safety()`
   now tries CCC pipeline first (55+ guards), falls back to local 9
-  regex if cc-cortex not installed. Zero breaking change to Aegis API.
+  regex if concinno not installed. Zero breaking change to Aegis API.
 - **PyPI metadata overhaul** — keywords expanded to 14 terms
   (ai-safety / guardrails / llm-guard / llm-security /
   prompt-injection / agent-governance / agent-safety / a2a).
@@ -848,7 +1102,7 @@ for Claude Code's `type: "prompt"` hook runtime.
   emits `hookSpecificOutput.updatedInput` + an `additionalContext`
   note so the user sees what changed. Rewrites are required to be
   *narrow*, *idempotent*, and *visible*.
-- **Three shipped rewriters** (`cc_cortex.guards.rewrite_guards`):
+- **Three shipped rewriters** (`concinno.guards.rewrite_guards`):
   - `BashDryRunRewriter` — `rm -rf .` / `rm -fr <glob>` → `echo
     '[dry-run] would have run: …'`, preserving the original form
     as a shell comment.
@@ -858,12 +1112,12 @@ for Claude Code's `type: "prompt"` hook runtime.
     (`.env.prod` → `.env.example.prod`). Edit is intentionally
     left alone (rotation, not materialisation).
   - `BashPipeToShellRewriter` — `curl … | bash` / `wget … | sh`
-    rewritten to `curl -fsSL URL -o /tmp/cc-cortex-download.sh &&
+    rewritten to `curl -fsSL URL -o /tmp/concinno-download.sh &&
     echo 'inspect before running'`.
 
   Registered early in the QUALITY layer so downstream guards
   (SecretScan, ExfilGuard, …) see the rewritten input.
-- **`cc_cortex.prompt_hooks`** — LLM-as-Judge reopen (1.3.0 H1). CCC
+- **`concinno.prompt_hooks`** — LLM-as-Judge reopen (1.3.0 H1). CCC
   ships three curated judge prompts as module constants plus a
   settings.json installer that writes `type: "prompt"` hook config
   for Claude Code's built-in prompt-hook runtime. CCC itself never
@@ -880,12 +1134,12 @@ for Claude Code's `type: "prompt"` hook runtime.
   All functions are idempotent, atomic, marker-tagged so user-written
   hooks in the same settings.json are never touched. Default model
   is `claude-haiku-4-5-20251001` (overridable per judge).
-- **`cc_cortex` top-level exports** — `BashDryRunRewriter`,
+- **`concinno` top-level exports** — `BashDryRunRewriter`,
   `BashPipeToShellRewriter`, `WriteSecretFileRewriter`, `PromptJudge`,
   `HALLUCINATION_JUDGE`, `EXCUSE_SCANNER_JUDGE`, `CODE_QUALITY_JUDGE`,
   `ALL_JUDGES`, `build_hook_config`, `install_prompt_hooks`,
   `uninstall_prompt_hooks`, `list_installed_judges`. Strangers can
-  now reach the 1.4.0 surface with a single `import cc_cortex`.
+  now reach the 1.4.0 surface with a single `import concinno`.
 
 ### Changed
 
@@ -931,7 +1185,7 @@ below for why. Never published to PyPI in the intermediate state.
 - **SSOT version guard** — `tests/test_version_sync.py` parses the
   `[project].version` field of `pyproject.toml` and the first
   `## [X.Y.Z]` header of `CHANGELOG.md` and asserts they match
-  `cc_cortex.__version__`. Drift now fails the suite.
+  `concinno.__version__`. Drift now fails the suite.
 
 ### Changed
 
@@ -961,17 +1215,17 @@ below for why. Never published to PyPI in the intermediate state.
   Exception: return`.
 - **`StaticCache.load()` stopped hard-coding author paths** (red team
   #3 坑 1). The initial merge read
-  `projects/cc-cortex/src/cc_cortex/cognitive_anchor.py` and
+  `projects/concinno/src/concinno/cognitive_anchor.py` and
   `.claude/rules/00-L0.md` — both absolute to the author's workspace.
-  New load order: `CC_CORTEX_IDENTITY_PATH` env var →
-  `<workspace>/.cc_cortex/identity.md` → (empty); iron laws come from
-  `CC_CORTEX_L0_RULES_PATH` → `<workspace>/.cc_cortex/l0.md` →
+  New load order: `CONCINNO_IDENTITY_PATH` env var →
+  `<workspace>/.concinno/identity.md` → (empty); iron laws come from
+  `CONCINNO_L0_RULES_PATH` → `<workspace>/.concinno/l0.md` →
   `<workspace>/CLAUDE.md` → (empty). CCC hard rule #1 (no personal
   paths in source) upheld. Dead helper `_extract_anchor_identity`
   removed.
-- **`cc_cortex.__version__` aligned with `pyproject.toml`** — was
+- **`concinno.__version__` aligned with `pyproject.toml`** — was
   stuck at `"1.1.0"` before this release; a stranger calling
-  `cc_cortex.__version__` at runtime got a value that matched no
+  `concinno.__version__` at runtime got a value that matched no
   released version.
 
 ### Fixed
@@ -992,9 +1246,9 @@ below for why. Never published to PyPI in the intermediate state.
   cache dir.
 - **Wheel/sdist artifact symmetry** (red team #1-F3). The wheel
   `force-include` was missing
-  `src/cc_cortex/_cognitive/__init__.py`; sdist already had it via
-  the sdist force-include fix. `pip install cc-cortex` and
-  `pip install --no-binary=:all: cc-cortex` now produce identical
+  `src/concinno/_cognitive/__init__.py`; sdist already had it via
+  the sdist force-include fix. `pip install concinno` and
+  `pip install --no-binary=:all: concinno` now produce identical
   package trees.
 
 ### Removed
@@ -1011,7 +1265,7 @@ below for why. Never published to PyPI in the intermediate state.
   architectural layer. Removing it kills a dead API before it hit
   PyPI and can be redesigned properly in a future release if a real
   hook-side consumer emerges.
-- **P2 Persona Router** — `cc_cortex.persona_router` module
+- **P2 Persona Router** — `concinno.persona_router` module
   (`PersonaRouter`, `infer_mode`, `MODES`, `DEFAULT_MODE`,
   `RouteExplanation`), `cognitive_inject.build_persona_directive`,
   `_PERSONA_DIRECTIVES`, the `persona_directive` dynamic slot, and
@@ -1049,7 +1303,7 @@ below for why. Never published to PyPI in the intermediate state.
   intermediate merge briefly peaked at 3320 when P1/P2 tests were
   still in the tree). 0 regressions vs 1.2.0.
 - `python -m build` + `twine check dist/*` → PASSED on both wheel
-  and sdist. Wheel verified to contain `cc_cortex/_cognitive/__init__.py`
+  and sdist. Wheel verified to contain `concinno/_cognitive/__init__.py`
   plus all 9 md files and `__version__ == "1.3.0"`.
 
 ## [1.2.0] - 2026-04-10
@@ -1196,7 +1450,7 @@ below for why. Never published to PyPI in the intermediate state.
 - **Agent Gate**: Misuse detection for unnecessary agent spawning
 - **MCP Server**: JSON-RPC stdio transport for Claude Code native integration
 - **Three-layer coordination**: Strategy Pattern extraction for cognitive layer
-- **Skills system**: `cc-cortex skills install/list/create` + SKILL.md templates
+- **Skills system**: `concinno skills install/list/create` + SKILL.md templates
 - **Process Guard**: ctypes-based Windows process tree enumeration
 - **Three Strike v2**: Auto-escalation with kb→rules→hook pipeline
 - **Status dashboard**: `/status` skill with terminal box-drawing UI
@@ -1218,9 +1472,9 @@ below for why. Never published to PyPI in the intermediate state.
 
 ### Added
 
-- **Autopilot module**: Autonomous task execution with MODULES registry + CLI 8 subcommands (`cc-cortex autopilot status/start/stop/config/logs/history/retry/reset`)
+- **Autopilot module**: Autonomous task execution with MODULES registry + CLI 8 subcommands (`concinno autopilot status/start/stop/config/logs/history/retry/reset`)
 - **Destruction Guard module**: R0-R4 risk classification for tool calls, backup engine, audit logging, integrated into `on_pre_tool.py`
-- **Backup CLI**: `cc-cortex backup list/cleanup/restore/pin/unpin` — 5 subcommands for managing safety backups
+- **Backup CLI**: `concinno backup list/cleanup/restore/pin/unpin` — 5 subcommands for managing safety backups
 - **Compact enhancement**: Transcript user-command extraction + full task reading + dual-format output (JSON+TXT)
 
 ### Changed
@@ -1241,7 +1495,7 @@ below for why. Never published to PyPI in the intermediate state.
 - **Security module**: 14-pattern prompt injection scanner with 100% detection / 0% FP rate
 - **Webhook module**: HTTP POST session events to Slack/dashboards
 - **TypeScript SHA256 caching**: cache-hit latency <2ms (vs 15s full recheck)
-- **Benchmark suite**: 7 benchmarks with competitor comparison (`cc-cortex benchmark`)
+- **Benchmark suite**: 7 benchmarks with competitor comparison (`concinno benchmark`)
 - **CLI `doctor` command**: health check for hooks, settings, config
 - **CLI `uninstall` command**: clean removal of all hooks
 - **CLI `benchmark` command**: run and display performance benchmarks
@@ -1265,7 +1519,7 @@ below for why. Never published to PyPI in the intermediate state.
 ### Fixed
 
 - **C1**: CLI enable/disable now actually reads/writes `cc_config.json` modules
-- **C2**: `cc-cortex init` copies real hook templates (not missing source files)
+- **C2**: `concinno init` copies real hook templates (not missing source files)
 - **C3**: Full test suite added (was zero tests)
 - **C4**: `scavenger.py` — `cfg.raw("scavenger", {})` replaces broken `.get()` call
 - **C5**: Config singleton respects new `hooks_dir` parameter
@@ -1283,4 +1537,4 @@ below for why. Never published to PyPI in the intermediate state.
 - **Quality**: C4 quality scoring (completeness, correctness, focus, efficiency)
 - **Evolution**: Three daily reflections + entropy reduction automation
 - **TypeScript**: Automatic `tsc --noEmit` validation within 15s
-- **CLI**: `cc-cortex init`, `cc-cortex enable/disable`, `cc-cortex status`
+- **CLI**: `concinno init`, `concinno enable/disable`, `concinno status`

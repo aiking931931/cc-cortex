@@ -1,4 +1,4 @@
-"""Tests for ``cc_cortex.tools.builtin.file_io`` — FileRead/Write/Edit.
+"""Tests for ``concinno.tools.builtin.file_io`` — FileRead/Write/Edit.
 
 The readFileState write-gate invariant is the central contract here: Write
 and Edit must refuse to touch a pre-existing file unless FileRead has
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.tools.builtin.file_io import (
+from concinno.tools.builtin.file_io import (
     DEFAULT_MAX_BYTES,
     BinaryFileError,
     FileEdit,
@@ -37,7 +37,7 @@ from cc_cortex.tools.builtin.file_io import (
 
 @pytest.fixture()
 def cache_dir(tmp_path: Path) -> str:
-    d = tmp_path / ".cc_cortex_cache"
+    d = tmp_path / ".concinno_cache"
     d.mkdir()
     return str(d)
 
@@ -288,7 +288,7 @@ def test_write_atomic_via_tempfile(
     writer.call(file_path=str(target), content="payload")
     # No stray tempfiles left behind.
     leftovers = [
-        p for p in tmp_path.iterdir() if p.name.startswith(".cc_cortex_write_")
+        p for p in tmp_path.iterdir() if p.name.startswith(".concinno_write_")
     ]
     assert leftovers == []
 

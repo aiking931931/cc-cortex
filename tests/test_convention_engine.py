@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.convention_engine."""
+"""Tests for concinno.convention_engine."""
 
 from __future__ import annotations
 
-from cc_cortex.convention_engine import (
+from concinno.convention_engine import (
     ConventionEngine,
     check_naming,
     suggest_path,
@@ -50,9 +50,9 @@ class TestSuggestPlacement:
 
     def test_handoff_placement(self):
         engine = ConventionEngine()
-        path = engine.suggest_placement("交接_CCC.md", project="cc-cortex")
+        path = engine.suggest_placement("交接_CCC.md", project="concinno")
         assert "06_Handoffs" in path
-        assert "cc-cortex" in path
+        assert "concinno" in path
 
     def test_feedback_placement(self):
         engine = ConventionEngine()

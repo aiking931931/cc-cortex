@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.core.defer_loader — DeferLoader + truncation + recovery."""
+"""Tests for concinno.core.defer_loader — DeferLoader + truncation + recovery."""
 
 from __future__ import annotations
 
-from cc_cortex.core.defer_loader import (
+from concinno.core.defer_loader import (
     DeferLoader,
     ModuleEntry,
     RecoveryResult,

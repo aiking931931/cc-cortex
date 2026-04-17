@@ -22,7 +22,7 @@ import time
 # Ensure package is importable when running from repo root
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent / "src"))
 
-from cc_cortex.ui.colors import (
+from concinno.ui.colors import (
     BOLD,
     BRIGHT_BLACK,
     BRIGHT_CYAN,
@@ -194,8 +194,8 @@ def scene_token_warning() -> None:
 
 
 def scene_doctor() -> None:
-    """Scene 5: Health check (cc-cortex doctor)."""
-    _print_header("Scene 5: cc-cortex doctor")
+    """Scene 5: Health check (concinno doctor)."""
+    _print_header("Scene 5: concinno doctor")
 
     _type(c("Running health check...", DIM))
     _delay(0.3)
@@ -252,9 +252,9 @@ def run_all() -> None:
     print()
     print(c("=" * 60, DIM))
     print(c("  Demo complete!", BOLD, BRIGHT_GREEN))
-    print(c("  Install: ", DIM) + c("pip install cc-cortex", BOLD))
-    print(c("  Setup:   ", DIM) + c("cc-cortex init", BOLD))
-    print(c("  Docs:    ", DIM) + c("https://github.com/anthropics-community/cc-cortex", BOLD))
+    print(c("  Install: ", DIM) + c("pip install concinno", BOLD))
+    print(c("  Setup:   ", DIM) + c("concinno init", BOLD))
+    print(c("  Docs:    ", DIM) + c("https://github.com/anthropics-community/concinno", BOLD))
     print(c("=" * 60, DIM))
     print()
 
@@ -276,7 +276,7 @@ def main() -> None:
 
     if args.plain:
         os.environ["NO_COLOR"] = "1"
-        from cc_cortex.ui.colors import reset_color_cache
+        from concinno.ui.colors import reset_color_cache
 
         reset_color_cache()
 

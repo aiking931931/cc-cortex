@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.scheduler."""
+"""Tests for concinno.scheduler."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 from unittest.mock import patch
 
-from cc_cortex.scheduler import (
+from concinno.scheduler import (
     TaskConfig,
     _check_dedup,
     _rotate_log,
@@ -161,7 +161,7 @@ class TestLaunchTask:
         assert result.skipped is True
         assert "disabled" in result.skip_reason
 
-    @patch("cc_cortex.scheduler._check_active_sessions", return_value="active session")
+    @patch("concinno.scheduler._check_active_sessions", return_value="active session")
     def test_active_session_skipped(self, mock_check):
         task = TaskConfig(
             name="test",
@@ -180,7 +180,7 @@ class TestLaunchTask:
 
 class TestSkillInstaller:
     def test_install_skills(self):
-        from cc_cortex.skills.installer import install_skills
+        from concinno.skills.installer import install_skills
 
         with tempfile.TemporaryDirectory() as td:
             installed = install_skills(td)

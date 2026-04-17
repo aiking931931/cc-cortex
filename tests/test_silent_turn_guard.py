@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.stop_guard.detect_silent_turn_end.
+"""Tests for concinno.stop_guard.detect_silent_turn_end.
 
 Root cause: MEMORY #15 handoff cognitive desync + WIREDO-D violation.
 After last mutating tool call, assistant must emit a summary; silent
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from cc_cortex.stop_guard import (
+from concinno.stop_guard import (
     _classify_bash,
     _classify_tool_call,
     _find_last_mutation,
@@ -331,7 +331,7 @@ class TestOnStopSilentTurnIntegration:
                                               monkeypatch):
         state_file = str(tmp_path / "block.json")
         monkeypatch.setattr(
-            "cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file,
+            "concinno.stop_guard._BLOCK_STATE_PATH", state_file,
         )
         data = {
             "session_id": "silent-test",
@@ -349,7 +349,7 @@ class TestOnStopSilentTurnIntegration:
                                               monkeypatch):
         state_file = str(tmp_path / "block.json")
         monkeypatch.setattr(
-            "cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file,
+            "concinno.stop_guard._BLOCK_STATE_PATH", state_file,
         )
         data = {
             "session_id": "silent-test-2",
@@ -370,7 +370,7 @@ class TestOnStopSilentTurnIntegration:
                                             monkeypatch):
         state_file = str(tmp_path / "block.json")
         monkeypatch.setattr(
-            "cc_cortex.stop_guard._BLOCK_STATE_PATH", state_file,
+            "concinno.stop_guard._BLOCK_STATE_PATH", state_file,
         )
         monkeypatch.setenv("CCC_SILENT_TURN_GUARD", "0")
         data = {

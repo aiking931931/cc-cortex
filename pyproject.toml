@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cc-cortex"
-version = "1.18.1"
-description = "AI behavior governance for Claude Code — 55+ guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
+name = "concinno"
+version = "2.3.0"
+description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
@@ -62,8 +62,20 @@ rag = [
 # Bundles
 lite = []  # zero-dep, regex-only — explicitly named for clarity
 all = [
-    "cc-cortex[llm]",
-    "cc-cortex[rag]",
+    "concinno[llm]",
+    "concinno[rag]",
+]
+# Windows-only: browser automation + desktop control
+windows = [
+    "playwright>=1.40",
+    "pywinauto>=0.6.8",
+    "mss>=9.0",
+    "pyperclip>=1.8",
+]
+# Windows full: everything
+windows-full = [
+    "concinno[all]",
+    "concinno[windows]",
 ]
 dev = [
     "pytest>=7.0",
@@ -78,56 +90,56 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/anthropics-community/cc-cortex"
-Repository = "https://github.com/anthropics-community/cc-cortex"
-Documentation = "https://github.com/anthropics-community/cc-cortex#readme"
-Issues = "https://github.com/anthropics-community/cc-cortex/issues"
-Changelog = "https://github.com/anthropics-community/cc-cortex/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/aiking931931/concinno"
+Repository = "https://github.com/aiking931931/concinno"
+Documentation = "https://github.com/aiking931931/concinno#readme"
+Issues = "https://github.com/aiking931931/concinno/issues"
+Changelog = "https://github.com/aiking931931/concinno/blob/main/CHANGELOG.md"
 
 [project.scripts]
-cc-cortex = "cc_cortex.cli:main"
-cc-guard = "cc_cortex.process_guard:main"
-cc-scheduler = "cc_cortex.scheduler:main"
-cc-skills = "cc_cortex.skills.installer:main"
-cc-rag = "cc_cortex.rag:cli_main"
-cc-handoff-index = "cc_cortex.handoff_index:main"
-cc-handoff-tag = "cc_cortex.handoff_auto_tag:main"
+concinno = "concinno.cli:main"
+concinno-guard = "concinno.process_guard:main"
+concinno-scheduler = "concinno.scheduler:main"
+concinno-skills = "concinno.skills.installer:main"
+concinno-rag = "concinno.rag:cli_main"
+concinno-handoff-index = "concinno.handoff_index:main"
+concinno-handoff-tag = "concinno.handoff_auto_tag:main"
 
 [tool.hatch.build.targets.sdist]
-include = ["src/cc_cortex", "knowledge"]
+include = ["src/concinno", "knowledge"]
 # _cognitive/ is in .gitignore (internal authoring flags) but the *.md
 # cognitive prompts are tracked and packaged. Force-include bypasses
 # hatchling's VCS-aware exclusion so sdist → wheel rebuild can find them.
 [tool.hatch.build.targets.sdist.force-include]
-"src/cc_cortex/_cognitive/three_layer.md" = "src/cc_cortex/_cognitive/three_layer.md"
-"src/cc_cortex/_cognitive/first_principles.md" = "src/cc_cortex/_cognitive/first_principles.md"
-"src/cc_cortex/_cognitive/prompt_select.md" = "src/cc_cortex/_cognitive/prompt_select.md"
-"src/cc_cortex/_cognitive/debug_loop.md" = "src/cc_cortex/_cognitive/debug_loop.md"
-"src/cc_cortex/_cognitive/decision_journal.md" = "src/cc_cortex/_cognitive/decision_journal.md"
-"src/cc_cortex/_cognitive/pdca.md" = "src/cc_cortex/_cognitive/pdca.md"
-"src/cc_cortex/_cognitive/judgment.md" = "src/cc_cortex/_cognitive/judgment.md"
-"src/cc_cortex/_cognitive/awareness.md" = "src/cc_cortex/_cognitive/awareness.md"
-"src/cc_cortex/_cognitive/learning_loop.md" = "src/cc_cortex/_cognitive/learning_loop.md"
-"src/cc_cortex/_cognitive/__init__.py" = "src/cc_cortex/_cognitive/__init__.py"
+"src/concinno/_cognitive/three_layer.md" = "src/concinno/_cognitive/three_layer.md"
+"src/concinno/_cognitive/first_principles.md" = "src/concinno/_cognitive/first_principles.md"
+"src/concinno/_cognitive/prompt_select.md" = "src/concinno/_cognitive/prompt_select.md"
+"src/concinno/_cognitive/debug_loop.md" = "src/concinno/_cognitive/debug_loop.md"
+"src/concinno/_cognitive/decision_journal.md" = "src/concinno/_cognitive/decision_journal.md"
+"src/concinno/_cognitive/pdca.md" = "src/concinno/_cognitive/pdca.md"
+"src/concinno/_cognitive/judgment.md" = "src/concinno/_cognitive/judgment.md"
+"src/concinno/_cognitive/awareness.md" = "src/concinno/_cognitive/awareness.md"
+"src/concinno/_cognitive/learning_loop.md" = "src/concinno/_cognitive/learning_loop.md"
+"src/concinno/_cognitive/__init__.py" = "src/concinno/_cognitive/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cc_cortex"]
+packages = ["src/concinno"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/cc_cortex/skills/guard.md" = "cc_cortex/skills/guard.md"
-"src/cc_cortex/skills/schedule.md" = "cc_cortex/skills/schedule.md"
-"src/cc_cortex/skills/hooks.md" = "cc_cortex/skills/hooks.md"
-"src/cc_cortex/_cognitive/__init__.py" = "cc_cortex/_cognitive/__init__.py"
-"src/cc_cortex/_cognitive/three_layer.md" = "cc_cortex/_cognitive/three_layer.md"
-"src/cc_cortex/_cognitive/first_principles.md" = "cc_cortex/_cognitive/first_principles.md"
-"src/cc_cortex/_cognitive/prompt_select.md" = "cc_cortex/_cognitive/prompt_select.md"
-"src/cc_cortex/_cognitive/debug_loop.md" = "cc_cortex/_cognitive/debug_loop.md"
-"src/cc_cortex/_cognitive/decision_journal.md" = "cc_cortex/_cognitive/decision_journal.md"
-"src/cc_cortex/_cognitive/pdca.md" = "cc_cortex/_cognitive/pdca.md"
-"src/cc_cortex/_cognitive/judgment.md" = "cc_cortex/_cognitive/judgment.md"
-"src/cc_cortex/_cognitive/awareness.md" = "cc_cortex/_cognitive/awareness.md"
-"src/cc_cortex/_cognitive/learning_loop.md" = "cc_cortex/_cognitive/learning_loop.md"
-"knowledge" = "cc_cortex/knowledge"
+"src/concinno/skills/guard.md" = "concinno/skills/guard.md"
+"src/concinno/skills/schedule.md" = "concinno/skills/schedule.md"
+"src/concinno/skills/hooks.md" = "concinno/skills/hooks.md"
+"src/concinno/_cognitive/__init__.py" = "concinno/_cognitive/__init__.py"
+"src/concinno/_cognitive/three_layer.md" = "concinno/_cognitive/three_layer.md"
+"src/concinno/_cognitive/first_principles.md" = "concinno/_cognitive/first_principles.md"
+"src/concinno/_cognitive/prompt_select.md" = "concinno/_cognitive/prompt_select.md"
+"src/concinno/_cognitive/debug_loop.md" = "concinno/_cognitive/debug_loop.md"
+"src/concinno/_cognitive/decision_journal.md" = "concinno/_cognitive/decision_journal.md"
+"src/concinno/_cognitive/pdca.md" = "concinno/_cognitive/pdca.md"
+"src/concinno/_cognitive/judgment.md" = "concinno/_cognitive/judgment.md"
+"src/concinno/_cognitive/awareness.md" = "concinno/_cognitive/awareness.md"
+"src/concinno/_cognitive/learning_loop.md" = "concinno/_cognitive/learning_loop.md"
+"knowledge" = "concinno/knowledge"
 # templates/ 已由 packages 自動打包，不需 force-include
 # force-include 會造成 duplicate name warning
 
@@ -143,10 +155,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "cc_cortex.delivery.*",
-    "cc_cortex.cognitive.*",
-    "cc_cortex.process_guard.*",
-    "cc_cortex.guards.*",
+    "concinno.delivery.*",
+    "concinno.cognitive.*",
+    "concinno.process_guard.*",
+    "concinno.guards.*",
 ]
 disallow_untyped_defs = true
 
@@ -164,7 +176,7 @@ select = ["E", "F", "I", "W"]
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["cc_cortex"]
+source = ["concinno"]
 omit = [
     "*/hooks/*",
     "*/_recycled/*",

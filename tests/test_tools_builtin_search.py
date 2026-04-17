@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.tools.builtin.search — FileGlob and FileGrep."""
+"""Tests for concinno.tools.builtin.search — FileGlob and FileGrep."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from cc_cortex.tools.builtin.search import (
+from concinno.tools.builtin.search import (
     EXCLUDED_DIRS,
     FileGlob,
     FileGrep,
@@ -336,7 +336,7 @@ class TestFileGrep:
     ):
         _touch(tmp_path / "a.py", "needle\n")
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.shutil.which",
+            "concinno.tools.builtin.search.shutil.which",
             lambda _: None,
         )
         tool = FileGrep()
@@ -381,7 +381,7 @@ class TestFileGrep:
     ):
         _touch(tmp_path / "a.py", "needle\n")
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.shutil.which",
+            "concinno.tools.builtin.search.shutil.which",
             lambda _: "/usr/bin/rg",
         )
 
@@ -394,7 +394,7 @@ class TestFileGrep:
             return FakeProc()
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.subprocess.run", fake_run
+            "concinno.tools.builtin.search.subprocess.run", fake_run
         )
         tool = FileGrep()
         result = tool.call(
@@ -409,7 +409,7 @@ class TestFileGrep:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.shutil.which",
+            "concinno.tools.builtin.search.shutil.which",
             lambda _: "/usr/bin/rg",
         )
 
@@ -419,7 +419,7 @@ class TestFileGrep:
             stderr = ""
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.subprocess.run",
+            "concinno.tools.builtin.search.subprocess.run",
             lambda *a, **k: FakeProc(),
         )
         tool = FileGrep()
@@ -436,7 +436,7 @@ class TestFileGrep:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.shutil.which",
+            "concinno.tools.builtin.search.shutil.which",
             lambda _: "/usr/bin/rg",
         )
 
@@ -446,7 +446,7 @@ class TestFileGrep:
             stderr = ""
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.subprocess.run",
+            "concinno.tools.builtin.search.subprocess.run",
             lambda *a, **k: FakeProc(),
         )
         tool = FileGrep()
@@ -460,7 +460,7 @@ class TestFileGrep:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.shutil.which",
+            "concinno.tools.builtin.search.shutil.which",
             lambda _: "/usr/bin/rg",
         )
 
@@ -470,7 +470,7 @@ class TestFileGrep:
             stderr = ""
 
         monkeypatch.setattr(
-            "cc_cortex.tools.builtin.search.subprocess.run",
+            "concinno.tools.builtin.search.subprocess.run",
             lambda *a, **k: FakeProc(),
         )
         tool = FileGrep()

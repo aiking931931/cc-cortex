@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.step_back — two-tier gate buffer."""
+"""Tests for concinno.step_back — two-tier gate buffer."""
 
 import os
 
 import pytest
 
-from cc_cortex.step_back import (
+from concinno.step_back import (
     clear_global_failures,
     clear_state,
     record_global_failure,

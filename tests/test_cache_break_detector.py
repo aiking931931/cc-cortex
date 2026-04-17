@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cache.cache_break_detector."""
+"""Tests for concinno.cache.cache_break_detector."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from cc_cortex.cache.cache_break_detector import (
+from concinno.cache.cache_break_detector import (
     BreakReport,
     CacheBreakDetector,
     PreviousState,

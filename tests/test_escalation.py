@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.escalation — multi-tier LLM gateway.
+"""Tests for concinno.escalation — multi-tier LLM gateway.
 
 All network I/O is mocked at the httpx.Client / anthropic.Anthropic level.
 No real API calls, no real sockets.
@@ -13,13 +13,15 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from cc_cortex.escalation import (
+from concinno.escalation import (
     DEFAULT_CHAIN,
     CircuitOpen,
     EscalationExhausted,
     EscalationResult,
     LLMEscalator,
     TierResult,
+    _anthropic_model_for,
+    _is_opus_4_7_plus,
     escalate,
 )
 
@@ -416,6 +418,110 @@ def test_token_counts_populated(
     result2 = esc.escalate(messages, force_tier="haiku")
     assert result2.final.tokens_in == 5
     assert result2.final.tokens_out == 6
+
+
+# ── Opus 4.7 compatibility ─────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "model_id,expected",
+    [
+        ("claude-opus-4-7", True),
+        ("claude-opus-4-7-20260416", True),
+        ("claude-opus-4-8", True),
+        ("claude-opus-5-0", True),
+        ("claude-opus-4-6", False),
+        ("claude-opus-4-5", False),
+        ("claude-opus-4-1", False),
+        ("claude-opus-3-5", False),
+        ("claude-sonnet-4-6", False),
+        ("claude-haiku-4-5", False),
+        ("gpt-4o", False),
+        ("claude-opus", False),
+        ("claude-opus-vnext", False),
+    ],
+)
+def test_is_opus_4_7_plus_detector(model_id: str, expected: bool) -> None:
+    assert _is_opus_4_7_plus(model_id) is expected
+
+
+def test_default_opus_model_is_4_7(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CONCINNO_OPUS_MODEL", raising=False)
+    assert _anthropic_model_for("opus") == "claude-opus-4-7"
+
+
+def test_opus_env_override_respected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONCINNO_OPUS_MODEL", "claude-opus-4-6")
+    assert _anthropic_model_for("opus") == "claude-opus-4-6"
+
+
+def test_opus_4_7_strips_temperature(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """Opus 4.7 rejects non-default temperature with 400 — must not be sent."""
+    anth = _mk_anth_client(_mk_anth_response("opus 4.7 reply"))
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=anth,
+    )
+    esc.escalate(messages, force_tier="opus")
+    anth.messages.create.assert_called_once()
+    kwargs = anth.messages.create.call_args.kwargs
+    assert kwargs["model"] == "claude-opus-4-7"
+    assert "temperature" not in kwargs
+    assert "top_p" not in kwargs
+    assert "top_k" not in kwargs
+
+
+def test_opus_4_6_keeps_temperature(
+    tmp_path: Any,
+    messages: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-4.7 Opus (and all Sonnet/Haiku) still accept temperature."""
+    monkeypatch.setenv("CONCINNO_OPUS_MODEL", "claude-opus-4-6")
+    anth = _mk_anth_client(_mk_anth_response("opus 4.6 reply"))
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=anth,
+    )
+    esc.escalate(messages, force_tier="opus", temperature=0.5)
+    kwargs = anth.messages.create.call_args.kwargs
+    assert kwargs["model"] == "claude-opus-4-6"
+    assert kwargs["temperature"] == 0.5
+
+
+def test_sonnet_keeps_temperature(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    anth = _mk_anth_client(_mk_anth_response("sonnet reply"))
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=anth,
+    )
+    esc.escalate(messages, force_tier="sonnet", temperature=0.4)
+    kwargs = anth.messages.create.call_args.kwargs
+    assert kwargs["temperature"] == 0.4
+
+
+def test_escalate_default_max_tokens_4096(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """Default raised from 2048 → 4096 for Opus 4.7 new tokenizer."""
+    anth = _mk_anth_client(_mk_anth_response("ok"))
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=anth,
+    )
+    esc.escalate(messages, force_tier="opus")
+    kwargs = anth.messages.create.call_args.kwargs
+    assert kwargs["max_tokens"] == 4096
 
 
 def test_latency_recorded_monotonic(

@@ -4,8 +4,8 @@ import json
 import os
 import time
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.sedimentation_gate import (
+from concinno.core.state_store import StateStore
+from concinno.sedimentation_gate import (
     _find_session_corrections,
     _is_valid_feedback,
     _scan_dir_for_feedback,
@@ -175,7 +175,7 @@ class TestOnStop:
         )
 
         # Manually set block_count=3 (already hit deadlock threshold)
-        cache_dir = tmp_path / ".cc_cortex_cache"
+        cache_dir = tmp_path / ".concinno_cache"
         cache_dir.mkdir(parents=True)
         store = StateStore(str(cache_dir))
         store.write("sedimentation_gate", session_id, {"block_count": 3})

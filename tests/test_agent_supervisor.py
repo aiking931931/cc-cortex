@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.agent_supervisor — supervised subagent framework."""
+"""Tests for concinno.agent_supervisor — supervised subagent framework."""
 
 from __future__ import annotations
 
 import os
 import tempfile
 
-from cc_cortex.agent_supervisor import (
+from concinno.agent_supervisor import (
     AgentSupervisor,
     SupervisedTask,
     VerificationResult,

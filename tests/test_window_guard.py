@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.window_guard — Console window flash prevention."""
+"""Tests for concinno.window_guard — Console window flash prevention."""
 
 from __future__ import annotations
 
-from cc_cortex.window_guard import check
+from concinno.window_guard import check
 
 
 class TestWindowGuardCheck:

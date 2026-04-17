@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.tool_executor."""
+"""Tests for concinno.tool_executor."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from cc_cortex.tool_executor import (
+from concinno.tool_executor import (
     CircuitOpen,
     ExecutionState,
     Tool,
@@ -725,7 +725,7 @@ def test_run_batched_max_concurrency_caps_width(tmp_path: Any) -> None:
 
 
 def test_run_batched_env_var_override(tmp_path: Any, monkeypatch: Any) -> None:
-    monkeypatch.setenv("CC_CORTEX_MAX_TOOL_USE_CONCURRENCY", "3")
+    monkeypatch.setenv("CONCINNO_MAX_TOOL_USE_CONCURRENCY", "3")
     delay = 0.1
     tools = [_ReadTool(f"r{i}", delay=delay) for i in range(6)]
     ex = ToolExecutor([], escalator=None, cache_dir=str(tmp_path))
@@ -739,8 +739,8 @@ def test_run_batched_env_var_override(tmp_path: Any, monkeypatch: Any) -> None:
     assert elapsed >= 0.18, f"env override should chunk to 3, got {elapsed:.2f}s"
     assert elapsed < 0.5
     # Confirm env-derived default reads correctly even when reverted.
-    monkeypatch.delenv("CC_CORTEX_MAX_TOOL_USE_CONCURRENCY", raising=False)
-    assert os.environ.get("CC_CORTEX_MAX_TOOL_USE_CONCURRENCY") is None
+    monkeypatch.delenv("CONCINNO_MAX_TOOL_USE_CONCURRENCY", raising=False)
+    assert os.environ.get("CONCINNO_MAX_TOOL_USE_CONCURRENCY") is None
 
 
 def test_run_batched_error_in_one_tool_others_complete(tmp_path: Any) -> None:

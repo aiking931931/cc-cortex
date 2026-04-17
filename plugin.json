@@ -1,6 +1,6 @@
 {
   "$schema": "https://claude.ai/schemas/plugin/v1.json",
-  "name": "cc-cortex",
+  "name": "concinno",
   "displayName": "CC Cortex — The Cognitive Layer for Claude Code",
   "version": "0.9.0",
   "description": "Safety guardrails, memory, multi-instance coordination, and cognitive architecture for Claude Code. Zero dependencies.",
@@ -9,15 +9,15 @@
     "email": "me@ai-king.dev"
   },
   "license": "Apache-2.0",
-  "repository": "https://github.com/anthropics-community/cc-cortex",
-  "homepage": "https://github.com/anthropics-community/cc-cortex",
+  "repository": "https://github.com/anthropics-community/concinno",
+  "homepage": "https://github.com/anthropics-community/concinno",
   "engines": {
     "claude-code": ">=1.0.0",
     "python": ">=3.10"
   },
   "install": {
-    "pip": "pip install cc-cortex",
-    "init": "cc-cortex init"
+    "pip": "pip install concinno",
+    "init": "concinno init"
   },
   "capabilities": {
     "agents": 36,
@@ -40,13 +40,13 @@
     }
   },
   "hooks": {
-    "PreToolUse": "python -m cc_cortex.hooks.on_pre_tool",
-    "PostToolUse": "python -m cc_cortex.hooks.on_post_tool",
-    "SessionStart": "python -m cc_cortex.hooks.on_session_start",
-    "PromptSubmit": "python -m cc_cortex.hooks.on_prompt_submit",
-    "PreCompact": "python -m cc_cortex.hooks.on_pre_compact",
-    "PostCompact": "python -m cc_cortex.hooks.on_post_compact",
-    "Stop": "python -m cc_cortex.hooks.on_stop"
+    "PreToolUse": "python -m concinno.hooks.on_pre_tool",
+    "PostToolUse": "python -m concinno.hooks.on_post_tool",
+    "SessionStart": "python -m concinno.hooks.on_session_start",
+    "PromptSubmit": "python -m concinno.hooks.on_prompt_submit",
+    "PreCompact": "python -m concinno.hooks.on_pre_compact",
+    "PostCompact": "python -m concinno.hooks.on_post_compact",
+    "Stop": "python -m concinno.hooks.on_stop"
   },
   "keywords": [
     "claude-code",

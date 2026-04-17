@@ -3,7 +3,7 @@
 CC Cortex supports three handoff modes that trade off **token conservation**
 against **execution continuity**. Mode is read from
 `${CLAUDE_PROJECT_DIR}/.claude/hooks/cc_config.json` via
-`cc_cortex.handoff_engine.get_handoff_mode()`. Default is `phase`.
+`concinno.handoff_engine.get_handoff_mode()`. Default is `phase`.
 
 ## Quick comparison
 
@@ -98,7 +98,7 @@ From the agent (internal behaviour under `full`):
 ## Programmatic check
 
 ```python
-from cc_cortex.handoff_engine import is_full_autonomous, get_handoff_mode
+from concinno.handoff_engine import is_full_autonomous, get_handoff_mode
 
 if is_full_autonomous():
     # Skip ask-user prompts, skip soft reminders,

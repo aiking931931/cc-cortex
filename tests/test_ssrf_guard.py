@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.security.ssrf_guard (Layer 7 Hermes-parity)."""
+"""Tests for concinno.security.ssrf_guard (Layer 7 Hermes-parity)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import socket
 
 import pytest
 
-from cc_cortex.security.ssrf_guard import (
+from concinno.security.ssrf_guard import (
     CLOUD_METADATA_HOSTS,
     SSRFCheckConfig,
     SSRFGuard,

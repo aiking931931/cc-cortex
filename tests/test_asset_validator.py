@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.asset_validator — Universal asset validation framework."""
+"""Tests for concinno.asset_validator — Universal asset validation framework."""
 
 from __future__ import annotations
 
 import json
 
-from cc_cortex.asset_validator import (
+from concinno.asset_validator import (
     AssetType,
     AssetValidator,
     DimensionResult,

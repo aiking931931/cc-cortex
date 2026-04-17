@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from cc_cortex.backup_manager import _BACKUP_RE, BackupEntry, BackupManager, _now_stamp
+from concinno.backup_manager import _BACKUP_RE, BackupEntry, BackupManager, _now_stamp
 
 # ── Helpers ──────────────────────────────────────────────
 
@@ -324,6 +324,6 @@ class TestEndToEnd:
 
 class TestImport:
     def test_public_api_import(self):
-        from cc_cortex import BackupManager as BM
+        from concinno import BackupManager as BM
 
         assert BM is BackupManager

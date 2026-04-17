@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cache.session_memory."""
+"""Tests for concinno.cache.session_memory."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.cache.session_memory import (
+from concinno.cache.session_memory import (
     DEFAULT_INIT_TOOL_COUNT,
     DEFAULT_MAX_MD_BYTES,
     DEFAULT_MAX_MD_LINES,

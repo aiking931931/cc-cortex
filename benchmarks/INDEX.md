@@ -14,7 +14,7 @@
 ## 重現指令
 
 ```bash
-cd e:/Cursor/projects/cc-cortex/benchmarks
+cd e:/Cursor/projects/concinno/benchmarks
 
 # 世界第一（E5-PT 專用參數）
 BEIR_DEVICE=cpu python -u sweep_e5pt.py

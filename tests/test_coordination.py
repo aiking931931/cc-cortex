@@ -1,16 +1,16 @@
-"""Tests for cc_cortex.coordination — strategy pattern abstraction."""
+"""Tests for concinno.coordination — strategy pattern abstraction."""
 
 import pytest
 
-from cc_cortex.coordination import (
+from concinno.coordination import (
     CoordinationStrategy,
     LockResult,
     SessionInfo,
     get_strategy,
 )
-from cc_cortex.coordination.agent_teams import AgentTeamsStrategy
-from cc_cortex.coordination.base import CoordinationStrategy as BaseStrategy
-from cc_cortex.coordination.file_lock import FileLockStrategy
+from concinno.coordination.agent_teams import AgentTeamsStrategy
+from concinno.coordination.base import CoordinationStrategy as BaseStrategy
+from concinno.coordination.file_lock import FileLockStrategy
 
 # ── get_strategy selector ─────────────────────────────────────────
 
@@ -533,7 +533,7 @@ class TestRenameSession:
 
     def test_project_abbr_helper(self):
         """Abbreviation map: known projects + override + fallback."""
-        from cc_cortex.coordination.base import project_abbr
+        from concinno.coordination.base import project_abbr
 
         assert project_abbr("psyche") == "PSY"
         assert project_abbr("evolution") == "EVO"
@@ -555,7 +555,7 @@ class TestOSFileLock:
 
     def test_basic_acquire_release(self):
         """A single process can acquire and release the lock."""
-        from cc_cortex.coordination._os_lock import OSFileLock
+        from concinno.coordination._os_lock import OSFileLock
 
         with OSFileLock(self.lock_path, timeout=1.0):
             pass  # Acquired and released cleanly
@@ -565,7 +565,7 @@ class TestOSFileLock:
 
     def test_timeout_when_held(self):
         """A second acquisition times out while the first still holds it."""
-        from cc_cortex.coordination._os_lock import (
+        from concinno.coordination._os_lock import (
             LockAcquireTimeout,
             OSFileLock,
         )
@@ -581,7 +581,7 @@ class TestOSFileLock:
 
     def test_reacquire_after_release(self):
         """After release, another acquire succeeds."""
-        from cc_cortex.coordination._os_lock import OSFileLock
+        from concinno.coordination._os_lock import OSFileLock
 
         lock_a = OSFileLock(self.lock_path, timeout=1.0)
         lock_a.__enter__()

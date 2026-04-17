@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.identity_guard — identity configuration protection."""
+"""Tests for concinno.identity_guard — identity configuration protection."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from cc_cortex.identity_guard import (
+from concinno.identity_guard import (
     check,
     classify_bash_identity,
     is_identity_file,

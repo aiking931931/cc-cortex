@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cache.microcompact.
+"""Tests for concinno.cache.microcompact.
 
 Covers:
 
@@ -18,7 +18,7 @@ from typing import Sequence
 
 import pytest
 
-from cc_cortex.cache.microcompact import (
+from concinno.cache.microcompact import (
     COMPACTABLE_TOOLS,
     TIME_BASED_MC_CLEARED_MESSAGE,
     CacheEdit,

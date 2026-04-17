@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.handoff_claim_guard — detect claimed-but-unwritten handoffs."""
+"""Tests for concinno.handoff_claim_guard — detect claimed-but-unwritten handoffs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import time
 from unittest.mock import patch
 
-from cc_cortex.handoff_claim_guard import (
+from concinno.handoff_claim_guard import (
     _already_blocked,
     _extract_last_assistant_text,
     _has_handoff_claim,
@@ -97,25 +97,25 @@ class TestExtractAssistant:
 
 class TestCircuitBreaker:
     def test_not_blocked_when_no_file(self, tmp_path):
-        with patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH",
+        with patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH",
                     str(tmp_path / "nonexistent.json")):
             assert _already_blocked("sess1") is False
 
     def test_blocked_after_record(self, tmp_path):
         state_path = str(tmp_path / "block.json")
-        with patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH", state_path):
+        with patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH", state_path):
             _record_block("sess1")
             assert _already_blocked("sess1") is True
 
     def test_not_blocked_different_session(self, tmp_path):
         state_path = str(tmp_path / "block.json")
-        with patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH", state_path):
+        with patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH", state_path):
             _record_block("sess1")
             assert _already_blocked("sess2") is False
 
     def test_not_blocked_after_cooldown(self, tmp_path):
         state_path = str(tmp_path / "block.json")
-        with patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH", state_path):
+        with patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH", state_path):
             # Write expired state
             with open(state_path, "w") as f:
                 json.dump({"session_id": "sess1", "ts": time.time() - 400}, f)
@@ -145,8 +145,8 @@ class TestOnStop:
         data = self._hook_data("→ 已寫入交接", session_id="block-test")
         state_path = str(tmp_path / "block.json")
         with (
-            patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH", state_path),
-            patch("cc_cortex.handoff_claim_guard._git_changed_handoff_files", return_value=[]),
+            patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH", state_path),
+            patch("concinno.handoff_claim_guard._git_changed_handoff_files", return_value=[]),
             patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(tmp_path)}),
         ):
             result = on_stop(data)
@@ -158,8 +158,8 @@ class TestOnStop:
         """Claimed handoff and handoff file actually modified → pass."""
         data = self._hook_data("已寫入交接", session_id="pass-test")
         with (
-            patch("cc_cortex.handoff_claim_guard._git_changed_handoff_files",
-                  return_value=["_AI_BRAIN/06_Handoffs/cc-cortex/交接_CC-Cortex.md"]),
+            patch("concinno.handoff_claim_guard._git_changed_handoff_files",
+                  return_value=["_AI_BRAIN/06_Handoffs/concinno/交接_CC-Cortex.md"]),
             patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(tmp_path)}),
         ):
             result = on_stop(data)
@@ -170,8 +170,8 @@ class TestOnStop:
         data = self._hook_data("→ 已寫入交接", session_id="cb-test")
         state_path = str(tmp_path / "block.json")
         with (
-            patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH", state_path),
-            patch("cc_cortex.handoff_claim_guard._git_changed_handoff_files", return_value=[]),
+            patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH", state_path),
+            patch("concinno.handoff_claim_guard._git_changed_handoff_files", return_value=[]),
             patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(tmp_path)}),
         ):
             # First call blocks
@@ -190,8 +190,8 @@ class TestOnStop:
         data = self._hook_data("I wrote the handoff file", session_id="en-test")
         state_path = str(tmp_path / "block.json")
         with (
-            patch("cc_cortex.handoff_claim_guard._BLOCK_STATE_PATH", state_path),
-            patch("cc_cortex.handoff_claim_guard._git_changed_handoff_files", return_value=[]),
+            patch("concinno.handoff_claim_guard._BLOCK_STATE_PATH", state_path),
+            patch("concinno.handoff_claim_guard._git_changed_handoff_files", return_value=[]),
             patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(tmp_path)}),
         ):
             result = on_stop(data)

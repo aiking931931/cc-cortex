@@ -1,20 +1,20 @@
-"""Tests for cc_cortex.agent.retrieve_pipeline — ZIQ cascade pipeline glue."""
+"""Tests for concinno.agent.retrieve_pipeline — ZIQ cascade pipeline glue."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from cc_cortex.agent.iterative_retrieve import (
+from concinno.agent.iterative_retrieve import (
     CascadeConfig,
     IterativeRetriever,
 )
-from cc_cortex.agent.retrieve_pipeline import (
+from concinno.agent.retrieve_pipeline import (
     CascadePipelineResult,
     ZIQCascadePipeline,
 )
-from cc_cortex.cache.cognitive_pool import CognitivePool
-from cc_cortex.cache.l2_distill import L2Distiller, RawHit
-from cc_cortex.ziq_retrieval import ZIQRetrieval
+from concinno.cache.cognitive_pool import CognitivePool
+from concinno.cache.l2_distill import L2Distiller, RawHit
+from concinno.ziq_retrieval import ZIQRetrieval
 
 # ---------------------------------------------------------------------------
 # Fakes

@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.track_classifier."""
+"""Tests for concinno.track_classifier."""
 
 from __future__ import annotations
 
-from cc_cortex.track_classifier import (
+from concinno.track_classifier import (
     CODING_KW,
     CYBER_KW,
     PERSONA_KW,

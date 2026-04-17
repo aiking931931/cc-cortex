@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.git_assist — Git status report generation."""
+"""Tests for concinno.git_assist — Git status report generation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cc_cortex.git_assist import (
+from concinno.git_assist import (
     _format_section,
     _gt,
     _is_secret,
@@ -90,7 +90,7 @@ def _mock_git(responses: dict):
 
 class TestGenerateReport:
     def test_not_a_git_repo(self):
-        with patch("cc_cortex.git_assist._git", return_value=None):
+        with patch("concinno.git_assist._git", return_value=None):
             assert generate_report("/tmp/no-repo") is None
 
     def test_clean_repo(self):
@@ -99,7 +99,7 @@ class TestGenerateReport:
             "status --short": "",
             "branch --show-current": "main",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             assert generate_report("/tmp/clean") is None
 
     def test_staged_only(self):
@@ -108,7 +108,7 @@ class TestGenerateReport:
             "status --short": "A  new_file.py",
             "branch --show-current": "main",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/staged", locale="en")
         assert report is not None
         assert "1 " in report
@@ -121,7 +121,7 @@ class TestGenerateReport:
             "status --short": " M changed.py",
             "branch --show-current": "dev",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/mod", locale="en")
         assert report is not None
         assert "changed.py" in report
@@ -132,7 +132,7 @@ class TestGenerateReport:
             "status --short": "?? temp.txt",
             "branch --show-current": "main",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/unt", locale="en")
         assert report is not None
         assert "temp.txt" in report
@@ -144,7 +144,7 @@ class TestGenerateReport:
             "status --short": status,
             "branch --show-current": "feature",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/mix", locale="en")
         assert report is not None
         assert "3 " in report
@@ -156,7 +156,7 @@ class TestGenerateReport:
             "status --short": lines,
             "branch --show-current": "main",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/many", locale="en")
         assert "+2 " in report
 
@@ -167,7 +167,7 @@ class TestGenerateReport:
             "status --short": lines,
             "branch --show-current": "main",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/many-u", locale="en")
         assert "+2 " in report
 
@@ -179,7 +179,7 @@ class TestGenerateReport:
             "branch --show-current": "main",
         }
         with (
-            patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)),
+            patch("concinno.git_assist._git", side_effect=_mock_git(responses)),
             patch.dict("os.environ", {"CLAUDE_PROJECT_DIR": "/env/dir"}),
         ):
             report = generate_report(locale="en")
@@ -192,7 +192,7 @@ class TestGenerateReport:
             "status --short": "AB",
             "branch --show-current": "main",
         }
-        with patch("cc_cortex.git_assist._git", side_effect=_mock_git(responses)):
+        with patch("concinno.git_assist._git", side_effect=_mock_git(responses)):
             report = generate_report("/tmp/short")
             assert report is None
 
@@ -288,12 +288,12 @@ class TestIsSecret:
         [
             # Scanner source code — talks ABOUT secrets, is not one
             "tests/test_secret_scan.py",
-            "projects/cc-cortex/tests/test_secret_scan.py",
+            "projects/concinno/tests/test_secret_scan.py",
             "src/services/secretScanner.ts",
             "web/src/scanners/secretScanner.ts",
             "downloads/src/services/teamMemorySync/secretScanner.ts",
             "downloads/src/services/teamMemorySync/teamMemSecretGuard.ts",
-            "projects/cc-cortex/src/cc_cortex/secret_scan.py",
+            "projects/concinno/src/concinno/secret_scan.py",
             # Test fixtures — NEVER real credentials
             "__tests__/credentials.test.ts",
             "tests/fixtures/fake_credentials.json",
@@ -309,8 +309,8 @@ class TestIsSecret:
             "api_key.test.tsx",
             "token.spec.js",
             # Source files whose module talks ABOUT secrets
-            "cc_cortex/git_assist.py",
-            "src/cc_cortex/secret_scan.py",
+            "concinno/git_assist.py",
+            "src/concinno/secret_scan.py",
             "kb_security.md",
             "docs/security-best-practices.md",
             # camelCase scanner class — no word separator, no match
@@ -346,7 +346,7 @@ class TestIsSecret:
         assert _is_secret("_AI_BRAIN/00_System/keys/line_channel_credentials.txt")
         assert _is_secret("_AI_BRAIN/00_System/keys/token.json")
         # False positives the old matcher wrongly caught — now fixed
-        assert not _is_secret("projects/cc-cortex/tests/test_secret_scan.py")
+        assert not _is_secret("projects/concinno/tests/test_secret_scan.py")
         assert not _is_secret(
             "downloads/src/services/teamMemorySync/secretScanner.ts"
         )
@@ -363,7 +363,7 @@ class TestAutoCommit:
     """
 
     def test_not_a_git_repo_returns_none(self):
-        with patch("cc_cortex.git_assist._git", return_value=None):
+        with patch("concinno.git_assist._git", return_value=None):
             assert auto_commit("/tmp/no-repo") is None
 
     def test_clean_repo_returns_none(self):
@@ -372,7 +372,7 @@ class TestAutoCommit:
             "status --short": "",
         }
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=_mock_git(responses),
         ):
             assert auto_commit("/tmp/clean") is None
@@ -398,7 +398,7 @@ class TestAutoCommit:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             msg = auto_commit("/tmp/big")
@@ -439,7 +439,7 @@ class TestAutoCommit:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             auto_commit("/tmp/mixed")
@@ -459,7 +459,7 @@ class TestAutoCommit:
             "status --short": " M .env\n M id_rsa",
         }
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=_mock_git(responses),
         ):
             assert auto_commit("/tmp/all-secret") is None
@@ -476,7 +476,7 @@ class TestAutoCommit:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=failing_git,
         ):
             assert auto_commit("/tmp/add-fail") is None
@@ -500,7 +500,7 @@ class TestAutoCommit:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=capturing_git,
         ):
             auto_commit("/tmp/timeout", timeout=5)  # caller asks 5s
@@ -514,8 +514,8 @@ class TestAutoCommit:
 
 class TestIsTrivialPath:
     def test_cache_dir(self):
-        assert _is_trivial_path(".cc_cortex_cache/audit/guard_denies.jsonl")
-        assert _is_trivial_path("projects/cc-cortex/.cc_cortex_cache/x.json")
+        assert _is_trivial_path(".concinno_cache/audit/guard_denies.jsonl")
+        assert _is_trivial_path("projects/concinno/.concinno_cache/x.json")
 
     def test_marker_dir(self):
         assert _is_trivial_path(
@@ -528,18 +528,18 @@ class TestIsTrivialPath:
         )
 
     def test_transcript_path_text(self):
-        assert _is_trivial_path(".cc_cortex_cache/transcript_path.txt")
+        assert _is_trivial_path(".concinno_cache/transcript_path.txt")
 
     def test_streak_ux(self):
-        assert _is_trivial_path(".cc_cortex_cache/streak_ux.json")
+        assert _is_trivial_path(".concinno_cache/streak_ux.json")
 
     def test_windows_backslash_normalised(self):
         assert _is_trivial_path(
-            r".cc_cortex_cache\audit\guard_denies.jsonl",
+            r".concinno_cache\audit\guard_denies.jsonl",
         )
 
     def test_real_source_not_trivial(self):
-        assert not _is_trivial_path("src/cc_cortex/git_assist.py")
+        assert not _is_trivial_path("src/concinno/git_assist.py")
         assert not _is_trivial_path("README.md")
         assert not _is_trivial_path("tests/test_git_assist.py")
 
@@ -561,8 +561,8 @@ class TestAutoCommitSkipGates:
     """
 
     def test_env_override_skips_everything(self, monkeypatch):
-        """`CC_CORTEX_NO_AUTOCOMMIT=1` short-circuits before any git call."""
-        monkeypatch.setenv("CC_CORTEX_NO_AUTOCOMMIT", "1")
+        """`CONCINNO_NO_AUTOCOMMIT=1` short-circuits before any git call."""
+        monkeypatch.setenv("CONCINNO_NO_AUTOCOMMIT", "1")
         called: list[list[str]] = []
 
         def recording_git(args, cwd, timeout=10):
@@ -570,7 +570,7 @@ class TestAutoCommitSkipGates:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             result = auto_commit("/tmp/optout")
@@ -581,9 +581,9 @@ class TestAutoCommitSkipGates:
     def test_skips_when_only_cache_dirty(self):
         """A cache-only working tree should not commit anything."""
         status = (
-            " M .cc_cortex_cache/audit/guard_denies.jsonl\n"
-            " M .cc_cortex_cache/streak_ux.json\n"
-            " M .cc_cortex_cache/transcript_path.txt"
+            " M .concinno_cache/audit/guard_denies.jsonl\n"
+            " M .concinno_cache/streak_ux.json\n"
+            " M .concinno_cache/transcript_path.txt"
         )
         calls: list[list[str]] = []
 
@@ -596,7 +596,7 @@ class TestAutoCommitSkipGates:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             result = auto_commit("/tmp/cache-only")
@@ -623,7 +623,7 @@ class TestAutoCommitSkipGates:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             result = auto_commit("/tmp/marker-only")
@@ -634,8 +634,8 @@ class TestAutoCommitSkipGates:
     def test_commits_when_mixed_real_and_trivial(self):
         """Real source change alongside cache noise must still commit."""
         status = (
-            " M .cc_cortex_cache/audit/guard_denies.jsonl\n"
-            " M src/cc_cortex/git_assist.py"
+            " M .concinno_cache/audit/guard_denies.jsonl\n"
+            " M src/concinno/git_assist.py"
         )
         calls: list[list[str]] = []
 
@@ -654,7 +654,7 @@ class TestAutoCommitSkipGates:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             result = auto_commit("/tmp/mixed")
@@ -684,7 +684,7 @@ class TestAutoCommitSkipGates:
             return ""
 
         with patch(
-            "cc_cortex.git_assist._git",
+            "concinno.git_assist._git",
             side_effect=recording_git,
         ):
             result = auto_commit("/tmp/real")

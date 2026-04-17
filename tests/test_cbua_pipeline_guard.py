@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.guards.cbua_pipeline_guard — PostToolUse CBUA enforcement.
+"""Tests for concinno.guards.cbua_pipeline_guard — PostToolUse CBUA enforcement.
 
 Covers the behavioural signals the guard persists across ticks via
 StateStore:
@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.guards.cbua_pipeline_guard import (
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardContext
+from concinno.guards.cbua_pipeline_guard import (
     CbuaPipelineGuard,
     _is_delivery_command,
 )
@@ -694,7 +694,7 @@ class TestCompetitionMode:
         self, guard, tmp_path, monkeypatch,
     ):
         """on_post_tool returns None under competition regardless of state."""
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
         _preseed_complexity(tmp_path, "complex")
 
         # Pre-populate state that would normally trigger B1 reminder
@@ -729,7 +729,7 @@ class TestCompetitionMode:
         A single Edit under competition must not increment edit_count
         because the early return happens before any StateStore write.
         """
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
         _preseed_complexity(tmp_path, "complicated")
 
         monkeypatch.setattr(
@@ -752,7 +752,7 @@ class TestCompetitionMode:
         mode keeps the existing CBUA pipeline behaviour (reminders +
         state mutation) so the change is strictly additive.
         """
-        from cc_cortex import handoff_engine
+        from concinno import handoff_engine
         _preseed_complexity(tmp_path, "complicated")
 
         monkeypatch.setattr(

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from cc_cortex.cache.microcompact import (
+from concinno.cache.microcompact import (
     POST_COMPACT_MAX_FILES_TO_RESTORE,
     POST_COMPACT_MAX_TOKENS_PER_FILE,
     POST_COMPACT_MAX_TOKENS_PER_SKILL,

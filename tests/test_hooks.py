@@ -1,11 +1,11 @@
-"""Tests for cc-cortex hook templates — throttle, pre_tool, post_tool."""
+"""Tests for concinno hook templates — throttle, pre_tool, post_tool."""
 
 from __future__ import annotations
 
 import json
 
-from cc_cortex.hooks.on_post_tool import _classify, _extract_streak_count, _throttle
-from cc_cortex.hooks.on_pre_tool import main as pre_tool_main
+from concinno.hooks.on_post_tool import _classify, _extract_streak_count, _throttle
+from concinno.hooks.on_pre_tool import main as pre_tool_main
 
 # ─── Three-tier classification ───────────────────────────────────
 

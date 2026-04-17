@@ -31,7 +31,7 @@ from collections import defaultdict
 from beir import util
 from beir.datasets.data_loader import GenericDataLoader
 
-from cc_cortex.star import (
+from concinno.star import (
     BM25Index,
     PROFILE_CONFIG,
     RetrievalProfile,

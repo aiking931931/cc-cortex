@@ -1,6 +1,6 @@
 # Contributor License Agreement (CLA)
 
-Thank you for your interest in contributing to **cc-cortex** ("the Project"), maintained by AI King ("the Maintainer").
+Thank you for your interest in contributing to **concinno** ("the Project"), maintained by AI King ("the Maintainer").
 
 By submitting a Contribution to this Project, you agree to the following terms:
 

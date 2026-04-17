@@ -1,4 +1,4 @@
-"""Tests for :mod:`cc_cortex.cache.memdir`.
+"""Tests for :mod:`concinno.cache.memdir`.
 
 Covers the append-only dated log invariants:
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.cache.memdir import (
+from concinno.cache.memdir import (
     DEFAULT_MAX_BYTES_PER_FILE,
     DEFAULT_MAX_ENTRYPOINT_BYTES,
     DEFAULT_MAX_ENTRYPOINT_LINES,
@@ -413,7 +413,7 @@ def test_stats_empty_when_no_files(tmp_path: Path) -> None:
 
 def test_default_root_respects_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     custom = tmp_path / "custom_memdir"
-    monkeypatch.setenv("CC_CORTEX_MEMDIR", str(custom))
+    monkeypatch.setenv("CONCINNO_MEMDIR", str(custom))
     memdir = Memdir()
     assert memdir.root == custom
     memdir.append(_make_entry(date(2026, 4, 13), summary="env-rooted"))

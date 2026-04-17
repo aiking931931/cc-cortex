@@ -1,8 +1,8 @@
 site_name: CC Cortex
 site_description: The Cognitive Layer for Claude Code
-site_url: https://anthropics-community.github.io/cc-cortex
-repo_url: https://github.com/anthropics-community/cc-cortex
-repo_name: anthropics-community/cc-cortex
+site_url: https://anthropics-community.github.io/tempero
+repo_url: https://github.com/anthropics-community/tempero
+repo_name: anthropics-community/tempero
 copyright: Copyright &copy; 2026 AI King (Chen-Xuan Wang) — Apache-2.0
 
 theme:

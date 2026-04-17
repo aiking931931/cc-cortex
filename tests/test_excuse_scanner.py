@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.excuse_scanner — Butterfly Effect excuse detector."""
+"""Tests for concinno.excuse_scanner — Butterfly Effect excuse detector."""
 
 from __future__ import annotations
 
-from cc_cortex.excuse_scanner import (
+from concinno.excuse_scanner import (
     ExcuseHit,
     _build_block_reason,
     _collect_hits,

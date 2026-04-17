@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cognitive_anchor — Red-team anchoring guard."""
+"""Tests for concinno.cognitive_anchor — Red-team anchoring guard."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import tempfile
 
 import pytest
 
-from cc_cortex.cognitive_anchor import (
+from concinno.cognitive_anchor import (
     CognitiveAnchorGuard,
     classify_risk,
     get_anchor_prompt,
     get_base_identity,
 )
-from cc_cortex.guards.base import GuardAction, GuardContext
+from concinno.guards.base import GuardAction, GuardContext
 
 
 @pytest.fixture()
@@ -44,15 +44,15 @@ class TestClassifyRisk:
     """Test risk classification logic."""
 
     def test_architecture_file_guards(self):
-        result = classify_risk("Edit", {"file_path": "src/cc_cortex/guards/base.py"})
+        result = classify_risk("Edit", {"file_path": "src/concinno/guards/base.py"})
         assert result == "architecture"
 
     def test_architecture_file_core(self):
-        result = classify_risk("Write", {"file_path": "src/cc_cortex/core/config.py"})
+        result = classify_risk("Write", {"file_path": "src/concinno/core/config.py"})
         assert result == "architecture"
 
     def test_architecture_file_init(self):
-        assert classify_risk("Edit", {"file_path": "src/cc_cortex/__init__.py"}) == "architecture"
+        assert classify_risk("Edit", {"file_path": "src/concinno/__init__.py"}) == "architecture"
 
     def test_architecture_file_pipeline(self):
         assert classify_risk("Edit", {"file_path": "guards/pipeline.py"}) == "architecture"
@@ -61,7 +61,7 @@ class TestClassifyRisk:
         assert classify_risk("Edit", {"file_path": "guards/registry.py"}) == "architecture"
 
     def test_normal_file_no_risk(self):
-        assert classify_risk("Edit", {"file_path": "src/cc_cortex/rag.py"}) is None
+        assert classify_risk("Edit", {"file_path": "src/concinno/rag.py"}) is None
 
     def test_large_deletion(self):
         old = "line\n" * 60
@@ -195,7 +195,7 @@ class TestCognitiveAnchorGuard:
         ctx = _ctx(
             tool_name="Edit",
             tool_input={
-                "file_path": "src/cc_cortex/guards/base.py",
+                "file_path": "src/concinno/guards/base.py",
                 "old_string": "x",
                 "new_string": "y",
             },
@@ -240,7 +240,7 @@ class TestCognitiveAnchorGuard:
         guard = CognitiveAnchorGuard()
         ctx = _ctx(
             tool_name="Edit",
-            tool_input={"file_path": "src/cc_cortex/rag.py", "old_string": "x", "new_string": "y"},
+            tool_input={"file_path": "src/concinno/rag.py", "old_string": "x", "new_string": "y"},
             cache_dir=cache_dir,
         )
         assert guard.check(ctx) is None

@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.hook_api — HookResult + Pipeline public API."""
+"""Tests for concinno.hook_api — HookResult + Pipeline public API."""
 
 from __future__ import annotations
 
-from cc_cortex.hook_api import HookResult, Pipeline, _normalize
+from concinno.hook_api import HookResult, Pipeline, _normalize
 
 # ── HookResult ────────────────────────────────────────────
 
@@ -199,7 +199,7 @@ class TestPipeline:
 
     def test_real_destruction_guard(self):
         """Integration: real destruction_guard works in pipeline."""
-        from cc_cortex.destruction_guard import evaluate
+        from concinno.destruction_guard import evaluate
 
         p = Pipeline()
         p.add_deny_guard("destruction", evaluate)

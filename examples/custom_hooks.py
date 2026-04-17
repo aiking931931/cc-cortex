@@ -4,12 +4,12 @@ CC Cortex — Custom Hook Examples
 Every example in this file uses REAL imports that work out of the box.
 Run ``python examples/custom_hooks.py`` to verify.
 
-Each example is a standalone guard function compatible with cc_cortex.Pipeline.
+Each example is a standalone guard function compatible with concinno.Pipeline.
 """
 
 from __future__ import annotations
 
-from cc_cortex import HookResult, Pipeline
+from concinno import HookResult, Pipeline
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Example 1: Production Safety Guard
@@ -55,8 +55,8 @@ def protected_file_guard(tool_name: str, tool_input: dict, **ctx) -> HookResult 
 
 def build_pipeline() -> Pipeline:
     """Build a pipeline with built-in + custom guards."""
-    from cc_cortex.destruction_guard import evaluate
-    from cc_cortex.secret_scan import check as secret_check
+    from concinno.destruction_guard import evaluate
+    from concinno.secret_scan import check as secret_check
 
     pipe = Pipeline()
 

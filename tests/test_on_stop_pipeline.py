@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cc_cortex.hooks.on_stop import (
+from concinno.hooks.on_stop import (
     _CircuitState,
     _fallback_sequential,
     _load_circuit_states,
@@ -71,7 +71,7 @@ class TestCircuitPersistence:
             "mod_a": _CircuitState(consecutive_failures=2, last_failure_ts=100.0),
             "mod_b": _CircuitState(consecutive_failures=0),  # should not be saved
         }
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             _save_circuit_states(states)
             loaded = _load_circuit_states()
 
@@ -82,7 +82,7 @@ class TestCircuitPersistence:
 
     def test_load_missing_file(self, tmp_path):
         path = str(tmp_path / "nonexistent.json")
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             loaded = _load_circuit_states()
         assert loaded == {}
 
@@ -90,7 +90,7 @@ class TestCircuitPersistence:
         path = str(tmp_path / "corrupt.json")
         with open(path, "w") as f:
             f.write("not json{{{")
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             loaded = _load_circuit_states()
         assert loaded == {}
 
@@ -174,7 +174,7 @@ class TestRunPipeline:
         ]
 
         t0 = time.monotonic()
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             result = await _run_pipeline(modules)
         elapsed = time.monotonic() - t0
 
@@ -198,7 +198,7 @@ class TestRunPipeline:
             _StopModule("good", _ok, timeout_s=5.0),
             _StopModule("bad", _fail, timeout_s=5.0),
         ]
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             result = await _run_pipeline(modules)
 
         assert result[0].result == "ok"
@@ -213,7 +213,7 @@ class TestRunPipeline:
             raise RuntimeError("fail")
 
         modules = [_StopModule("failing", _fail, timeout_s=5.0)]
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             await _run_pipeline(modules)
 
         # Verify state was written
@@ -225,7 +225,7 @@ class TestRunPipeline:
     @pytest.mark.asyncio
     async def test_empty_modules(self, tmp_path):
         path = str(tmp_path / "circuit.json")
-        with patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path):
+        with patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path):
             result = await _run_pipeline([])
         assert result == []
 
@@ -273,42 +273,42 @@ class TestMainEntry:
         path = str(tmp_path / "circuit.json")
         hook_data = {"session_id": "test-123"}
         with (
-            patch("cc_cortex.hooks.on_stop._CIRCUIT_STATE_PATH", path),
-            patch("cc_cortex.hooks.on_stop._build_knowledge", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_cognitive", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_multi_instance", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_stop_guard", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_auto_delivery", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_orphan_scan", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_session_summary", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_notify", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._CIRCUIT_STATE_PATH", path),
+            patch("concinno.hooks.on_stop._build_knowledge", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_cognitive", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_multi_instance", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_stop_guard", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_auto_delivery", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_orphan_scan", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_session_summary", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_notify", return_value=lambda: None),
         ):
-            from cc_cortex.hooks.on_stop import main
+            from concinno.hooks.on_stop import main
             main(hook_data)
 
     def test_main_none_reads_stdin(self):
         """main(None) tries stdin — should not crash on empty."""
-        from cc_cortex.hooks.on_stop import main
+        from concinno.hooks.on_stop import main
         with patch("sys.stdin") as mock_stdin:
             mock_stdin.read.return_value = "{}"
             # Should not crash even with empty hook_data
             with (
-                patch("cc_cortex.hooks.on_stop._build_knowledge", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_cognitive", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_multi_instance", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_stop_guard", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_auto_delivery", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_orphan_scan", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_session_summary", return_value=lambda: None),
-                patch("cc_cortex.hooks.on_stop._build_notify", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_knowledge", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_cognitive", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_multi_instance", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_stop_guard", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_auto_delivery", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_orphan_scan", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_session_summary", return_value=lambda: None),
+                patch("concinno.hooks.on_stop._build_notify", return_value=lambda: None),
             ):
                 main(None)
 
     def test_fallback_sequential_does_not_crash(self):
         """_fallback_sequential should be resilient."""
         with (
-            patch("cc_cortex.hooks.on_stop._build_multi_instance", return_value=lambda: None),
-            patch("cc_cortex.hooks.on_stop._build_notify", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_multi_instance", return_value=lambda: None),
+            patch("concinno.hooks.on_stop._build_notify", return_value=lambda: None),
         ):
             _fallback_sequential({"session_id": "test"})
 

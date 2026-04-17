@@ -1,7 +1,7 @@
-"""Tests for cc_cortex.pre_tool_guards — BashGuard, PythonGuard, ReadFirst."""
+"""Tests for concinno.pre_tool_guards — BashGuard, PythonGuard, ReadFirst."""
 
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.pre_tool_guards import (
+from concinno.guards.base import GuardContext
+from concinno.pre_tool_guards import (
     ReadBudgetGuard,
     check_bash,
     check_python_c,

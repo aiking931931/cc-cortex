@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.skill_router — Cognitive Skill Router."""
+"""Tests for concinno.skill_router — Cognitive Skill Router."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.skill_router import SkillRouter, _parse_skill_md
+from concinno.skill_router import SkillRouter, _parse_skill_md
 
 # ── Helpers ───────────────────────────────────────────────────
 

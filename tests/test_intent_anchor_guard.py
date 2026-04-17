@@ -1,8 +1,8 @@
 """Tests for intent_anchor_guard — Preserve original task intent."""
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.intent_anchor_guard import (
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.intent_anchor_guard import (
     IntentAnchorGuard,
     _extract_intent,
 )

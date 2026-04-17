@@ -32,7 +32,7 @@ jobs:
         run: ruff check src/ tests/
 
       - name: Test with coverage
-        run: pytest --cov=cc_cortex --cov-fail-under=80 -x --tb=short -q
+        run: pytest --cov=concinno --cov-fail-under=80 -x --tb=short -q
 
   lint:
     runs-on: ubuntu-latest

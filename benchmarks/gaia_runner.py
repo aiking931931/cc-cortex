@@ -196,7 +196,7 @@ def run_gaia(
     star_engine = None
     if not no_rag:
         try:
-            from cc_cortex.star import RetrievalProfile, create_star_engine
+            from concinno.star import RetrievalProfile, create_star_engine
 
             profile_enum = None
             if profile:

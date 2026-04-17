@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.design_theory — Design theory enforcement."""
+"""Tests for concinno.design_theory — Design theory enforcement."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from cc_cortex.design_theory import (
+from concinno.design_theory import (
     DESIGN_CONSTRAINTS,
     DesignTheoryGuard,
     TaskClassification,
@@ -14,7 +14,7 @@ from cc_cortex.design_theory import (
     format_hitl_afk_tag,
     generate_parallel_prompts,
 )
-from cc_cortex.guards.base import GuardContext
+from concinno.guards.base import GuardContext
 
 # ── check_vertical_slice ──
 

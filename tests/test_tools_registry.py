@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.tools.registry — deferred tool registry + search.
+"""Tests for concinno.tools.registry — deferred tool registry + search.
 
 Matches CC's ToolSearchTool semantics: select: exact mode, keyword
 scoring with weighted part/description matches, lazy import with
@@ -12,7 +12,7 @@ import sys
 
 import pytest
 
-from cc_cortex.tools.registry import (
+from concinno.tools.registry import (
     ToolEntry,
     ToolRegistry,
     ToolSearchResult,
@@ -141,7 +141,7 @@ class TestGet:
     def test_get_bad_import_path_returns_none(self, caplog):
         reg = ToolRegistry()
         reg.register_deferred("X", "nonexistent_module_xyz:Attr", "desc")
-        with caplog.at_level(logging.ERROR, logger="cc_cortex.tools.registry"):
+        with caplog.at_level(logging.ERROR, logger="concinno.tools.registry"):
             result = reg.get("X")
         assert result is None
         assert any("failed to import" in rec.message for rec in caplog.records)
@@ -149,21 +149,21 @@ class TestGet:
     def test_get_missing_attr_returns_none(self, caplog):
         reg = ToolRegistry()
         reg.register_deferred("X", "tests.test_tools_registry:NoSuchAttr", "desc")
-        with caplog.at_level(logging.ERROR, logger="cc_cortex.tools.registry"):
+        with caplog.at_level(logging.ERROR, logger="concinno.tools.registry"):
             result = reg.get("X")
         assert result is None
 
     def test_get_non_tool_returns_none(self, caplog):
         reg = ToolRegistry()
         reg.register_deferred("X", "tests.test_tools_registry:_BadProtocol", "desc")
-        with caplog.at_level(logging.ERROR, logger="cc_cortex.tools.registry"):
+        with caplog.at_level(logging.ERROR, logger="concinno.tools.registry"):
             result = reg.get("X")
         assert result is None
 
     def test_get_malformed_import_path_returns_none(self, caplog):
         reg = ToolRegistry()
         reg.register_deferred("X", "no_colon_path", "desc")
-        with caplog.at_level(logging.ERROR, logger="cc_cortex.tools.registry"):
+        with caplog.at_level(logging.ERROR, logger="concinno.tools.registry"):
             result = reg.get("X")
         assert result is None
 
@@ -341,7 +341,7 @@ class TestDescriptionBudget:
     def test_over_budget_description_emits_warning(self, caplog):
         reg = ToolRegistry()
         long_desc = "x" * 300
-        with caplog.at_level(logging.WARNING, logger="cc_cortex.tools.registry"):
+        with caplog.at_level(logging.WARNING, logger="concinno.tools.registry"):
             reg.register_deferred("Big", "mod:attr", long_desc)
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
         assert any("250" in w.message or ">" in w.message for w in warnings)
@@ -350,7 +350,7 @@ class TestDescriptionBudget:
 
     def test_under_budget_no_warning(self, caplog):
         reg = ToolRegistry()
-        with caplog.at_level(logging.WARNING, logger="cc_cortex.tools.registry"):
+        with caplog.at_level(logging.WARNING, logger="concinno.tools.registry"):
             reg.register_deferred("Small", "mod:attr", "short")
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
         assert not warnings
@@ -406,7 +406,7 @@ class TestDefaultRegistry:
     def test_default_core_includes_file_tools(self):
         reg = get_default_registry()
         core = set(reg.list_core())
-        # Built-in tool names from cc_cortex.tools.builtin — Read/Write/Edit/Glob/Grep
+        # Built-in tool names from concinno.tools.builtin — Read/Write/Edit/Glob/Grep
         assert "Read" in core
         assert "Write" in core
         assert "Edit" in core
@@ -420,7 +420,7 @@ class TestDefaultRegistry:
         assert entry.resolved is None
         shell = reg.get("Shell")
         assert shell is not None
-        # Shell tool's canonical name inside cc_cortex.tools.builtin is "Bash"
+        # Shell tool's canonical name inside concinno.tools.builtin is "Bash"
         # (matches CC's BashTool). The registry key is "Shell" — that's the
         # search handle; the underlying tool.name is orthogonal.
         assert shell.name in ("Shell", "Bash")

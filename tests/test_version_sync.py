@@ -1,8 +1,8 @@
-"""SSOT guard: cc_cortex.__version__ must match pyproject.toml and CHANGELOG.md.
+"""SSOT guard: concinno.__version__ must match pyproject.toml and CHANGELOG.md.
 
 Red team #3 found the three sources out of sync (pyproject=1.3.0,
 CHANGELOG=1.3.0, __init__.py=1.1.0). A stranger printing
-``cc_cortex.__version__`` at runtime got a value that did not match any
+``concinno.__version__`` at runtime got a value that did not match any
 published release. This test pins them together.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import cc_cortex
+import concinno
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
@@ -46,12 +46,12 @@ def _changelog_latest_version() -> str:
 
 
 def test_version_sources_are_aligned():
-    dunder = cc_cortex.__version__
+    dunder = concinno.__version__
     pyproj = _pyproject_version()
     changelog = _changelog_latest_version()
     assert dunder == pyproj == changelog, (
         f"Version drift detected: "
-        f"cc_cortex.__version__={dunder!r}, "
+        f"concinno.__version__={dunder!r}, "
         f"pyproject.toml={pyproj!r}, "
         f"CHANGELOG.md latest={changelog!r}. "
         f"Update all three before publishing."
@@ -60,5 +60,5 @@ def test_version_sources_are_aligned():
 
 def test_version_is_semver():
     assert re.fullmatch(
-        r"\d+\.\d+\.\d+(?:[-+][\w.]+)?", cc_cortex.__version__,
-    ), f"Not a SemVer string: {cc_cortex.__version__!r}"
+        r"\d+\.\d+\.\d+(?:[-+][\w.]+)?", concinno.__version__,
+    ), f"Not a SemVer string: {concinno.__version__!r}"

@@ -10,13 +10,13 @@ from __future__ import annotations
 import os
 import tempfile
 
-from cc_cortex.hooks.on_prompt_submit import _auto_capture_goal
-from cc_cortex.task_orchestrator import TaskOrchestrator
+from concinno.hooks.on_prompt_submit import _auto_capture_goal
+from concinno.task_orchestrator import TaskOrchestrator
 
 
 def _fresh_context() -> tuple[str, str]:
     tmp = tempfile.mkdtemp()
-    cache_dir = os.path.join(tmp, ".cc_cortex_cache")
+    cache_dir = os.path.join(tmp, ".concinno_cache")
     session_id = "sess-goalcap01"
     return cache_dir, session_id
 

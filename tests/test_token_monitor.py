@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.token_monitor — Token usage tracking."""
+"""Tests for concinno.token_monitor — Token usage tracking."""
 
 from __future__ import annotations
 
 import json
 from unittest.mock import patch
 
-from cc_cortex.token_monitor import (
+from concinno.token_monitor import (
     check_budget_gate,
     check_threshold,
     read_real_token_usage,
@@ -150,7 +150,7 @@ class TestCheckBudgetGate:
     def test_no_transcript_returns_none(self):
         """No transcript file → fail-open."""
         with patch(
-            "cc_cortex.token_monitor._find_transcript", return_value="",
+            "concinno.token_monitor._find_transcript", return_value="",
         ):
             assert check_budget_gate("sess", "Agent") is None
 
@@ -159,7 +159,7 @@ class TestCheckBudgetGate:
         f = tmp_path / "transcript.jsonl"
         f.write_text('{"message": {}}\n')
         with patch(
-            "cc_cortex.token_monitor._find_transcript",
+            "concinno.token_monitor._find_transcript",
             return_value=str(f),
         ):
             assert check_budget_gate("sess", "Agent") is None
@@ -179,7 +179,7 @@ class TestCheckBudgetGate:
         }
         f.write_text(json.dumps(entry) + "\n")
         with patch(
-            "cc_cortex.token_monitor._find_transcript",
+            "concinno.token_monitor._find_transcript",
             return_value=str(f),
         ):
             result = check_budget_gate(
@@ -203,10 +203,10 @@ class TestCheckBudgetGate:
         }
         f.write_text(json.dumps(entry) + "\n")
         with patch(
-            "cc_cortex.token_monitor._find_transcript",
+            "concinno.token_monitor._find_transcript",
             return_value=str(f),
         ), patch(
-            "cc_cortex.handoff_engine.get_handoff_mode",
+            "concinno.handoff_engine.get_handoff_mode",
             return_value="phase",
         ):
             result = check_budget_gate(
@@ -232,10 +232,10 @@ class TestCheckBudgetGate:
         }
         f.write_text(json.dumps(entry) + "\n")
         with patch(
-            "cc_cortex.token_monitor._find_transcript",
+            "concinno.token_monitor._find_transcript",
             return_value=str(f),
         ), patch(
-            "cc_cortex.handoff_engine.get_handoff_mode",
+            "concinno.handoff_engine.get_handoff_mode",
             return_value="phase",
         ):
             result = check_budget_gate(
@@ -261,7 +261,7 @@ class TestCheckBudgetGate:
         }
         f.write_text(json.dumps(entry) + "\n")
         with patch(
-            "cc_cortex.token_monitor._find_transcript",
+            "concinno.token_monitor._find_transcript",
             return_value=str(f),
         ):
             # Below default 140K → should pass

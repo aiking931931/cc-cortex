@@ -12,7 +12,7 @@ build/
 .destruction_backups/
 benchmarks/datasets/
 benchmarks/results/
-.cc_cortex_cache/
+.tempero_cache/
 .claude-forge/
 
 # Red-team batch test fixtures — contain format-valid dummy secrets
@@ -31,7 +31,7 @@ secrets*
 # Internal / not for release
 _recycled/
 _cognitive/
-.cc_cortex_cache/
+.tempero_cache/
 
 # Testing & linting caches
 .pytest_cache/

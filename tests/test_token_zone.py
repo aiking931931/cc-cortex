@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.token_zone — Three-zone token management."""
+"""Tests for concinno.token_zone — Three-zone token management."""
 
 from __future__ import annotations
 
 import json
 import time
 
-from cc_cortex.token_zone import (
+from concinno.token_zone import (
     HANDOFF_TOOLS,
     MODEL_PROFILES,
     Zone,
@@ -245,7 +245,7 @@ class TestShouldGateTool:
 class TestZoneFileIO:
     def test_write_and_read(self, tmp_path, monkeypatch):
         zone_file = str(tmp_path / ".token_zone.json")
-        monkeypatch.setattr("cc_cortex.token_zone.ZONE_FILE", zone_file)
+        monkeypatch.setattr("concinno.token_zone.ZONE_FILE", zone_file)
 
         write_zone_file(72.5, 145_000)
         data = read_zone_file(max_age_s=10)
@@ -258,7 +258,7 @@ class TestZoneFileIO:
 
     def test_write_yellow_zone(self, tmp_path, monkeypatch):
         zone_file = str(tmp_path / ".token_zone.json")
-        monkeypatch.setattr("cc_cortex.token_zone.ZONE_FILE", zone_file)
+        monkeypatch.setattr("concinno.token_zone.ZONE_FILE", zone_file)
 
         # Opus 1M: 850K > C3(600K) → orange
         write_zone_file(50.0, 850_000)
@@ -269,7 +269,7 @@ class TestZoneFileIO:
 
     def test_compact_count_persisted(self, tmp_path, monkeypatch):
         zone_file = str(tmp_path / ".token_zone.json")
-        monkeypatch.setattr("cc_cortex.token_zone.ZONE_FILE", zone_file)
+        monkeypatch.setattr("concinno.token_zone.ZONE_FILE", zone_file)
 
         write_zone_file(50.0, 100_000, compact_count=2)
         data = read_zone_file(max_age_s=10)
@@ -277,7 +277,7 @@ class TestZoneFileIO:
 
     def test_stale_file_returns_none(self, tmp_path, monkeypatch):
         zone_file = str(tmp_path / ".token_zone.json")
-        monkeypatch.setattr("cc_cortex.token_zone.ZONE_FILE", zone_file)
+        monkeypatch.setattr("concinno.token_zone.ZONE_FILE", zone_file)
 
         with open(zone_file, "w") as f:
             json.dump({"zone": "red", "pct": 90, "ts": int(time.time()) - 300}, f)
@@ -287,7 +287,7 @@ class TestZoneFileIO:
 
     def test_missing_file_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "cc_cortex.token_zone.ZONE_FILE",
+            "concinno.token_zone.ZONE_FILE",
             str(tmp_path / "nonexistent.json"),
         )
         assert read_zone_file() is None
@@ -300,7 +300,7 @@ class TestIntegration:
     def test_full_flow(self, tmp_path, monkeypatch):
         """Status line → zone file → hook read → gate check."""
         zone_file = str(tmp_path / ".token_zone.json")
-        monkeypatch.setattr("cc_cortex.token_zone.ZONE_FILE", zone_file)
+        monkeypatch.setattr("concinno.token_zone.ZONE_FILE", zone_file)
 
         # Opus 1M: 850K = orange (past C3 600K)
         write_zone_file(50.0, 850_000)

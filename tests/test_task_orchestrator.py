@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.task_orchestrator."""
+"""Tests for concinno.task_orchestrator."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.task_orchestrator import TaskOrchestrator
+from concinno.task_orchestrator import TaskOrchestrator
 
 
 @pytest.fixture

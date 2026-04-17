@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.security.policy_gate — Layer 9 policy-as-code engine."""
+"""Tests for concinno.security.policy_gate — Layer 9 policy-as-code engine."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.security.policy_gate import (
+from concinno.security.policy_gate import (
     OWASP_LLM_BASELINE,
     CallableMatcher,
     CompositeMatcher,

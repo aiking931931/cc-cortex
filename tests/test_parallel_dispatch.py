@@ -1,16 +1,16 @@
-"""Tests for cc_cortex.agent.parallel_dispatch."""
+"""Tests for concinno.agent.parallel_dispatch."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.agent.fork_context import (
+from concinno.agent.fork_context import (
     FileStateCache,
     ForkDepthExceeded,
     SubagentContext,
     create_cache_safe_params,
 )
-from cc_cortex.agent.parallel_dispatch import (
+from concinno.agent.parallel_dispatch import (
     COORDINATOR_PROMPT_SNIPPET,
     DEFAULT_MAX_FORK_DEPTH,
     DEFAULT_MAX_PARALLEL,

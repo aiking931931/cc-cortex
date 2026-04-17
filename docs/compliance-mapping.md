@@ -27,7 +27,7 @@ CCC 守衛分三層，按順序執行：
 | GV-1.1 法規合規 | 理解並記錄 AI 相關法規要求 | `BoundaryGuard`（CC/CCC 邊界強制）+ `PublishScan`（發布前掃描） | ✅ 完整 |
 | GV-1.2 可信 AI 整合 | 將可信 AI 特性整合到組織框架 | `L0/L1 Rules` + `PromptEngine`（動態 prompt 組裝反漂移）+ `DesignTheoryGuard`（設計理論強制） | ✅ 完整 |
 | GV-1.3 風險容忍度 | 根據風險容忍度決定管理活動層級 | `C0Router`（CBUA 複雜度分類 Simple/Complicated/Complex/Chaotic）+ `ConfidenceGate`（信心閾值門控） | ✅ 完整 |
-| GV-1.4 透明控制 | 透明的政策、程序和控制機制 | `GuardPipeline`（所有決策 ALLOW/DENY 可追蹤）+ `StepBack`（二階緩衝）+ 審計日誌（`.cc_cortex_cache/audit/`） | ✅ 完整 |
+| GV-1.4 透明控制 | 透明的政策、程序和控制機制 | `GuardPipeline`（所有決策 ALLOW/DENY 可追蹤）+ `StepBack`（二階緩衝）+ 審計日誌（`.concinno_cache/audit/`） | ✅ 完整 |
 | GV-1.5 持續監控 | 持續監控和定期審查 | `SentinelGuard`（行為模式偵測）+ `TokenMonitor`（token 使用追蹤）+ `EquilibriumGuard`（動態平衡） | ✅ 完整 |
 | GV-1.6 AI 系統清冊 | AI 系統清冊機制 | `FileTrackerGuard`（檔案追蹤+衝突偵測）+ `PipelineState`（管線狀態機） | ⚠️ 部分（守衛級清冊，非組織級） |
 | GV-1.7 退役程序 | 安全退役程序 | `DestructionGuard`（R0-R4 風險分級+自動備份）+ `BackupManager` | ✅ 完整 |
@@ -168,7 +168,7 @@ CCC 守衛分三層，按順序執行：
 |--------|---------|----------|------|
 | A.8.2 | 告知 AI 互動 | `HonestyGate`（誠實門控，禁止委婉語掩蓋）+ `ProgressReporter`（里程碑報告） | ✅ |
 | A.8.3 | 告知 AI 結果 | `WiredoGuard`（W-I-R-E-D-O 六維透明交付）+ 審計日誌 | ✅ |
-| A.8.4 | AI 互動資訊存取 | 審計日誌（`.cc_cortex_cache/audit/`）+ `TokenMonitor` + `CostTracker` | ✅ |
+| A.8.4 | AI 互動資訊存取 | 審計日誌（`.concinno_cache/audit/`）+ `TokenMonitor` + `CostTracker` | ✅ |
 | A.8.5 | 人類回應 AI 輸出 | `StepBack`（二階緩衝讓用戶介入）+ `AgentGateGuard`（人類監督升級） | ✅ |
 
 ### A.9 AI 系統使用（Use of AI Systems）

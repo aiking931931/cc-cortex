@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.security.permission_mode.
+"""Tests for concinno.security.permission_mode.
 
 Covers the 5-mode FSM's decision matrix, rule precedence, hook
 fallback, dontAsk transform, audit trail, and stats accounting.
@@ -10,7 +10,7 @@ from typing import Literal
 
 import pytest
 
-from cc_cortex.security.permission_mode import (
+from concinno.security.permission_mode import (
     AUTO_SAFE_TOOLS,
     EXEC_TOOLS,
     READ_ONLY_TOOLS,

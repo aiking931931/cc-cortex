@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from cc_cortex.riverbed import RiverbedMemory
-from cc_cortex.star import (
+from concinno.riverbed import RiverbedMemory
+from concinno.star import (
     NOISE_RATIO_MAX,
     OPTIMAL_RESULTS_PER_QUERY,
     AdaptiveRouter,

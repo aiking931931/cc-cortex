@@ -1,6 +1,6 @@
 """Example: LLM-as-Judge via prompt_hooks (1.4.0 C6).
 
-Demonstrates the `cc_cortex.prompt_hooks` module by generating a
+Demonstrates the `concinno.prompt_hooks` module by generating a
 Claude Code settings.json fragment for the three shipped judges —
 HallucinationJudge, ExcuseScannerJudge, CodeQualityJudge — and
 showing the install / list / uninstall round-trip.
@@ -25,7 +25,7 @@ from pathlib import Path
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from cc_cortex import (
+from concinno import (
     ALL_JUDGES,
     CODE_QUALITY_JUDGE,
     EXCUSE_SCANNER_JUDGE,
@@ -42,7 +42,7 @@ def _header(title: str) -> None:
 
 
 def main() -> None:
-    print("cc-cortex 1.4.0 — prompt_hooks (LLM-as-Judge) example")
+    print("concinno 1.4.0 — prompt_hooks (LLM-as-Judge) example")
 
     _header("1. Shipped judges")
     for judge in ALL_JUDGES:

@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.star — STAR (Stimulus-Triggered Agentic Retrieval) v3.5."""
+"""Tests for concinno.star — STAR (Stimulus-Triggered Agentic Retrieval) v3.5."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import textwrap
 import time
 
-from cc_cortex.star import (
+from concinno.star import (
     MAX_WEB_RESULTS,
     NOISE_RATIO_MAX,
     OPTIMAL_RESULTS_PER_QUERY,
@@ -542,9 +542,9 @@ class TestSTAREngine:
 
     def test_riverbed_emotional_integration(self, tmp_path):
         """End-to-end: Riverbed emotional_charge flows through STAR pipeline."""
-        from cc_cortex.riverbed import RiverbedMemory, Stake
+        from concinno.riverbed import RiverbedMemory, Stake
 
-        rb_dir = tmp_path / ".cc_cortex_cache" / "riverbed"
+        rb_dir = tmp_path / ".concinno_cache" / "riverbed"
         rb_dir.mkdir(parents=True)
 
         mem = RiverbedMemory(project_dir=str(tmp_path), cache_dir=str(rb_dir))
@@ -575,7 +575,7 @@ class TestSTAREngine:
                         assert s.emotional_charge != 0.0
 
     def test_synthesize_merges(self):
-        from cc_cortex.star import _synthesize
+        from concinno.star import _synthesize
         result = _synthesize([
             SourceResult(
                 source=SourceType.KB_SKILL,

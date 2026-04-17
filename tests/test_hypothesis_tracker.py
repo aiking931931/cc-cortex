@@ -1,9 +1,9 @@
-"""Tests for cc_cortex.hypothesis_tracker — HypothesisTrackerGuard."""
+"""Tests for concinno.hypothesis_tracker — HypothesisTrackerGuard."""
 
 from __future__ import annotations
 
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.hypothesis_tracker import (
+from concinno.guards.base import GuardContext
+from concinno.hypothesis_tracker import (
     HypothesisTrackerGuard,
     _approach_signature,
     _is_failure,

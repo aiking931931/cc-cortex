@@ -1,6 +1,6 @@
 # CC-Cortex Guards Charter
 
-> The constitution for cc-cortex's guard system. This document is the
+> The constitution for concinno's guard system. This document is the
 > **forcing function** that prevents the guard system from sliding into
 > Goodhart's Law theater.
 >
@@ -12,7 +12,7 @@
 
 ## 1. Purpose
 
-cc-cortex ships ~55 guards that run on every Claude Code tool call. This
+concinno ships ~55 guards that run on every Claude Code tool call. This
 charter exists because the guard system was caught displaying classic
 Goodhart symptoms: warnings stacked into ritual, regex matchers gamed by
 inserting jargon, ratio thresholds without empirical backing, and tests
@@ -30,7 +30,7 @@ declared in `FEATURE_META[<name>]["tier"]` and enforced by the dispatcher.
 |---|---|---|
 | `hard_block` | Returns `decision=block`. Halts the tool call. | Security, data destruction, identity, unrecoverable state changes. |
 | `advisory` | Aggregated into a once-per-session digest emitted at session end (or `/digest` on demand). NOT printed per tool call. | Quality / style / cognitive nudges. Things a reasonable engineer wants to know but does not need interrupted by. |
-| `telemetry` | Silent. Recorded to `.cc_cortex_cache/audit/` for retrospective review. | Pure observation. Anything where the cost of a single false positive exceeds the marginal value of the signal. |
+| `telemetry` | Silent. Recorded to `.concinno_cache/audit/` for retrospective review. | Pure observation. Anything where the cost of a single false positive exceeds the marginal value of the signal. |
 
 A guard that does not declare a tier defaults to `advisory`. A guard that
 attempts to print to stderr per tool call without `tier == "hard_block"` is
@@ -66,7 +66,7 @@ Concretely:
   Forcing. *Replaces* the deprecated `delivery_ledger` proposal which was
   itself a Goodhart trap (an opt-in jsonl file is just an honor system in
   disguise).
-- **P5** UIVerify scope = project marker file (e.g. `.cc-cortex/ui-verify.enabled`)
+- **P5** UIVerify scope = project marker file (e.g. `.concinno/ui-verify.enabled`)
   in addition to the file-extension whitelist. Forcing.
 - **P6** `override_rate` autocounter for `hard_block` guards. Forcing.
 
@@ -84,7 +84,7 @@ failure mode.
 |---|---|---|
 | Signal quality (warning → user fix rate) | up | drop guards entirely → 100% trivially |
 | Noise rate (warnings emitted per tool call) | down | same as above |
-| Override rate (`CC_CORTEX_FORCE_STOP` / per-guard escape used) | flat or down | same as above |
+| Override rate (`CONCINNO_FORCE_STOP` / per-guard escape used) | flat or down | same as above |
 
 A reform iteration succeeds only if all three move in the right direction
 at once. Any presentation that touts one metric in isolation is rejected

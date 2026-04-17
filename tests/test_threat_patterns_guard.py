@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.threat_patterns_guard import ThreatPatternsGuard
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.threat_patterns_guard import ThreatPatternsGuard
 
 
 def _ctx(tool_name: str = "Bash", tool_input: dict | None = None) -> GuardContext:

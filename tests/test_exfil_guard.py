@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.exfil_guard — Data exfiltration prevention."""
+"""Tests for concinno.exfil_guard — Data exfiltration prevention."""
 
 from __future__ import annotations
 
-from cc_cortex.exfil_guard import check
+from concinno.exfil_guard import check
 
 
 class TestExfilGuardCheck:

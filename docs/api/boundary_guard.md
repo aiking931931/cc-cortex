@@ -1,6 +1,6 @@
 # Boundary Guard
 
-`cc_cortex.boundary_guard` — Enforces CC/CCC boundary separation.
+`concinno.boundary_guard` — Enforces CC/CCC boundary separation.
 
 Blocks writes of:
 
@@ -13,7 +13,7 @@ personal application layer consuming it.
 
 ## API
 
-::: cc_cortex.boundary_guard
+::: concinno.boundary_guard
     options:
       show_root_heading: false
       members:

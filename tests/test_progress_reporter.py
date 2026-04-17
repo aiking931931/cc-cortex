@@ -1,12 +1,12 @@
-"""Tests for cc_cortex.progress_reporter."""
+"""Tests for concinno.progress_reporter."""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.cost_tracker import CostTracker
-from cc_cortex.progress_reporter import ProgressReporter
-from cc_cortex.task_orchestrator import TaskOrchestrator
+from concinno.cost_tracker import CostTracker
+from concinno.progress_reporter import ProgressReporter
+from concinno.task_orchestrator import TaskOrchestrator
 
 
 @pytest.fixture

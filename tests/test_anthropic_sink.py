@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cache.anthropic_sink — AnthropicCacheEditSink.
+"""Tests for concinno.cache.anthropic_sink — AnthropicCacheEditSink.
 
 Covers: Protocol compliance, tool-result deletion, section edit/replace,
 dry-run semantics, queue management, deep-copy safety, stats tracking.
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import copy
 
-from cc_cortex.cache.anthropic_sink import AnthropicCacheEditSink
-from cc_cortex.cache.microcompact import CacheEdit, SectionEdit
+from concinno.cache.anthropic_sink import AnthropicCacheEditSink
+from concinno.cache.microcompact import CacheEdit, SectionEdit
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 
-from cc_cortex.c0_router import NAMESPACE, C0Result, C0Router
+from concinno.c0_router import NAMESPACE, C0Result, C0Router
 
 # ── Helpers ──────────────────────────────────────────────
 

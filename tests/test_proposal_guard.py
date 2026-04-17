@@ -1,8 +1,8 @@
 """Tests for proposal_guard — side-effect analysis enforcement."""
 
 
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.proposal_guard import (
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.proposal_guard import (
     ProposalGuard,
     _is_planning_file,
     check_proposal,
@@ -13,7 +13,7 @@ from cc_cortex.proposal_guard import (
 
 class TestIsPlanningFile:
     def test_task_pool(self):
-        assert _is_planning_file("_AI_BRAIN/06_Handoffs/cc-cortex/task-pool.md")
+        assert _is_planning_file("_AI_BRAIN/06_Handoffs/concinno/task-pool.md")
 
     def test_handoff(self):
         assert _is_planning_file("_AI_BRAIN/06_Handoffs/psyche/交接_數位人格.md")
@@ -25,7 +25,7 @@ class TestIsPlanningFile:
         assert _is_planning_file("docs/handoff-notes.md")
 
     def test_normal_code_file(self):
-        assert not _is_planning_file("src/cc_cortex/sentinel.py")
+        assert not _is_planning_file("src/concinno/sentinel.py")
 
     def test_empty(self):
         assert not _is_planning_file("")
@@ -79,14 +79,14 @@ class TestCheckProposal:
 
     def test_edit_proposal_without_sideeffect(self):
         result = check_proposal("Edit", {
-            "file_path": "_AI_BRAIN/06_Handoffs/cc-cortex/task-pool.md",
+            "file_path": "_AI_BRAIN/06_Handoffs/concinno/task-pool.md",
             "new_string": "Phase 3: 新功能開發\n| 任務 | 狀態 |\n| P1 | ⬜ |",
         })
         assert result is not None
 
     def test_edit_proposal_with_risk(self):
         result = check_proposal("Edit", {
-            "file_path": "_AI_BRAIN/06_Handoffs/cc-cortex/task-pool.md",
+            "file_path": "_AI_BRAIN/06_Handoffs/concinno/task-pool.md",
             "new_string": (
                 "Phase 3: 新功能開發\n| 任務 | 狀態 |\n| P1 | ⬜ |\n"
                 "| risk | breaking change 可能影響 API |"

@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.signal_patterns."""
+"""Tests for concinno.signal_patterns."""
 
 from __future__ import annotations
 
-from cc_cortex.signal_patterns import (
+from concinno.signal_patterns import (
     CHARACTER_CHALLENGE_PATTERN,
     GREETING_PATTERN,
     IDENTITY_PROBE_PATTERN,

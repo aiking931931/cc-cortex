@@ -1,13 +1,13 @@
-"""Tests for cc_cortex.agent.iterative_retrieve — three-layer cascade retrieval."""
+"""Tests for concinno.agent.iterative_retrieve — three-layer cascade retrieval."""
 
 from __future__ import annotations
 
-from cc_cortex.agent.iterative_retrieve import (
+from concinno.agent.iterative_retrieve import (
     CascadeConfig,
     IterativeRetriever,
 )
-from cc_cortex.cache.cognitive_pool import CognitivePool
-from cc_cortex.cache.l2_distill import L2Distiller, RawHit
+from concinno.cache.cognitive_pool import CognitivePool
+from concinno.cache.l2_distill import L2Distiller, RawHit
 
 # ---------------------------------------------------------------------------
 # Fakes

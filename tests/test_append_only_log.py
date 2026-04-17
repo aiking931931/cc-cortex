@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.cache.append_only_log."""
+"""Tests for concinno.cache.append_only_log."""
 from __future__ import annotations
 
 import json
 import time
 from pathlib import Path
 
-from cc_cortex.cache.append_only_log import (
+from concinno.cache.append_only_log import (
     SCHEMA_VERSION,
     AppendOnlyLog,
     LogEvent,
@@ -88,7 +88,7 @@ def test_constructor_default_home(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("CCC_APPEND_LOG_DIR", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     log = AppendOnlyLog()
-    assert log.log_dir == tmp_path / ".cc_cortex_cache" / "append_only_log"
+    assert log.log_dir == tmp_path / ".concinno_cache" / "append_only_log"
     assert log.log_dir.is_dir()
 
 

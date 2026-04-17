@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.destruction_guard — risk classification, backup, CLI."""
+"""Tests for concinno.destruction_guard — risk classification, backup, CLI."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cc_cortex.destruction_guard import (
+from concinno.destruction_guard import (
     R0,
     R1,
     R2,
@@ -197,7 +197,7 @@ class TestEvaluate:
         assert result["permissionDecision"] == "allow"
 
     def test_disabled(self):
-        with patch("cc_cortex.destruction_guard.load_config",
+        with patch("concinno.destruction_guard.load_config",
                    return_value={"enabled": False}):
             result = evaluate("Bash", {"command": "rm -rf /"})
             assert result["permissionDecision"] == "allow"
@@ -277,7 +277,7 @@ class TestBlockMessage:
 
 class TestBackupCLI:
     def test_list_empty(self, tmp_path: Path):
-        with patch("cc_cortex.destruction_guard._backup_dir", return_value=tmp_path / "none"):
+        with patch("concinno.destruction_guard._backup_dir", return_value=tmp_path / "none"):
             assert "No backups" in list_backups()
 
     def test_list_with_backups(self, tmp_path: Path):
@@ -288,7 +288,7 @@ class TestBackupCLI:
             "id": bid, "timestamp": "2026-03-10T12:00:00",
             "type": "auto", "targets": ["/tmp/foo"], "pinned": False,
         }))
-        with patch("cc_cortex.destruction_guard._backup_dir", return_value=tmp_path):
+        with patch("concinno.destruction_guard._backup_dir", return_value=tmp_path):
             result = list_backups()
             assert bid in result
 
@@ -299,7 +299,7 @@ class TestBackupCLI:
         (bdir / "manifest.json").write_text(json.dumps({
             "id": bid, "pinned": False,
         }))
-        with patch("cc_cortex.destruction_guard._backup_dir", return_value=tmp_path):
+        with patch("concinno.destruction_guard._backup_dir", return_value=tmp_path):
             result = set_pin(bid, True)
             assert "Pinned" in result
             data = json.loads((bdir / "manifest.json").read_text())
@@ -314,7 +314,7 @@ class TestBackupCLI:
             "id": bid, "timestamp": "2020-01-01T00:00:00",
             "pinned": False,
         }))
-        with patch("cc_cortex.destruction_guard._backup_dir", return_value=tmp_path):
+        with patch("concinno.destruction_guard._backup_dir", return_value=tmp_path):
             result = cleanup_backups(keep_days=1)
             assert "1" in result
             assert not bdir.exists()
@@ -327,6 +327,6 @@ class TestBackupCLI:
             "id": bid, "timestamp": "2020-01-01T00:00:00",
             "pinned": True,
         }))
-        with patch("cc_cortex.destruction_guard._backup_dir", return_value=tmp_path):
+        with patch("concinno.destruction_guard._backup_dir", return_value=tmp_path):
             cleanup_backups(keep_days=1)
             assert bdir.exists()

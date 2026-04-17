@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.knowledge — correction detection, extraction, and learning lifecycle."""
+"""Tests for concinno.knowledge — correction detection, extraction, and learning lifecycle."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from cc_cortex.knowledge import (
+from concinno.knowledge import (
     check_conflicts,
     check_staleness,
     detect_skill_candidates,

@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.secret_scan — Hardcoded secret detection."""
+"""Tests for concinno.secret_scan — Hardcoded secret detection."""
 
 from __future__ import annotations
 
-from cc_cortex.secret_scan import check
+from concinno.secret_scan import check
 
 
 class TestSecretScanCheck:

@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cognitive_inject — three-layer knowledge router."""
+"""Tests for concinno.cognitive_inject — three-layer knowledge router."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from cc_cortex.cognitive_inject import (
+from concinno.cognitive_inject import (
     _build_index,
     _build_pointers,
     _build_summaries,
@@ -154,7 +154,7 @@ class TestBuildSummaries:
 class TestRagContext:
     def test_no_learnings_empty(self):
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_rag_context("task", "/fake")
         assert result == ""
@@ -168,7 +168,7 @@ class TestRagContext:
             },
         ]
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings",
+            "concinno.cognitive_inject._load_learnings",
             return_value=learnings,
         ):
             result = build_rag_context("fix auth module", "/fake")
@@ -179,7 +179,7 @@ class TestBuildCognitiveContext:
     def test_parent_gets_full_cognition(self):
         """Parent session (no agent_type) gets L0+L1+L2."""
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_cognitive_context()
         assert "CP" in result  # L0
@@ -189,7 +189,7 @@ class TestBuildCognitiveContext:
     def test_research_subagent_gets_minimal(self):
         """Research subagent gets L0 only (minimal attention cost)."""
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_cognitive_context(agent_type="Explore")
         assert "CP" in result  # L0
@@ -199,7 +199,7 @@ class TestBuildCognitiveContext:
     def test_execution_subagent_gets_standard(self):
         """Execution subagent gets L0+L1 (anti-bias, no deep cognition)."""
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_cognitive_context(agent_type="general-purpose")
         assert "CP" in result  # L0
@@ -209,21 +209,21 @@ class TestBuildCognitiveContext:
     def test_execution_subagent_gets_delivery(self):
         """Execution subagent gets delivery standards even without prompt."""
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_cognitive_context(agent_type="general-purpose")
         assert "dead code" in result or "wired" in result
 
     def test_code_task_includes_delivery(self):
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_cognitive_context(task_prompt="implement feature")
         assert "W" in result
 
     def test_empty_prompt_no_crash(self):
         with patch(
-            "cc_cortex.cognitive_inject._load_learnings", return_value=[],
+            "concinno.cognitive_inject._load_learnings", return_value=[],
         ):
             result = build_cognitive_context(task_prompt="", workspace="")
         assert isinstance(result, str)
@@ -239,7 +239,7 @@ class TestBuildCognitiveContext:
         ]
         with (
             patch(
-                "cc_cortex.cognitive_inject._load_learnings",
+                "concinno.cognitive_inject._load_learnings",
                 return_value=learnings,
             ),
             tempfile.TemporaryDirectory() as td,
@@ -345,7 +345,7 @@ class TestThreeLayerRouting:
                     'description: Deploy VPS. Triggers on "deploy".\n---\n',
                 )
             with patch(
-                "cc_cortex.cognitive_inject._load_learnings",
+                "concinno.cognitive_inject._load_learnings",
                 return_value=learnings,
             ):
                 result = build_rag_context("fix deploy issue", td)
@@ -374,7 +374,7 @@ class TestThreeLayerRouting:
                     'description: Deploy VPS. Triggers on "deploy".\n---\n',
                 )
             with patch(
-                "cc_cortex.cognitive_inject._load_learnings",
+                "concinno.cognitive_inject._load_learnings",
                 return_value=learnings,
             ):
                 # Task about "quantum" — no match to auth or deploy

@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.delivery — Enterprise Delivery Gate."""
+"""Tests for concinno.delivery — Enterprise Delivery Gate."""
 
 import json  # noqa: I001
 import os
 
 import pytest
 
-from cc_cortex.delivery import (
+from concinno.delivery import (
     Criterion,
     CriterionType,
     DeliveryGate,
@@ -1024,13 +1024,13 @@ class TestHasScreenshotEvidence:
         assert not _has_screenshot_evidence(str(tmp_path), "sid1")
 
     def test_verified(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("ui_verify", "sid1", {"verified": True})
         assert _has_screenshot_evidence(str(tmp_path), "sid1")
 
     def test_verify_fails(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("ui_verify", "sid1", {"verify_fails": 1})
         assert _has_screenshot_evidence(str(tmp_path), "sid1")
@@ -1041,7 +1041,7 @@ class TestHasTestEvidence:
         assert not _has_test_evidence(str(tmp_path), "sid1")
 
     def test_pytest_found(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("sentinel", "sid1", {
             "calls": [{"tool": "Bash", "bash_pfx": "pytest tests/"}],
@@ -1049,7 +1049,7 @@ class TestHasTestEvidence:
         assert _has_test_evidence(str(tmp_path), "sid1")
 
     def test_vitest_found(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("sentinel", "sid1", {
             "calls": [{"tool": "Bash", "bash_pfx": "npx vitest run"}],
@@ -1057,7 +1057,7 @@ class TestHasTestEvidence:
         assert _has_test_evidence(str(tmp_path), "sid1")
 
     def test_non_test_bash(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("sentinel", "sid1", {
             "calls": [{"tool": "Bash", "bash_pfx": "git status"}],
@@ -1074,7 +1074,7 @@ class TestDefendedCheck:
         assert any("D(frontend)" in ln for ln in lines)
 
     def test_frontend_with_screenshot(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("ui_verify", "sid1", {"verified": True})
         lines = _defended_check(["src/App.tsx"], str(tmp_path), "sid1")
@@ -1085,7 +1085,7 @@ class TestDefendedCheck:
         assert any("D(backend)" in ln for ln in lines)
 
     def test_backend_with_test(self, tmp_path):
-        from cc_cortex.core.state_store import StateStore
+        from concinno.core.state_store import StateStore
         store = StateStore(str(tmp_path))
         store.write("sentinel", "sid1", {
             "calls": [{"tool": "Bash", "bash_pfx": "pytest"}],
@@ -1104,8 +1104,8 @@ class TestDefendedCheck:
 class TestWiredCheckWithD:
     def test_includes_d_report(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        from cc_cortex.core.state_store import StateStore
-        store = StateStore(str(tmp_path / ".cc_cortex_cache"))
+        from concinno.core.state_store import StateStore
+        store = StateStore(str(tmp_path / ".concinno_cache"))
         # Write sentinel with frontend file edited, no screenshot
         store.write("sentinel", "sid1", {
             "edited_files": [str(tmp_path / "App.tsx")],
@@ -1113,7 +1113,7 @@ class TestWiredCheckWithD:
         # Create the file so _get_session_code_files finds it
         (tmp_path / "App.tsx").write_text("export const X = 1;")
         report = wired_check(
-            str(tmp_path / ".cc_cortex_cache"), "sid1",
+            str(tmp_path / ".concinno_cache"), "sid1",
         )
         assert "WIREDO-D" in report
         assert "D(frontend)" in report
@@ -1129,8 +1129,8 @@ class TestAutoDeliveryGate:
 
     def test_all_pass_backend_with_test(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        cache_dir = str(tmp_path / ".cc_cortex_cache")
-        from cc_cortex.core.state_store import StateStore
+        cache_dir = str(tmp_path / ".concinno_cache")
+        from concinno.core.state_store import StateStore
         store = StateStore(cache_dir)
 
         # Create a wired backend file
@@ -1151,8 +1151,8 @@ class TestAutoDeliveryGate:
 
     def test_fail_unwired_file(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        cache_dir = str(tmp_path / ".cc_cortex_cache")
-        from cc_cortex.core.state_store import StateStore
+        cache_dir = str(tmp_path / ".concinno_cache")
+        from concinno.core.state_store import StateStore
         store = StateStore(cache_dir)
 
         orphan = tmp_path / "orphan_module.py"
@@ -1169,8 +1169,8 @@ class TestAutoDeliveryGate:
 
     def test_fail_frontend_no_screenshot(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        cache_dir = str(tmp_path / ".cc_cortex_cache")
-        from cc_cortex.core.state_store import StateStore
+        cache_dir = str(tmp_path / ".concinno_cache")
+        from concinno.core.state_store import StateStore
         store = StateStore(cache_dir)
 
         # Frontend file + wired
@@ -1189,8 +1189,8 @@ class TestAutoDeliveryGate:
 
     def test_fail_backend_no_test(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        cache_dir = str(tmp_path / ".cc_cortex_cache")
-        from cc_cortex.core.state_store import StateStore
+        cache_dir = str(tmp_path / ".concinno_cache")
+        from concinno.core.state_store import StateStore
         store = StateStore(cache_dir)
 
         mod = tmp_path / "api.py"
@@ -1208,8 +1208,8 @@ class TestAutoDeliveryGate:
 
     def test_audit_log_written(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-        cache_dir = str(tmp_path / ".cc_cortex_cache")
-        from cc_cortex.core.state_store import StateStore
+        cache_dir = str(tmp_path / ".concinno_cache")
+        from concinno.core.state_store import StateStore
         store = StateStore(cache_dir)
 
         mod = tmp_path / "svc.py"

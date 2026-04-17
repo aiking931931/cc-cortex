@@ -7,8 +7,8 @@ import tempfile
 
 import pytest
 
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.guards.registry import create_default_pipeline
+from concinno.guards.base import GuardContext
+from concinno.guards.registry import create_default_pipeline
 
 # ── Helpers ──────────────────────────────────────────────────
 

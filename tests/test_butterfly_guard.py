@@ -1,10 +1,10 @@
-"""Tests for cc_cortex.butterfly_guard module."""
+"""Tests for concinno.butterfly_guard module."""
 
 from __future__ import annotations
 
 import time
 
-from cc_cortex.butterfly_guard import (
+from concinno.butterfly_guard import (
     ButterflyGuard,
     DiscoveredIssue,
     IssueLedger,
@@ -12,7 +12,7 @@ from cc_cortex.butterfly_guard import (
     is_clean_result,
     is_verify_command,
 )
-from cc_cortex.guards.base import GuardContext  # noqa: I001
+from concinno.guards.base import GuardContext  # noqa: I001
 
 # ── helpers ──────────────────────────────────────────────
 

@@ -1,12 +1,12 @@
-"""Tests for cc_cortex.sibling_scan — Sibling Pattern Scan guard."""
+"""Tests for concinno.sibling_scan — Sibling Pattern Scan guard."""
 
 from __future__ import annotations
 
 import os
 from unittest.mock import patch
 
-from cc_cortex.guards.base import GuardContext
-from cc_cortex.sibling_scan import (
+from concinno.guards.base import GuardContext
+from concinno.sibling_scan import (
     SiblingScanGuard,
     _build_result,
     _extract_core_pattern,
@@ -133,7 +133,7 @@ class TestSiblingScanGuard:
         ctx = self._make_ctx(workspace="")
         assert guard.on_post_tool(ctx) is None
 
-    @patch("cc_cortex.sibling_scan._run_grep")
+    @patch("concinno.sibling_scan._run_grep")
     def test_no_siblings_found(self, mock_grep):
         mock_grep.return_value = ["/workspace/src/component_a.tsx"]
         guard = SiblingScanGuard()
@@ -141,7 +141,7 @@ class TestSiblingScanGuard:
         result = guard.on_post_tool(ctx)
         assert result is None
 
-    @patch("cc_cortex.sibling_scan._run_grep")
+    @patch("concinno.sibling_scan._run_grep")
     def test_siblings_found(self, mock_grep):
         mock_grep.return_value = [
             "src/component_a.tsx",
@@ -158,7 +158,7 @@ class TestSiblingScanGuard:
 
     def test_guard_registration(self):
         """Verify guard can be registered in pipeline."""
-        from cc_cortex.guards.pipeline import GuardPipeline
+        from concinno.guards.pipeline import GuardPipeline
         pipe = GuardPipeline()
         guard = SiblingScanGuard()
         pipe.register(guard)

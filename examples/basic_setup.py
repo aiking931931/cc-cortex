@@ -1,14 +1,14 @@
-"""Basic cc-cortex setup example.
+"""Basic concinno setup example.
 
-Shows how to programmatically configure cc-cortex modules
+Shows how to programmatically configure concinno modules
 and verify the installation.
 """
 
-from cc_cortex.core.config import DEFAULT_CONFIG
+from concinno.core.config import DEFAULT_CONFIG
 
 
 def show_default_config():
-    """Print the default cc-cortex configuration."""
+    """Print the default concinno configuration."""
     print("=== Default Configuration ===")
     for key, value in DEFAULT_CONFIG.items():
         if isinstance(value, dict):
@@ -24,7 +24,7 @@ def show_default_config():
 
 
 def check_installation():
-    """Verify cc-cortex modules are importable."""
+    """Verify concinno modules are importable."""
     modules = [
         ("core.config", "Config"),
         ("sentinel", "check_sentinel"),
@@ -38,11 +38,11 @@ def check_installation():
     print("\n=== Module Check ===")
     for mod_path, func_name in modules:
         try:
-            mod = __import__(f"cc_cortex.{mod_path}", fromlist=[func_name])
+            mod = __import__(f"concinno.{mod_path}", fromlist=[func_name])
             getattr(mod, func_name)
-            print(f"  [OK] cc_cortex.{mod_path}.{func_name}")
+            print(f"  [OK] concinno.{mod_path}.{func_name}")
         except (ImportError, AttributeError) as e:
-            print(f"  [FAIL] cc_cortex.{mod_path}.{func_name}: {e}")
+            print(f"  [FAIL] concinno.{mod_path}.{func_name}: {e}")
 
 
 if __name__ == "__main__":

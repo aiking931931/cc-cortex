@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.equilibrium_guard — write-and-clean for handoff files."""
+"""Tests for concinno.equilibrium_guard — write-and-clean for handoff files."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import textwrap
 
 import pytest
 
-from cc_cortex.equilibrium_guard import (
+from concinno.equilibrium_guard import (
     KEEP_RECENT,
     EquilibriumGuard,
     _atomic_rewrite,
@@ -16,7 +16,7 @@ from cc_cortex.equilibrium_guard import (
     _parse_records,
     cleanup_handoff,
 )
-from cc_cortex.guards.base import GuardContext
+from concinno.guards.base import GuardContext
 
 # ── Fixtures ─────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.fewshot — generic solved-case store."""
+"""Tests for concinno.fewshot — generic solved-case store."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.fewshot import (
+from concinno.fewshot import (
     DEFAULT_STOP_WORDS,
     FewshotBank,
     FewshotCase,

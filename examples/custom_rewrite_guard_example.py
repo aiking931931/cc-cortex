@@ -17,7 +17,7 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from cc_cortex import (
+from concinno import (
     BaseGuard,
     GuardCategory,
     GuardContext,
@@ -59,7 +59,7 @@ class GitCommitMessageRewriter(BaseGuard):
 
         new_cmd = (
             'git commit -m "TODO: write a real commit message before pushing" '
-            "# cc-cortex GitCommitMessageRewriter"
+            "# concinno GitCommitMessageRewriter"
         )
         new_input = dict(ctx.tool_input)
         new_input["command"] = new_cmd
@@ -87,7 +87,7 @@ def _run_pipeline(tool_input: dict) -> dict:
 
 
 def main() -> None:
-    print("cc-cortex 1.4.0 — custom rewrite guard example")
+    print("concinno 1.4.0 — custom rewrite guard example")
 
     for label, cmd in [
         ("missing -m (should rewrite)", "git commit"),

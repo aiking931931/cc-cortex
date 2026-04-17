@@ -1,9 +1,9 @@
-"""Tests for cc_cortex.wiredo_change_type classifier."""
+"""Tests for concinno.wiredo_change_type classifier."""
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.wiredo_change_type import (
+from concinno.wiredo_change_type import (
     CHANGE_TYPES,
     detect_change_type,
     detect_from_command,
@@ -17,11 +17,11 @@ from cc_cortex.wiredo_change_type import (
 @pytest.mark.parametrize(
     "path,expected",
     [
-        ("src/cc_cortex/hooks/on_stop.py", "hook"),
-        ("src/cc_cortex/guards/foo_guard.py", "hook"),
-        ("src/cc_cortex/cli/main.py", "cli"),
+        ("src/concinno/hooks/on_stop.py", "hook"),
+        ("src/concinno/guards/foo_guard.py", "hook"),
+        ("src/concinno/cli/main.py", "cli"),
         ("scripts/deploy.py", "cli"),
-        ("src/cc_cortex/my_cli.py", "cli"),
+        ("src/concinno/my_cli.py", "cli"),
         ("src/frontend/components/Button.tsx", "frontend"),
         ("app/web/page.jsx", "frontend"),
         ("api/routes/users.py", "backend"),
@@ -40,10 +40,10 @@ from cc_cortex.wiredo_change_type import (
         ("contract.doc", "word_doc"),
         ("migrations/001_init.sql", "migration"),
         ("alembic/versions/abc_migrate.py", "migration"),
-        ("src/cc_cortex/escalation.py", "library"),
+        ("src/concinno/escalation.py", "library"),
         (".claude/skills/foo/SKILL.md", "ai_prompt"),
         ("agents/planner/prompt.md", "ai_prompt"),  # agents/ marker wins
-        ("dist/cc_cortex-1.14.0.tar.gz", "build_artifact"),
+        ("dist/concinno-1.14.0.tar.gz", "build_artifact"),
         ("dist/pkg.whl", "build_artifact"),
         ("query.sql", "db_query"),
     ],
@@ -62,7 +62,7 @@ def test_detect_from_path_unknown_extension_returns_none():
 
 def test_detect_from_path_windows_separator():
     # Backslashes should be normalized.
-    assert detect_from_path("src\\cc_cortex\\hooks\\on_stop.py") == "hook"
+    assert detect_from_path("src\\concinno\\hooks\\on_stop.py") == "hook"
 
 
 # ── detect_from_command ─────────────────────────────────────────
@@ -108,7 +108,7 @@ def test_aggregate_empty_returns_default():
 
 def test_aggregate_command_wins_over_paths():
     got = detect_change_type(
-        paths=["src/cc_cortex/foo.py"], commands=["python deploy.py"]
+        paths=["src/concinno/foo.py"], commands=["python deploy.py"]
     )
     assert got == "deploy"
 
@@ -116,8 +116,8 @@ def test_aggregate_command_wins_over_paths():
 def test_aggregate_mode_from_paths():
     got = detect_change_type(
         paths=[
-            "src/cc_cortex/foo.py",
-            "src/cc_cortex/bar.py",
+            "src/concinno/foo.py",
+            "src/concinno/bar.py",
             "tests/test_foo.py",
         ]
     )
@@ -128,7 +128,7 @@ def test_aggregate_mode_from_paths():
 def test_aggregate_docs_only_requires_clean_sweep():
     # Mixed docs + code should NOT be docs_only.
     got = detect_change_type(
-        paths=["README.md", "src/cc_cortex/foo.py"]
+        paths=["README.md", "src/concinno/foo.py"]
     )
     assert got != "docs_only"
     # Pure docs sweep IS docs_only.
@@ -139,8 +139,8 @@ def test_aggregate_docs_only_requires_clean_sweep():
 def test_aggregate_tie_prefers_non_library():
     got = detect_change_type(
         paths=[
-            "src/cc_cortex/foo.py",  # library
-            "src/cc_cortex/hooks/bar.py",  # hook
+            "src/concinno/foo.py",  # library
+            "src/concinno/hooks/bar.py",  # hook
         ]
     )
     # 1 library + 1 hook, tie → should prefer hook (more specific)
@@ -153,11 +153,11 @@ def test_aggregate_unknown_paths_fall_back_to_default():
 
 
 def test_aggregate_filters_empty_strings():
-    got = detect_change_type(paths=["", "src/cc_cortex/foo.py", ""])
+    got = detect_change_type(paths=["", "src/concinno/foo.py", ""])
     assert got == "library"
 
 
 def test_change_types_constant_matches_loader_set():
-    from cc_cortex.wiredo_loader import CHANGE_TYPES as LOADER_TYPES
+    from concinno.wiredo_loader import CHANGE_TYPES as LOADER_TYPES
 
     assert set(CHANGE_TYPES) == set(LOADER_TYPES)

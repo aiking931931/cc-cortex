@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cc_cortex.ziq_control import (
+from concinno.ziq_control import (
     TctConfig,
     TctSignal,
     compute_riverbed,

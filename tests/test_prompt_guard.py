@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.prompt_guard — clarity gate + multi-question detection."""
+"""Tests for concinno.prompt_guard — clarity gate + multi-question detection."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 
-from cc_cortex.prompt_guard import (
+from concinno.prompt_guard import (
     MULTI_Q_MARKERS,
     _get_irreversible,
     _get_known_commands,

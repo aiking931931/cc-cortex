@@ -11,12 +11,12 @@ import argparse
 import os
 import tempfile
 
-from cc_cortex.cli.main import (
+from concinno.cli.main import (
     _aegis_context,
     cmd_aegis_goal,
     cmd_aegis_status,
 )
-from cc_cortex.task_orchestrator import TaskOrchestrator
+from concinno.task_orchestrator import TaskOrchestrator
 
 
 def _patch_env(monkeypatch, project_dir: str, session_id: str) -> None:
@@ -32,7 +32,7 @@ class TestAegisContext:
         assert ctx is not None
         cache_dir, session_id = ctx
         assert session_id == "sess-aaaa"
-        assert cache_dir.endswith(".cc_cortex_cache")
+        assert cache_dir.endswith(".concinno_cache")
 
     def test_missing_env_returns_none(self, monkeypatch):
         monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
@@ -60,7 +60,7 @@ class TestAegisStatus:
     def test_with_seeded_goal(self, monkeypatch, capsys):
         tmp = tempfile.mkdtemp()
         _patch_env(monkeypatch, tmp, "sess-seed")
-        cache_dir = os.path.join(tmp, ".cc_cortex_cache")
+        cache_dir = os.path.join(tmp, ".concinno_cache")
         # Seed a goal + one subtask done
         orch = TaskOrchestrator(
             cache_dir=cache_dir, session_id="sess-seed",
@@ -92,7 +92,7 @@ class TestAegisGoal:
         assert "3 subtask" in out
 
         # Verify persistence
-        cache_dir = os.path.join(tmp, ".cc_cortex_cache")
+        cache_dir = os.path.join(tmp, ".concinno_cache")
         orch = TaskOrchestrator(
             cache_dir=cache_dir, session_id="sess-goal",
         )

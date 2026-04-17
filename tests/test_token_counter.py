@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.token_counter."""
+"""Tests for concinno.token_counter."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cc_cortex.token_counter import TokenCounter, _estimate_fast
+from concinno.token_counter import TokenCounter, _estimate_fast
 
 # ── fast mode ─────────────────────────────────────────────
 
@@ -36,6 +36,46 @@ def test_fast_mode_empty():
     tc = TokenCounter(mode="fast")
     assert tc.count("") == 0
     assert _estimate_fast("") == 0
+
+
+# ── tokenizer profile contract ─────────────────────────────
+# 2.3.0 removed the ``opus47`` profile because its ratio constants
+# could not be anchored to a published Anthropic source. These tests
+# lock in the replacement contract: only ``legacy`` is accepted, and
+# unknown profile names raise at the fast-mode entry point so silent
+# substitution cannot regress.
+
+
+def test_fast_mode_unknown_tokenizer_rejected():
+    """Unknown tokenizer profile raises — no silent fallback."""
+    import pytest
+    with pytest.raises(ValueError, match="unknown tokenizer profile"):
+        _estimate_fast("hello", tokenizer="opus47")
+    with pytest.raises(ValueError, match="unknown tokenizer profile"):
+        _estimate_fast("hello", tokenizer="future-model")
+
+
+def test_fast_mode_legacy_is_the_only_profile():
+    """``legacy`` ratio is the supported fast-mode profile."""
+    text = "a" * 300
+    assert _estimate_fast(text) == _estimate_fast(text, tokenizer="legacy")
+    # ASCII ratio: len / 4
+    assert _estimate_fast(text) == 75
+    # CJK ratio: len * 1.5
+    assert _estimate_fast("字" * 200) == 300
+
+
+def test_tokencounter_opus_47_still_works_via_accurate_path():
+    """Opus 4.7 callers must use accurate/hybrid, not a fast-mode profile.
+
+    The constructor accepts any model name; fast mode falls back to
+    ``legacy`` (via ``_tokenizer_for``) and only accurate/hybrid calls
+    the real ``count_tokens`` API that knows the true tokenizer.
+    """
+    tc47 = TokenCounter(mode="fast", model="claude-opus-4-7")
+    tc46 = TokenCounter(mode="fast", model="claude-opus-4-6")
+    # Same fast-mode ratio regardless of model — by design.
+    assert tc47.count("hello world") == tc46.count("hello world")
 
 
 # ── hybrid mode ───────────────────────────────────────────

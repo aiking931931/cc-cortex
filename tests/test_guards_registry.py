@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from cc_cortex.guards.base import BaseGuard, GuardCategory
-from cc_cortex.guards.pipeline import GuardPipeline
-from cc_cortex.guards.registry import create_default_pipeline
+from concinno.guards.base import BaseGuard, GuardCategory
+from concinno.guards.pipeline import GuardPipeline
+from concinno.guards.registry import create_default_pipeline
 
 # ── Factory ──────────────────────────────────────────────────
 

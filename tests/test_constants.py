@@ -1,8 +1,8 @@
-"""Tests for cc_cortex.constants — tool sets and gate response factories."""
+"""Tests for concinno.constants — tool sets and gate response factories."""
 
 from __future__ import annotations
 
-from cc_cortex.constants import READ_TOOLS, WRITE_TOOLS, WRITE_TOOLS_EXT, make_allow, make_deny
+from concinno.constants import READ_TOOLS, WRITE_TOOLS, WRITE_TOOLS_EXT, make_allow, make_deny
 
 # ── Tool Sets ───────────────────────────────────────────────
 

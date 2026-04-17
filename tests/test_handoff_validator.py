@@ -1,6 +1,6 @@
-"""Tests for cc_cortex.handoff_validator."""
+"""Tests for concinno.handoff_validator."""
 
-from cc_cortex.handoff_validator import (
+from concinno.handoff_validator import (
     format_report,
     parse_frontmatter,
     validate_dir,

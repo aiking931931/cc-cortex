@@ -2,9 +2,9 @@
 
 import pytest
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.ui_verify import (
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.ui_verify import (
     UIVerifyGuard,
     _has_failures,
     _is_deploy_command,

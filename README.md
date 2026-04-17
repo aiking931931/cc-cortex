@@ -1,13 +1,6 @@
-# CC Cortex
+# Concinno
 
-```text
- ██████╗ ██████╗     ██████╗ ██████╗ ██████╗ ████████╗███████╗██╗  ██╗
-██╔════╝██╔════╝    ██╔════╝██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝
-██║     ██║         ██║     ██║   ██║██████╔╝   ██║   █████╗   ╚███╔╝
-██║     ██║         ██║     ██║   ██║██╔══██╗   ██║   ██╔══╝   ██╔██╗
-╚██████╗╚██████╗    ╚██████╗╚██████╔╝██║  ██║   ██║   ███████╗██╔╝ ██╗
- ╚═════╝ ╚═════╝     ╚═════╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
-```
+> *Previously known as CC Cortex (CCC)*
 
 **The Cognitive Layer for Claude Code**
 
@@ -16,19 +9,19 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#zero-dependency-philosophy)
 [![Tests: 3430](https://img.shields.io/badge/tests-3430-brightgreen.svg)](#architecture)
 [![Guards: 55+](https://img.shields.io/badge/guards-55%2B-orange.svg)](#guard-pipeline--eslint-for-ai-behavior)
-[![PyPI](https://img.shields.io/pypi/v/cc-cortex.svg)](https://pypi.org/project/cc-cortex/)
-[![A2A](https://img.shields.io/badge/A2A-v1.0-blue.svg)](#why-cortex)
+[![PyPI](https://img.shields.io/pypi/v/concinno.svg)](https://pypi.org/project/concinno/)
+[![A2A](https://img.shields.io/badge/A2A-v1.0-blue.svg)](#why-concinno)
 [![Skills: 66](https://img.shields.io/badge/skills-66-blueviolet.svg)](#modules)
 [![Agents: 36](https://img.shields.io/badge/agents-36-blue.svg)](#modules)
 [![NIST AI RMF](https://img.shields.io/badge/NIST_AI_RMF-aligned-blue.svg)](#enterprise-governance)
 
-> **cc-cortex** is a modular hook toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). It gives your AI coding assistant safety guardrails, memory, multi-instance coordination, and autonomous self-improvement — all through a zero-dependency, drop-in Python package.
+> **concinno** is a modular hook toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). It gives your AI coding assistant safety guardrails, memory, multi-instance coordination, and autonomous self-improvement — all through a zero-dependency, drop-in Python package.
 
 ---
 
-## Why "Cortex"?
+## Why "Concinno"?
 
-The **cortex** is the outermost layer of the brain — responsible for perception, decision-making, and higher-order cognition. **CC Cortex** transforms raw Claude Code sessions into a coherent, self-improving cognitive system:
+**Concinno** (Latin: "I regulate, I moderate") is the governance layer for Claude Code. Previously known as CC Cortex, **Concinno** transforms raw Claude Code sessions into a coherent, self-improving cognitive system:
 
 - **Guardrails** that prevent destructive actions (like the prefrontal cortex inhibiting impulsive behavior)
 - **Memory** that persists across sessions (like hippocampus-cortex memory consolidation)
@@ -39,7 +32,7 @@ The **cortex** is the outermost layer of the brain — responsible for perceptio
 
 ## The Six Pain Points
 
-| # | Pain Point | Without CC Cortex | With CC Cortex |
+| # | Pain Point | Without Concinno | With Concinno |
 |---|-----------|-------------------|----------------|
 | 1 | **Destructive Actions** — AI can delete files, force-push, or overwrite work | Hope for the best | `destruction_guard` blocks `rm -rf`, `git push --force`, and 40+ patterns |
 | 2 | **Secret Leaks** — API keys hardcoded into Bash commands | Manual review | `secret_scan` detects API keys, tokens, and passwords in real-time |
@@ -53,16 +46,16 @@ The **cortex** is the outermost layer of the brain — responsible for perceptio
 ## Quick Start (30 seconds)
 
 ```bash
-pip install cc-cortex    # zero-dep core, or: pip install cc-cortex[all]
-cc-cortex init           # auto-detects workspace, installs hooks
+pip install concinno    # zero-dep core, or: pip install concinno[all]
+concinno init           # auto-detects workspace, installs hooks
 ```
 
-**What just happened?** CC Cortex registered 4 hooks into your Claude Code
+**What just happened?** Concinno registered 4 hooks into your Claude Code
 `settings.json` — every tool call now passes through 55+ guards before
 execution. Try it:
 
 ```python
-from cc_cortex import create_default_pipeline, GuardContext
+from concinno import create_default_pipeline, GuardContext
 
 pipe = create_default_pipeline()  # 55 guards, sorted by category
 result = pipe.run_pre_tool(GuardContext.from_hook_data({
@@ -76,18 +69,18 @@ print(result)  # → {"permissionDecision": "deny", ...}
 
 | Tier    | Command                       | What you get                              |
 | ------- | ----------------------------- | ----------------------------------------- |
-| Default | `pip install cc-cortex`       | Full power: guards + LLM judges + FieldRead |
-| Lite    | `pip install cc-cortex[lite]` | Zero deps, guards only                    |
-| RAG     | `pip install cc-cortex[rag]`  | + chromadb + sentence-transformers         |
-| All     | `pip install cc-cortex[all]`  | Everything                                |
+| Default | `pip install concinno`       | Full power: guards + LLM judges + FieldRead |
+| Lite    | `pip install concinno[lite]` | Zero deps, guards only                    |
+| RAG     | `pip install concinno[rag]`  | + chromadb + sentence-transformers         |
+| All     | `pip install concinno[all]`  | Everything                                |
 
 ---
 
 ## Guard Pipeline — "ESLint for AI Behavior"
 
-If you know ESLint, you already know CC Cortex guards.
+If you know ESLint, you already know Concinno guards.
 
-| ESLint | CC Cortex Guard |
+| ESLint | Concinno Guard |
 | ------ | --------------- |
 | **Rule** (`no-unused-vars`) | **Guard** (`destruction_guard`) |
 | **Ruleset** (`.eslintrc`) | **Pipeline** (44 guards, auto-sorted) |
@@ -96,7 +89,7 @@ If you know ESLint, you already know CC Cortex guards.
 | **Plugin** (`eslint-plugin-react`) | **Custom Guard** (subclass `BaseGuard`) |
 | **Path scope** (`overrides[].files`) | **`path_scope`** (glob patterns) |
 
-CC Cortex uses a **unified Guard Pipeline** with 55+ guards across 3 layers:
+Concinno uses a **unified Guard Pipeline** with 55+ guards across 3 layers:
 
 ```text
 SECURITY  (7 guards)   →  hard deny, no step-back
@@ -107,8 +100,8 @@ COGNITIVE (9 guards)   →  knowledge injection on allow
 ### Writing Custom Guards
 
 ```python
-from cc_cortex import BaseGuard, GuardCategory, GuardContext, GuardResult
-from cc_cortex import create_default_pipeline
+from concinno import BaseGuard, GuardCategory, GuardContext, GuardResult
+from concinno import create_default_pipeline
 
 class ProdDeployGuard(BaseGuard):
     name = "prod_deploy"
@@ -145,7 +138,7 @@ Three rewriters ship by default:
 | -------- | --------------- | ------------------- |
 | `BashDryRunRewriter` | `rm -rf .`, `rm -fr <glob>` | `echo '[dry-run] would have run: …'` |
 | `WriteSecretFileRewriter` | `Write(.env)`, `Write(credentials.json)`, `Write(secrets.yaml)` | `.env.example`, `credentials.example.json`, `secrets.example.yaml` |
-| `BashPipeToShellRewriter` | `curl … \| bash`, `wget … \| sh` | `curl -fsSL -o /tmp/cc-cortex-download.sh && echo 'inspect first'` |
+| `BashPipeToShellRewriter` | `curl … \| bash`, `wget … \| sh` | `curl -fsSL -o /tmp/concinno-download.sh && echo 'inspect first'` |
 
 Rewrites are *narrow*, *idempotent*, *visible* (every rewrite surfaces
 a `↻ <guard>: <reason>` note), and *composable* — a later guard can
@@ -157,13 +150,13 @@ and returning `GuardResult.rewrite(updated_input=…, reason=…)`. See
 ### 1.4.0 — LLM-as-Judge via `prompt_hooks`
 
 Claude Code 2026-04 shipped a `type: "prompt"` hook that runs a short
-single-turn LLM evaluation inside the CC runtime. `cc_cortex.prompt_hooks`
+single-turn LLM evaluation inside the CC runtime. `concinno.prompt_hooks`
 wraps that feature with three curated judge prompts — you get the value
 of an LLM reviewer without CCC itself importing an LLM SDK (core stays
 zero-dep).
 
 ```python
-from cc_cortex import install_prompt_hooks, ALL_JUDGES
+from concinno import install_prompt_hooks, ALL_JUDGES
 from pathlib import Path
 
 # Installs HallucinationJudge + ExcuseScannerJudge + CodeQualityJudge
@@ -188,7 +181,7 @@ install. Full runnable demo in `examples/prompt_hooks_example.py`.
 <summary>Legacy v0.5 API (deprecated, removed in v1.0)</summary>
 
 ```python
-from cc_cortex import HookResult, Pipeline
+from concinno import HookResult, Pipeline
 
 pipe = Pipeline()
 pipe.add_deny_guard("destruction", evaluate)
@@ -203,7 +196,7 @@ See [examples/custom_hooks.py](examples/custom_hooks.py) for runnable demos.
 
 ## Modules
 
-CC Cortex ships ~40 modules organized into 5 layers:
+Concinno ships ~40 modules organized into 5 layers:
 
 ### Safety & Guardrails
 
@@ -255,18 +248,18 @@ CC Cortex ships ~40 modules organized into 5 layers:
 | `mcp_server` | MCP Server adapter for Claude Code native integration |
 | `warn_router` | Warning message routing and priority classification |
 | `feature_config` | Feature toggle with risk metadata and validation |
-| `cli` | `cc-cortex init/status/doctor` CLI entry point |
+| `cli` | `concinno init/status/doctor` CLI entry point |
 
 ---
 
 ## CLI
 
-### `cc-cortex status`
+### `concinno status`
 
 ```text
-$ cc-cortex status
+$ concinno status
 
-cc-cortex modules:
+concinno modules:
 
   🔒 core                 Token guardian + session notifications   (always on)
   ✅ knowledge            Auto-learning loop + knowledge base      (default)
@@ -281,12 +274,12 @@ cc-cortex modules:
   ✅ cognitive            Cross-session learning + decision tracking (default)
 ```
 
-### `cc-cortex doctor`
+### `concinno doctor`
 
 ```text
-$ cc-cortex doctor
+$ concinno doctor
 
-🩺 cc-cortex doctor
+🩺 concinno doctor
 
   ✅ cc_config.json — valid
   ✅ on-session-start.py
@@ -305,7 +298,7 @@ $ cc-cortex doctor
 
 ## Configuration
 
-CC Cortex uses a single `cc_config.json` file:
+Concinno uses a single `cc_config.json` file:
 
 ```jsonc
 {
@@ -325,9 +318,9 @@ See [examples/cc_config_example.jsonc](examples/cc_config_example.jsonc) for a f
 
 ## Enterprise Governance
 
-CC Cortex provides built-in alignment with enterprise AI governance standards:
+Concinno provides built-in alignment with enterprise AI governance standards:
 
-| Standard | Alignment | CC Cortex Feature |
+| Standard | Alignment | Concinno Feature |
 |----------|-----------|-------------------|
 | **NIST AI RMF** (Govern/Map/Measure/Manage) | Measure + Manage | Guard audit logs (JSONL) + gate deny enforcement |
 | **NIST AI Agent Standards** (2026) | Auth + Privilege Control | Identity guard + agent gate + confidence gate |
@@ -343,8 +336,8 @@ CC Cortex provides built-in alignment with enterprise AI governance standards:
 ## Architecture
 
 ```text
-cc-cortex/
-├── src/cc_cortex/
+concinno/
+├── src/concinno/
 │   ├── __init__.py          # Public API: BaseGuard, GuardPipeline
 │   ├── guards/              # Guard Pipeline (base, pipeline, registry)
 │   ├── core/                # Atomic I/O, config, session, notify, compact
@@ -360,7 +353,7 @@ cc-cortex/
 │   ├── think_inject.py      # Think tool injection for high-risk operations
 │   ├── field_read.py        # Selective field extraction (ZIQ breakeven gate)
 │   ├── rag.py               # Cognitive RAG (optional: chromadb)
-│   └── cli/                 # `cc-cortex` CLI entry point
+│   └── cli/                 # `concinno` CLI entry point
 ├── tests/                   # 3430+ tests (pytest)
 ├── examples/                # Runnable examples
 └── docs/                    # Documentation
@@ -370,7 +363,7 @@ cc-cortex/
 
 ## Zero Dependency Philosophy
 
-The core package (`pip install cc-cortex[lite]`) has **zero external
+The core package (`pip install concinno[lite]`) has **zero external
 dependencies** — stdlib only. The default install adds optional LLM and
 FieldRead support; `[rag]` adds chromadb; `[all]` includes everything.
 
@@ -401,6 +394,6 @@ Apache-2.0 License. See [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <strong>CC Cortex</strong> — The Cognitive Layer for Claude Code<br>
+  <strong>Concinno</strong> — The Cognitive Layer for Claude Code<br>
   <em>Stop re-explaining. Start remembering.</em>
 </p>

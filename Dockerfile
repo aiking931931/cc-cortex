@@ -9,11 +9,11 @@ RUN pip install --no-cache-dir \
     openai
 
 # Copy A2A server code only (no CCC internals)
-COPY src/cc_cortex/a2a/ ./cc_cortex/a2a/
-COPY src/cc_cortex/__init__.py ./cc_cortex/__init__.py
+COPY src/tempero/a2a/ ./tempero/a2a/
+COPY src/tempero/__init__.py ./tempero/__init__.py
 
 # Create cache dir
-RUN mkdir -p /tmp/cc_cortex_cache/stepback
+RUN mkdir -p /tmp/tempero_cache/stepback
 
 # Environment variables (override at runtime)
 ENV A2A_PORT=8420
@@ -26,4 +26,4 @@ EXPOSE 8420
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8420/.well-known/agent-card.json')" || exit 1
 
-CMD ["python", "-m", "cc_cortex.a2a.server"]
+CMD ["python", "-m", "tempero.a2a.server"]

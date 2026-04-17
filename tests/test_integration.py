@@ -10,7 +10,7 @@ import pytest
 @pytest.fixture
 def mock_env(tmp_path):
     """Set up a mock project environment."""
-    cache_dir = tmp_path / ".cc_cortex_cache"
+    cache_dir = tmp_path / ".concinno_cache"
     cache_dir.mkdir()
     old = os.environ.get("CLAUDE_PROJECT_DIR")
     os.environ["CLAUDE_PROJECT_DIR"] = str(tmp_path)
@@ -25,13 +25,13 @@ class TestStreakUXIntegration:
     """Streak UX: actual state file read/write + milestone triggering."""
 
     def _get_module(self, ux_path):
-        from cc_cortex.hooks import on_post_tool as opt
+        from concinno.hooks import on_post_tool as opt
         importlib.reload(opt)
         opt._UX_STATE_FILE = str(ux_path)
         return opt
 
     def _write_ux(self, path, streak=0, errors=None):
-        from cc_cortex.hooks.on_post_tool import _resolve_session_id
+        from concinno.hooks.on_post_tool import _resolve_session_id
         with open(path, "w", encoding="utf-8") as f:
             json.dump(
                 {"errors": errors or {}, "streak": streak, "session_id": _resolve_session_id()},
@@ -210,7 +210,7 @@ class TestTokenMonitorIntegration:
     def test_read_real_usage(self, mock_env):
         """Read token usage from transcript JSONL."""
         tmp, _ = mock_env
-        from cc_cortex.token_monitor import read_real_token_usage
+        from concinno.token_monitor import read_real_token_usage
 
         path = self._make_transcript(tmp, tokens=80000, cache_read=20000, output=5000)
         result = read_real_token_usage(path)
@@ -222,7 +222,7 @@ class TestTokenMonitorIntegration:
     def test_threshold_100k(self, mock_env):
         """100K tokens → 📊 info threshold."""
         tmp, cache = mock_env
-        from cc_cortex.token_monitor import check_threshold
+        from concinno.token_monitor import check_threshold
 
         path = self._make_transcript(tmp, tokens=105000)
         thresholds = [
@@ -239,7 +239,7 @@ class TestTokenMonitorIntegration:
     def test_threshold_140k(self, mock_env):
         """140K tokens → ⚠️ warning threshold."""
         tmp, cache = mock_env
-        from cc_cortex.token_monitor import check_threshold
+        from concinno.token_monitor import check_threshold
 
         path = self._make_transcript(tmp, tokens=145000)
         thresholds = [
@@ -255,7 +255,7 @@ class TestTokenMonitorIntegration:
     def test_threshold_160k_repeats(self, mock_env):
         """160K with repeat=True → warns every time."""
         tmp, cache = mock_env
-        from cc_cortex.token_monitor import check_threshold
+        from concinno.token_monitor import check_threshold
 
         path = self._make_transcript(tmp, tokens=165000)
         thresholds = [
@@ -275,7 +275,7 @@ class TestTokenMonitorIntegration:
     def test_threshold_dedup_non_repeat(self, mock_env):
         """Non-repeat threshold → only warns once per session."""
         tmp, cache = mock_env
-        from cc_cortex.token_monitor import check_threshold
+        from concinno.token_monitor import check_threshold
 
         path = self._make_transcript(tmp, tokens=105000)
         thresholds = [
@@ -292,7 +292,7 @@ class TestTokenMonitorIntegration:
     def test_below_threshold_returns_none(self, mock_env):
         """50K tokens → no threshold crossed."""
         tmp, cache = mock_env
-        from cc_cortex.token_monitor import check_threshold
+        from concinno.token_monitor import check_threshold
 
         path = self._make_transcript(tmp, tokens=50000)
         thresholds = [
@@ -304,7 +304,7 @@ class TestTokenMonitorIntegration:
     def test_cost_weighted_tokens(self, mock_env):
         """Cost tokens should discount cache_read by 90%."""
         tmp, _ = mock_env
-        from cc_cortex.token_monitor import read_real_token_usage
+        from concinno.token_monitor import read_real_token_usage
 
         # 50K input + 100K cache_read → context=150K, cost=50K+10K=60K+output
         path = self._make_transcript(tmp, tokens=50000, cache_read=100000, output=5000)
@@ -321,11 +321,11 @@ class TestFullPipelineIntegration:
         """Write tool to .md file → streak increments, no output (not milestone)."""
         _, cache = mock_env
         ux_path = cache / "streak_ux.json"
-        from cc_cortex.hooks.on_post_tool import _resolve_session_id
+        from concinno.hooks.on_post_tool import _resolve_session_id
         with open(ux_path, "w") as f:
             json.dump({"errors": {}, "streak": 0, "session_id": _resolve_session_id()}, f)
 
-        from cc_cortex.hooks import on_post_tool as opt
+        from concinno.hooks import on_post_tool as opt
         importlib.reload(opt)
         opt._UX_STATE_FILE = str(ux_path)
 
@@ -342,11 +342,11 @@ class TestFullPipelineIntegration:
         """Write at streak=4 → milestone 5 → JSON output with 🔥."""
         _, cache = mock_env
         ux_path = cache / "streak_ux.json"
-        from cc_cortex.hooks.on_post_tool import _resolve_session_id
+        from concinno.hooks.on_post_tool import _resolve_session_id
         with open(ux_path, "w") as f:
             json.dump({"errors": {}, "streak": 4, "session_id": _resolve_session_id()}, f)
 
-        from cc_cortex.hooks import on_post_tool as opt
+        from concinno.hooks import on_post_tool as opt
         importlib.reload(opt)
         opt._UX_STATE_FILE = str(ux_path)
 
@@ -363,11 +363,11 @@ class TestFullPipelineIntegration:
         """Grep/Read tools should not affect streak."""
         _, cache = mock_env
         ux_path = cache / "streak_ux.json"
-        from cc_cortex.hooks.on_post_tool import _resolve_session_id
+        from concinno.hooks.on_post_tool import _resolve_session_id
         with open(ux_path, "w") as f:
             json.dump({"errors": {}, "streak": 3, "session_id": _resolve_session_id()}, f)
 
-        from cc_cortex.hooks import on_post_tool as opt
+        from concinno.hooks import on_post_tool as opt
         importlib.reload(opt)
         opt._UX_STATE_FILE = str(ux_path)
 

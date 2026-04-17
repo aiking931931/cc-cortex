@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.pipeline_state — Pipeline state management."""
+"""Tests for concinno.pipeline_state — Pipeline state management."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.pipeline_state import (
+from concinno.pipeline_state import (
     PIPELINE_PHASES,
     clear_state,
     get_next_suggestion,

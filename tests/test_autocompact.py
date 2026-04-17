@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cache.autocompact."""
+"""Tests for concinno.cache.autocompact."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.cache.autocompact import (
+from concinno.cache.autocompact import (
     AUTOCOMPACT_BUFFER_TOKENS,
     DEFAULT_MODEL_BUDGETS,
     ERROR_THRESHOLD_BUFFER_TOKENS,
@@ -81,24 +81,57 @@ def test_default_threshold_constants() -> None:
 
 
 def test_model_budget_lookup_opus_4_6() -> None:
+    """Defaults are the 200K standard window for every tier.
+
+    The 1M window is a beta-gated feature — library consumers without
+    beta access would silently miss their real 200K ceiling if we
+    defaulted to 1M. Opt-in via ``CONCINNO_OPUS_1M_BETA=1`` (covered
+    by :func:`test_model_budget_opus_1m_beta_opt_in`).
+    """
     ac = AutoCompactor(model="claude-opus-4-6")
-    assert ac.model_budget == 1_000_000
-    assert DEFAULT_MODEL_BUDGETS["claude-opus-4-6"] == 1_000_000
-    assert DEFAULT_MODEL_BUDGETS["claude-sonnet-4-6"] == 1_000_000
+    assert ac.model_budget == 200_000
+    assert DEFAULT_MODEL_BUDGETS["claude-opus-4-7"] == 200_000
+    assert DEFAULT_MODEL_BUDGETS["claude-opus-4-6"] == 200_000
+    assert DEFAULT_MODEL_BUDGETS["claude-sonnet-4-6"] == 200_000
     assert DEFAULT_MODEL_BUDGETS["claude-haiku-4-5"] == 200_000
+
+
+def test_model_budget_opus_1m_beta_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``CONCINNO_OPUS_1M_BETA=1`` bumps Opus 4.6+/Sonnet 4.6+ to 1M.
+
+    Haiku and unknown models are unaffected by the opt-in — only
+    the models Anthropic documents as eligible for the 1M beta.
+    """
+    from concinno.cache.autocompact import _budget_for_model
+
+    monkeypatch.setenv("CONCINNO_OPUS_1M_BETA", "1")
+    assert _budget_for_model("claude-opus-4-7") == 1_000_000
+    assert _budget_for_model("claude-opus-4-6") == 1_000_000
+    assert _budget_for_model("claude-sonnet-4-6") == 1_000_000
+    assert _budget_for_model("claude-haiku-4-5") == 200_000  # unchanged
+    assert _budget_for_model("unknown-model") == 200_000  # unchanged
+
+    # Without the env var the lookup stays at the conservative default.
+    monkeypatch.delenv("CONCINNO_OPUS_1M_BETA", raising=False)
+    assert _budget_for_model("claude-opus-4-7") == 200_000
 
 
 def test_model_budget_unknown_falls_back_to_200k(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with caplog.at_level("WARNING", logger="cc_cortex.cache.autocompact"):
+    with caplog.at_level("WARNING", logger="concinno.cache.autocompact"):
         ac = AutoCompactor(model="claude-martian-99")
     assert ac.model_budget == 200_000
     assert any("unknown model" in r.message for r in caplog.records)
 
 
 def test_get_autocompact_threshold_math() -> None:
-    ac = AutoCompactor(model="claude-opus-4-6")
+    # Threshold math is checked under an explicit 1M budget (as if the
+    # caller held Opus 1M beta access) so the numbers don't drift with
+    # the library default. Default is 200K — covered separately.
+    ac = AutoCompactor(model="claude-opus-4-6", model_budget=1_000_000)
     # 1_000_000 - 13_000 - 20_000
     assert ac.get_autocompact_threshold() == 967_000
 
@@ -116,20 +149,20 @@ def test_get_autocompact_threshold_math() -> None:
 
 
 def test_should_trigger_noop_below_threshold() -> None:
-    ac = AutoCompactor(model="claude-opus-4-6")
+    ac = AutoCompactor(model="claude-opus-4-6", model_budget=1_000_000)
     assert ac.should_trigger(current_tokens=100_000) == "noop"
     assert ac.should_trigger(current_tokens=966_999) == "noop"
 
 
 def test_should_trigger_warning_zone() -> None:
-    ac = AutoCompactor(model="claude-opus-4-6")
+    ac = AutoCompactor(model="claude-opus-4-6", model_budget=1_000_000)
     # Above 967_000, below 987_000
     assert ac.should_trigger(current_tokens=970_000) == "warning"
     assert ac.should_trigger(current_tokens=986_999) == "warning"
 
 
 def test_should_trigger_error_zone() -> None:
-    ac = AutoCompactor(model="claude-opus-4-6")
+    ac = AutoCompactor(model="claude-opus-4-6", model_budget=1_000_000)
     # At or above 987_000 (= 1_000_000 - 13_000)
     assert ac.should_trigger(current_tokens=987_000) == "error"
     assert ac.should_trigger(current_tokens=999_999) == "error"
@@ -319,7 +352,7 @@ def test_stats_tracks_counters() -> None:
     sink = FakeCompactSink(
         results=[_ok_result(reclaimed=30_000), _fail_result("e1")]
     )
-    ac = AutoCompactor(model="claude-opus-4-6", sink=sink)
+    ac = AutoCompactor(model="claude-opus-4-6", model_budget=1_000_000, sink=sink)
     ac.run(current_tokens=970_000)
     ac.run(current_tokens=970_000)
     stats = ac.stats()
@@ -387,7 +420,9 @@ def test_run_passes_warning_reason_first_then_error() -> None:
             captured.append(req)
             return _ok_result()
 
-    ac = AutoCompactor(model="claude-opus-4-6", sink=CaptureSink())
+    ac = AutoCompactor(
+        model="claude-opus-4-6", model_budget=1_000_000, sink=CaptureSink(),
+    )
     ac.run(current_tokens=970_000)  # warning zone
     ac.run(current_tokens=999_000)  # error zone (>= 987_000)
     assert [r.reason for r in captured] == ["warning", "error"]

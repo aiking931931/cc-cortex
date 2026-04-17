@@ -1,0 +1,122 @@
+"""concinno.agent — Agent management subsystem facade.
+
+Re-exports from top-level modules for ``from concinno.agent import …`` usage.
+"""
+
+from concinno.agent.fork_context import (
+    ANTHROPIC_MAX_CACHE_BREAKPOINTS,
+    FORK_PLACEHOLDER_RESULT,
+    CacheSafeParams,
+    FileStateCache,
+    ForkDepthExceeded,
+    RenderedPromptCache,
+    SubagentContext,
+    create_cache_safe_params,
+    create_subagent_context,
+    estimate_cache_savings,
+    insert_cache_breakpoints,
+    is_in_fork_child,
+    normalize_tool_result_for_cache,
+    render_for_fork_byte_exact,
+)
+from concinno.agent.iterative_retrieve import (
+    CascadeConfig,
+    CascadeStats,
+    EvolutionScheduler,
+    IterativeRetriever,
+    L1Retriever,
+    RetrievalResult,
+)
+from concinno.agent.prompts import (
+    AGENT_GUIDANCE_ARITHMETIC,
+    AGENT_GUIDANCE_NO_REFUSAL,
+    AGENT_GUIDANCE_UNCERTAINTY,
+    default_guidance,
+)
+from concinno.agent.sentinel_parser import extract_sentinel_answer
+from concinno.agent.parallel_dispatch import (
+    COORDINATOR_PROMPT_SNIPPET,
+    DEFAULT_MAX_FORK_DEPTH,
+    DEFAULT_MAX_PARALLEL,
+    DispatchFeatures,
+    DispatchPlan,
+    DispatchRejected,
+    ForkInForkRejected,
+    ParallelDispatcher,
+    ParallelLimitExceeded,
+    SimpleFeatures,
+    SpawnPath,
+    SpawnRequest,
+    TeammateCannotSpawnBackground,
+    TeammateCannotSpawnTeammate,
+)
+from concinno.agent.retrieve_pipeline import (
+    CascadePipelineResult,
+    ZIQCascadePipeline,
+)
+from concinno.agent_artifact_guard import AgentArtifactGuard
+from concinno.agent_gate import (
+    AgentGateGuard,
+    check,
+    gate_agent_cap,
+    is_research_agent,
+)
+from concinno.agent_supervisor import (
+    AgentSupervisor,
+    SupervisedTask,
+    VerificationResult,
+    verify_task,
+)
+
+__all__ = [
+    "AGENT_GUIDANCE_ARITHMETIC",
+    "AGENT_GUIDANCE_NO_REFUSAL",
+    "AGENT_GUIDANCE_UNCERTAINTY",
+    "ANTHROPIC_MAX_CACHE_BREAKPOINTS",
+    "COORDINATOR_PROMPT_SNIPPET",
+    "DEFAULT_MAX_FORK_DEPTH",
+    "DEFAULT_MAX_PARALLEL",
+    "FORK_PLACEHOLDER_RESULT",
+    "AgentArtifactGuard",
+    "AgentGateGuard",
+    "AgentSupervisor",
+    "CacheSafeParams",
+    "CascadeConfig",
+    "CascadePipelineResult",
+    "CascadeStats",
+    "DispatchFeatures",
+    "DispatchPlan",
+    "DispatchRejected",
+    "EvolutionScheduler",
+    "FileStateCache",
+    "ForkDepthExceeded",
+    "ForkInForkRejected",
+    "IterativeRetriever",
+    "L1Retriever",
+    "ParallelDispatcher",
+    "ParallelLimitExceeded",
+    "RenderedPromptCache",
+    "RetrievalResult",
+    "SimpleFeatures",
+    "SpawnPath",
+    "SpawnRequest",
+    "SubagentContext",
+    "SupervisedTask",
+    "TeammateCannotSpawnBackground",
+    "TeammateCannotSpawnTeammate",
+    "VerificationResult",
+    "ZIQCascadePipeline",
+    "check",
+    "create_cache_safe_params",
+    "create_subagent_context",
+    "default_guidance",
+    "estimate_cache_savings",
+    "extract_sentinel_answer",
+    "gate_agent_cap",
+    "insert_cache_breakpoints",
+    "is_in_fork_child",
+    "is_research_agent",
+    "normalize_tool_result_for_cache",
+    "render_for_fork_byte_exact",
+    "verify_task",
+]

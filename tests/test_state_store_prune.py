@@ -10,7 +10,7 @@ import os
 import time
 from pathlib import Path
 
-from cc_cortex.core.state_store import StateStore
+from concinno.core.state_store import StateStore
 
 
 def _touch(path: Path, mtime_offset: float) -> None:

@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.typescript — TypeScript tsc checker with SHA256 cache."""
+"""Tests for concinno.typescript — TypeScript tsc checker with SHA256 cache."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-from cc_cortex.typescript import (
+from concinno.typescript import (
     SUPPORTED_EXTENSIONS,
     _file_sha256,
     _find_ts_project,
@@ -123,7 +123,7 @@ class TestCheckTypescript:
         f.write_text("const x: number = 1;")
 
         mock_result = MagicMock(returncode=0, stdout="", stderr="")
-        with patch("cc_cortex.typescript.subprocess.run", return_value=mock_result):
+        with patch("concinno.typescript.subprocess.run", return_value=mock_result):
             result = check_typescript("Write", {"file_path": str(f)}, use_cache=False)
         assert result is None
 
@@ -139,7 +139,7 @@ class TestCheckTypescript:
             "index.ts(2,3): error TS1005: ';' expected.\n"
         )
         mock_result = MagicMock(returncode=1, stdout=errors, stderr="")
-        with patch("cc_cortex.typescript.subprocess.run", return_value=mock_result):
+        with patch("concinno.typescript.subprocess.run", return_value=mock_result):
             result = check_typescript("Write", {"file_path": str(f)}, use_cache=False)
         assert result is not None
         assert "2 errors" in result
@@ -154,7 +154,7 @@ class TestCheckTypescript:
 
         errors = "\n".join(f"file.ts({i},1): error TS{i}: err" for i in range(6))
         mock_result = MagicMock(returncode=1, stdout=errors, stderr="")
-        with patch("cc_cortex.typescript.subprocess.run", return_value=mock_result):
+        with patch("concinno.typescript.subprocess.run", return_value=mock_result):
             result = check_typescript("Write", {"file_path": str(f)}, use_cache=False)
         assert "6 errors" in result
         assert "3 more" in result
@@ -169,7 +169,7 @@ class TestCheckTypescript:
         f.write_text("x")
 
         with patch(
-            "cc_cortex.typescript.subprocess.run",
+            "concinno.typescript.subprocess.run",
             side_effect=subprocess.TimeoutExpired("cmd", 15),
         ):
             assert check_typescript("Write", {"file_path": str(f)}, use_cache=False) is None
@@ -182,7 +182,7 @@ class TestCheckTypescript:
         f.write_text("x")
 
         mock_result = MagicMock(returncode=0, stdout="", stderr="")
-        with patch("cc_cortex.typescript.subprocess.run", return_value=mock_result):
+        with patch("concinno.typescript.subprocess.run", return_value=mock_result):
             result = check_typescript(
                 "Write",
                 {"file_path": str(f)},
@@ -199,13 +199,13 @@ class TestCheckTypescript:
         f.write_text("const x: number = 1;")
         sha = _file_sha256(str(f))
 
-        cache_file = tmp_path / ".cc_cortex_cache" / "tsc_sha.json"
+        cache_file = tmp_path / ".concinno_cache" / "tsc_sha.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps({str(f): sha}))
 
-        with patch("cc_cortex.typescript._CACHE_FILE", str(cache_file)):
+        with patch("concinno.typescript._CACHE_FILE", str(cache_file)):
             # Should skip tsc entirely due to cache hit
-            with patch("cc_cortex.typescript.subprocess.run") as mock_run:
+            with patch("concinno.typescript.subprocess.run") as mock_run:
                 result = check_typescript("Write", {"file_path": str(f)}, use_cache=True)
                 mock_run.assert_not_called()
         assert result is None
@@ -218,5 +218,5 @@ class TestCheckTypescript:
         f.write_text("x")
 
         mock_result = MagicMock(returncode=1, stdout="some output", stderr="")
-        with patch("cc_cortex.typescript.subprocess.run", return_value=mock_result):
+        with patch("concinno.typescript.subprocess.run", return_value=mock_result):
             assert check_typescript("Write", {"file_path": str(f)}, use_cache=False) is None

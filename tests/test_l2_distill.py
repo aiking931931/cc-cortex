@@ -1,10 +1,10 @@
-"""Tests for :mod:`cc_cortex.cache.l2_distill`.
+"""Tests for :mod:`concinno.cache.l2_distill`.
 
 These exercise the L2 distill layer against a real
-:class:`~cc_cortex.cache.cognitive_pool.CognitivePool` backed by a
+:class:`~concinno.cache.cognitive_pool.CognitivePool` backed by a
 ``tmp_path`` directory. The LLM distillation pass is faked with a
 simple scriptable :class:`FakeDistillSink` that returns canned
-:class:`~cc_cortex.cache.l2_distill.DistillResult` batches, one per
+:class:`~concinno.cache.l2_distill.DistillResult` batches, one per
 ``distill`` call.
 """
 
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from cc_cortex.cache.cognitive_pool import CognitivePool, PoolSection
-from cc_cortex.cache.l2_distill import (
+from concinno.cache.cognitive_pool import CognitivePool, PoolSection
+from concinno.cache.l2_distill import (
     DistillationFailed,
     DistillCandidate,
     DistillRequest,

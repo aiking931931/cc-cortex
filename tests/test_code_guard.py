@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.code_guard module."""
+"""Tests for concinno.code_guard module."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-from cc_cortex.code_guard import (
+from concinno.code_guard import (
     SUPPORTED_EXTENSIONS,
     CodeGuard,
     _check_python,
@@ -15,7 +15,7 @@ from cc_cortex.code_guard import (
     _update_cache,
     check_code_guard,
 )
-from cc_cortex.guards.base import GuardContext
+from concinno.guards.base import GuardContext
 
 # ── _file_sha256 ──────────────────────────────────────────
 
@@ -43,8 +43,8 @@ def test_file_sha256_deterministic(tmp_path):
 
 
 def test_cache_roundtrip(tmp_path, monkeypatch):
-    cache_file = str(tmp_path / ".cc_cortex_cache" / "code_guard_sha.json")
-    monkeypatch.setattr("cc_cortex.code_guard._CACHE_FILE", cache_file)
+    cache_file = str(tmp_path / ".concinno_cache" / "code_guard_sha.json")
+    monkeypatch.setattr("concinno.code_guard._CACHE_FILE", cache_file)
 
     _update_cache("/some/file.py", "abc123")
     assert _is_cached("/some/file.py", "abc123") is True
@@ -53,8 +53,8 @@ def test_cache_roundtrip(tmp_path, monkeypatch):
 
 
 def test_cache_bounded_to_500(tmp_path, monkeypatch):
-    cache_file = str(tmp_path / ".cc_cortex_cache" / "code_guard_sha.json")
-    monkeypatch.setattr("cc_cortex.code_guard._CACHE_FILE", cache_file)
+    cache_file = str(tmp_path / ".concinno_cache" / "code_guard_sha.json")
+    monkeypatch.setattr("concinno.code_guard._CACHE_FILE", cache_file)
 
     # Fill cache with 501 entries
     for i in range(501):
@@ -96,7 +96,7 @@ def test_extracts_file_path_key(tmp_path, monkeypatch):
     fp = str(f)
 
     mock_checker = MagicMock(return_value=None)
-    import cc_cortex.code_guard as cg_mod
+    import concinno.code_guard as cg_mod
 
     monkeypatch.setitem(cg_mod._EXT_CHECKER, ".py", mock_checker)
 
@@ -113,8 +113,8 @@ def test_extracts_file_path_key(tmp_path, monkeypatch):
 
 
 def test_use_cache_false_always_runs_checker(tmp_path, monkeypatch):
-    cache_file = str(tmp_path / ".cc_cortex_cache" / "code_guard_sha.json")
-    monkeypatch.setattr("cc_cortex.code_guard._CACHE_FILE", cache_file)
+    cache_file = str(tmp_path / ".concinno_cache" / "code_guard_sha.json")
+    monkeypatch.setattr("concinno.code_guard._CACHE_FILE", cache_file)
 
     f = tmp_path / "cached.py"
     f.write_text("x = 1\n", encoding="utf-8")
@@ -124,7 +124,7 @@ def test_use_cache_false_always_runs_checker(tmp_path, monkeypatch):
     sha = _file_sha256(fp)
     _update_cache(fp, sha)
 
-    import cc_cortex.code_guard as cg_mod
+    import concinno.code_guard as cg_mod
 
     mock_checker = MagicMock(return_value=None)
     monkeypatch.setitem(cg_mod._EXT_CHECKER, ".py", mock_checker)
@@ -133,8 +133,8 @@ def test_use_cache_false_always_runs_checker(tmp_path, monkeypatch):
 
 
 def test_cache_hit_skips_checker(tmp_path, monkeypatch):
-    cache_file = str(tmp_path / ".cc_cortex_cache" / "code_guard_sha.json")
-    monkeypatch.setattr("cc_cortex.code_guard._CACHE_FILE", cache_file)
+    cache_file = str(tmp_path / ".concinno_cache" / "code_guard_sha.json")
+    monkeypatch.setattr("concinno.code_guard._CACHE_FILE", cache_file)
 
     f = tmp_path / "cached2.py"
     f.write_text("x = 1\n", encoding="utf-8")
@@ -143,7 +143,7 @@ def test_cache_hit_skips_checker(tmp_path, monkeypatch):
     sha = _file_sha256(fp)
     _update_cache(fp, sha)
 
-    with patch("cc_cortex.code_guard._check_python", return_value=None) as mock_check:
+    with patch("concinno.code_guard._check_python", return_value=None) as mock_check:
         check_code_guard("Write", {"file_path": fp}, use_cache=True)
         assert not mock_check.called, "Checker should be skipped on cache hit"
 
@@ -159,7 +159,7 @@ def test_check_python_clean(tmp_path):
     mock_result.returncode = 0
     mock_result.stdout = ""
 
-    with patch("cc_cortex.code_guard._run_cmd", return_value=mock_result):
+    with patch("concinno.code_guard._run_cmd", return_value=mock_result):
         assert _check_python(str(f)) is None
 
 
@@ -171,7 +171,7 @@ def test_check_python_errors(tmp_path):
     mock_result.returncode = 1
     mock_result.stdout = "bad.py:1:1: F401 `os` imported but unused\n"
 
-    with patch("cc_cortex.code_guard._run_cmd", return_value=mock_result):
+    with patch("concinno.code_guard._run_cmd", return_value=mock_result):
         result = _check_python(str(f))
         assert result is not None
         assert "ruff" in result
@@ -218,7 +218,7 @@ class TestLintDebt:
         bar.write_text("ok", encoding="utf-8")
 
         # Manually write debt
-        from cc_cortex.code_guard import _write_lint_debt
+        from concinno.code_guard import _write_lint_debt
         _write_lint_debt({os.path.normpath(str(foo)): "ruff error in foo.py"})
 
         guard = CodeGuard()
@@ -233,7 +233,7 @@ class TestLintDebt:
         foo = tmp_path / "foo.py"
         foo.write_text("bad", encoding="utf-8")
 
-        from cc_cortex.code_guard import _write_lint_debt
+        from concinno.code_guard import _write_lint_debt
         _write_lint_debt({os.path.normpath(str(foo)): "ruff error"})
 
         guard = CodeGuard()
@@ -246,7 +246,7 @@ class TestLintDebt:
         bar = tmp_path / "bar.py"
         bar.write_text("ok", encoding="utf-8")
 
-        from cc_cortex.code_guard import _write_lint_debt
+        from concinno.code_guard import _write_lint_debt
         _write_lint_debt({"/nonexistent/deleted.py": "stale error"})
 
         guard = CodeGuard()
@@ -264,13 +264,13 @@ class TestLintDebt:
         mock_result.stdout = "bad.py:1:1: F401 `os` imported but unused\n"
 
         guard = CodeGuard()
-        with patch("cc_cortex.code_guard._run_cmd", return_value=mock_result):
+        with patch("concinno.code_guard._run_cmd", return_value=mock_result):
             result = guard.on_post_tool(self._make_ctx("Write", str(f), "PostToolUse"))
 
         assert result is not None
         assert result.action.value == "allow"  # PostToolUse returns allow+context
 
-        from cc_cortex.code_guard import _read_lint_debt
+        from concinno.code_guard import _read_lint_debt
         debt = _read_lint_debt()
         assert os.path.normpath(str(f)) in debt
 
@@ -280,7 +280,7 @@ class TestLintDebt:
         f = tmp_path / "fixed.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        from cc_cortex.code_guard import _write_lint_debt
+        from concinno.code_guard import _write_lint_debt
         norm = os.path.normpath(str(f))
         _write_lint_debt({norm: "old error"})
 
@@ -289,11 +289,11 @@ class TestLintDebt:
         mock_result.stdout = ""
 
         guard = CodeGuard()
-        with patch("cc_cortex.code_guard._run_cmd", return_value=mock_result):
+        with patch("concinno.code_guard._run_cmd", return_value=mock_result):
             result = guard.on_post_tool(self._make_ctx("Edit", str(f), "PostToolUse"))
 
         assert result is None
-        from cc_cortex.code_guard import _read_lint_debt
+        from concinno.code_guard import _read_lint_debt
         assert norm not in _read_lint_debt()
 
     def test_non_write_tools_ignored(self, tmp_path, monkeypatch):
@@ -302,7 +302,7 @@ class TestLintDebt:
         foo = tmp_path / "foo.py"
         foo.write_text("x", encoding="utf-8")
 
-        from cc_cortex.code_guard import _write_lint_debt
+        from concinno.code_guard import _write_lint_debt
         _write_lint_debt({os.path.normpath(str(foo)): "error"})
 
         guard = CodeGuard()
@@ -319,7 +319,7 @@ class TestLintDebt:
         for f in [a, b, c]:
             f.write_text("x", encoding="utf-8")
 
-        from cc_cortex.code_guard import _write_lint_debt
+        from concinno.code_guard import _write_lint_debt
         _write_lint_debt({
             os.path.normpath(str(a)): "error a",
             os.path.normpath(str(b)): "error b",

@@ -1,17 +1,21 @@
-"""Tests for cc_cortex.ziq_retrieval — FTRL-powered adaptive RAG."""
+"""Tests for concinno.ziq_retrieval — FTRL-powered adaptive RAG."""
 
 from __future__ import annotations
 
 import tempfile
 
-from cc_cortex.ziq_retrieval import (
+from concinno.ziq_retrieval import (
     DEFAULT_HIGH_THRESHOLD,
     DEFAULT_LOW_THRESHOLD,
     WEIGHT_MAX,
     WEIGHT_MIN,
+    RetrieverConfidenceSPS,
+    SPSProtocol,
     SourceState,
+    SPPMIPrior,
     ThresholdState,
     ZIQRetrieval,
+    _MetaTuner,
     _ema_update,
     record_feedback,
     rerank_results,
@@ -432,3 +436,308 @@ class TestAdaptiveThresholds:
         ts2 = ziq.route_feedback(correct_namespaces=["skills"])
         delta2 = old_low - ts2.low
         assert delta2 < delta1, "LR should decay over time"
+
+
+class TestFTRLNamespace:
+    """Tests for v6.2.1 FTRL per-namespace weights."""
+
+    def _make_ziq(self):
+        return ZIQRetrieval(cache_dir=tempfile.mkdtemp())
+
+    def test_ftrl_namespace_update_persists(self):
+        """Update FTRL namespace weights, read back from new instance."""
+        cache = tempfile.mkdtemp()
+        ziq1 = ZIQRetrieval(cache_dir=cache)
+        ziq1._ftrl_ns.update(["memory", "cognition"])
+        weights1 = ziq1._ftrl_ns.likelihood()
+
+        # New instance, same cache
+        ziq2 = ZIQRetrieval(cache_dir=cache)
+        weights2 = ziq2._ftrl_ns.likelihood()
+        assert weights1 == weights2
+        # Updated namespaces should differ from default 1.0
+        assert weights2["memory"] != 1.0
+
+    def test_ftrl_namespace_correct_increases_weight(self):
+        """Correct namespace weight goes up after update."""
+        ziq = self._make_ziq()
+        before = ziq._ftrl_ns.likelihood()["memory"]
+        for _ in range(5):
+            ziq._ftrl_ns.update(["memory"])
+        after = ziq._ftrl_ns.likelihood()["memory"]
+        assert after > before
+
+    def test_ftrl_namespace_incorrect_decreases_weight(self):
+        """Namespace not in correct list gets weight decreased."""
+        ziq = self._make_ziq()
+        before = ziq._ftrl_ns.likelihood()["context"]
+        # Update with only "memory" correct — context is penalized
+        for _ in range(5):
+            ziq._ftrl_ns.update(["memory"])
+        after = ziq._ftrl_ns.likelihood()["context"]
+        assert after < before
+
+    def test_feedback_updates_ftrl_namespace(self):
+        """Full feedback() flow triggers FTRL namespace update."""
+        ziq = self._make_ziq()
+        # Rerank to register results
+        ziq.rerank([
+            {"text": "c", "file": "corrections/c.md", "score": 0.8},
+            {"text": "r", "file": "rules/r.md", "score": 0.7},
+        ])
+        # Feedback: correction was used (maps to "memory" namespace)
+        ziq.feedback(["corrections/c.md"])
+        weights = ziq._ftrl_ns.likelihood()
+        # "memory" namespace should have been updated (not default 1.0)
+        assert weights["memory"] != 1.0
+
+    def test_bayesian_posterior_uses_ftrl_namespace(self):
+        """route_query with SPPMI prior uses FTRL namespace weights."""
+        cache = tempfile.mkdtemp()
+        # Build a simple SPPMI prior
+        prior = SPPMIPrior.build_from_texts({
+            "memory": ["correction feedback handoff memory"],
+            "cognition": ["rule cbua thinking decision"],
+            "skills": ["skill knowledge base audio"],
+            "knowledge": ["context search retrieval"],
+            "context": ["session state environment"],
+        })
+        ziq = ZIQRetrieval(cache_dir=cache, sppmi_prior=prior)
+
+        # Train FTRL namespace: heavily favor "cognition"
+        for _ in range(20):
+            ziq._ftrl_ns.update(["cognition"])
+
+        # Query that SPPMI might not strongly prefer cognition
+        # but FTRL likelihood should boost it
+        result = ziq.route_query("general query", confidence=0.1)
+        ftrl_w = ziq._ftrl_ns.likelihood()
+        # cognition should have highest FTRL weight
+        assert ftrl_w["cognition"] == max(ftrl_w.values())
+        # route_query should return something (not crash)
+        assert len(result) >= 1
+
+    def test_sppmi_persist_and_autoload(self):
+        """SPPMI built once persists; new ZIQRetrieval auto-loads."""
+        cache = tempfile.mkdtemp()
+        ns_texts = {
+            "memory": ["feedback correction handoff"],
+            "cognition": ["rule decision cbua"],
+            "skills": ["skill tool audio"],
+            "knowledge": ["reference search"],
+            "context": ["session state"],
+        }
+        # Build and persist
+        ziq1 = ZIQRetrieval(cache_dir=cache)
+        assert ziq1._sppmi is None  # no prior yet
+        prior = ziq1.build_and_persist_sppmi(ns_texts)
+        assert prior.is_built
+        assert prior.n_terms > 0
+
+        # New instance auto-loads from cache
+        ziq2 = ZIQRetrieval(cache_dir=cache)
+        assert ziq2._sppmi is not None
+        assert ziq2._sppmi.is_built
+        assert ziq2._sppmi.n_terms == prior.n_terms
+
+        # Routing uses the auto-loaded SPPMI
+        result = ziq2.route_query("feedback correction", confidence=0.1)
+        assert len(result) >= 1
+
+    def test_sppmi_to_dict_from_dict_roundtrip(self):
+        """SPPMIPrior serialization roundtrip preserves state."""
+        prior = SPPMIPrior.build_from_texts({
+            "memory": ["hello world test"],
+            "cognition": ["rule decision"],
+        })
+        data = prior.to_dict()
+        restored = SPPMIPrior.from_dict(data)
+        assert restored.is_built
+        assert restored.shift_k == prior.shift_k
+        assert restored.n_terms == prior.n_terms
+        assert restored.n_nonzero == prior.n_nonzero
+        # Same prior distribution
+        p1 = prior.prior("hello rule")
+        p2 = restored.prior("hello rule")
+        for ns in p1:
+            assert abs(p1[ns] - p2[ns]) < 1e-9
+
+
+class TestMetaTuner:
+    """Tests for Autonomy L2: _MetaTuner hyperparameter learning."""
+
+    def _make(self):
+        from concinno.core.state_store import StateStore
+        return _MetaTuner(StateStore(tempfile.mkdtemp()))
+
+    def test_defaults_match_hardcoded(self):
+        """Fresh MetaTuner returns same values as hardcoded defaults."""
+        mt = self._make()
+        assert mt.get_param("ftrl_alpha") == 0.1
+        assert mt.get_param("ftrl_lam") == 0.01
+
+    def test_no_tune_before_interval(self):
+        """No tuning happens before TUNE_INTERVAL decisions."""
+        mt = self._make()
+        for _ in range(49):
+            r = mt.record_outcome(correct=True)
+        # 49 decisions: no tune yet (interval=50)
+        assert r is None
+
+    def test_baseline_set_at_first_interval(self):
+        """First interval sets baseline, no adjustments."""
+        mt = self._make()
+        for i in range(50):
+            r = mt.record_outcome(correct=(i % 2 == 0))
+        assert r is not None
+        assert r["status"] == "baseline_set"
+        assert mt.get_param("ftrl_alpha") == 0.1  # unchanged
+
+    def test_regret_up_slows_down(self):
+        """Accuracy drop > 5% triggers slowdown (alpha × 0.9)."""
+        mt = self._make()
+        # First 50: high accuracy (baseline)
+        for _ in range(50):
+            mt.record_outcome(correct=True)
+        # Next 50: low accuracy (regret up)
+        for i in range(50):
+            r = mt.record_outcome(correct=(i < 5))
+        assert r is not None
+        assert r["status"] == "tuned"
+        # Alpha should have decreased
+        assert mt.get_param("ftrl_alpha") < 0.1
+
+    def test_regret_down_speeds_up(self):
+        """Accuracy gain > 5% triggers speedup (alpha × 1.05)."""
+        mt = self._make()
+        # First 50: low accuracy (baseline)
+        for i in range(50):
+            mt.record_outcome(correct=(i < 5))
+        # Next 50: high accuracy (regret down)
+        for _ in range(50):
+            r = mt.record_outcome(correct=True)
+        assert r is not None
+        assert r["status"] == "tuned"
+        assert mt.get_param("ftrl_alpha") > 0.1
+
+    def test_stable_no_change(self):
+        """Stable accuracy (delta < 5%) → no adjustment."""
+        mt = self._make()
+        # Two intervals with similar accuracy
+        for _ in range(50):
+            mt.record_outcome(correct=True)
+        for _ in range(50):
+            r = mt.record_outcome(correct=True)
+        assert r is not None
+        assert r["status"] == "stable"
+        assert mt.get_param("ftrl_alpha") == 0.1
+
+    def test_bounds_respected(self):
+        """Params never go below min or above max."""
+        mt = self._make()
+        # Repeatedly trigger slowdown
+        for cycle in range(10):
+            for _ in range(50):
+                mt.record_outcome(correct=True)
+            for i in range(50):
+                mt.record_outcome(correct=(i < 2))
+        alpha = mt.get_param("ftrl_alpha")
+        assert alpha >= 0.01  # min bound
+
+    def test_status_reports_state(self):
+        """status() returns meaningful debugging info."""
+        mt = self._make()
+        for _ in range(60):
+            mt.record_outcome(correct=True)
+        s = mt.status()
+        assert s["n_decisions"] == 60
+        assert "params" in s
+
+    def test_wired_into_ziq_retrieval(self):
+        """ZIQRetrieval creates MetaTuner and FTRL uses it."""
+        ziq = ZIQRetrieval(cache_dir=tempfile.mkdtemp())
+        assert hasattr(ziq, "_meta")
+        assert ziq._ftrl_ns._meta is ziq._meta
+        # Verify FTRL uses tuned alpha
+        alpha = ziq._meta.get_param("ftrl_alpha")
+        assert alpha == 0.1
+
+    def test_route_feedback_records_outcome(self):
+        """route_feedback() feeds outcome to MetaTuner."""
+        ziq = ZIQRetrieval(cache_dir=tempfile.mkdtemp())
+        ziq._last_route_breadth = "medium"
+        ziq._last_route_result = ["memory"]
+        ziq.route_feedback(["memory"])
+        s = ziq._meta.status()
+        assert s["n_decisions"] == 1
+
+    def test_stats_includes_l2(self):
+        """stats() includes L2 meta-tuner state."""
+        ziq = ZIQRetrieval(cache_dir=tempfile.mkdtemp())
+        stats = ziq.stats()
+        assert "_l2_meta" in stats
+        assert "params" in stats["_l2_meta"]
+
+
+class TestRetrieverConfidenceSPS:
+    """Tests for retriever selection domain SPS."""
+
+    def test_confident_retriever_gets_higher_prior(self):
+        """Retriever with peaked scores → higher prior."""
+        sps = RetrieverConfidenceSPS()
+        p = sps.prior("test query", scores={
+            "bm25": [0.9, 0.3, 0.2, 0.1],  # peaked
+            "dense": [0.5, 0.45, 0.4, 0.35],  # flat
+        })
+        assert p["bm25"] > p["dense"]
+
+    def test_sums_to_one(self):
+        """Prior distribution sums to ~1."""
+        sps = RetrieverConfidenceSPS()
+        p = sps.prior("q", scores={
+            "a": [0.8, 0.2],
+            "b": [0.6, 0.5],
+            "c": [0.3, 0.1],
+        })
+        assert abs(sum(p.values()) - 1.0) < 1e-6
+
+    def test_empty_scores(self):
+        """Empty scores → empty prior."""
+        sps = RetrieverConfidenceSPS()
+        assert sps.prior("q", scores={}) == {}
+
+    def test_single_retriever(self):
+        """Single retriever gets probability 1."""
+        sps = RetrieverConfidenceSPS()
+        p = sps.prior("q", scores={"only": [0.9, 0.1]})
+        assert abs(p["only"] - 1.0) < 1e-6
+
+    def test_equal_confidence_uniform(self):
+        """Equal confidence → roughly uniform prior."""
+        sps = RetrieverConfidenceSPS()
+        p = sps.prior("q", scores={
+            "a": [0.5, 0.3],
+            "b": [0.5, 0.3],
+        })
+        assert abs(p["a"] - p["b"]) < 1e-6
+
+    def test_score_gap_metric(self):
+        """_score_gap computes top-1 minus mean(rest)."""
+        gap = RetrieverConfidenceSPS._score_gap(
+            [0.9, 0.3, 0.2, 0.1],
+        )
+        assert abs(gap - (0.9 - 0.2)) < 1e-6
+
+    def test_single_score_returns_zero_gap(self):
+        """Single score → 0 gap (can't compute)."""
+        assert RetrieverConfidenceSPS._score_gap([0.9]) == 0.0
+
+    def test_sps_protocol_conformance(self):
+        """Both SPS classes satisfy SPSProtocol."""
+        assert isinstance(
+            RetrieverConfidenceSPS(), SPSProtocol,
+        )
+        prior = SPPMIPrior.build_from_texts({
+            "memory": ["hello"],
+        })
+        assert isinstance(prior, SPSProtocol)

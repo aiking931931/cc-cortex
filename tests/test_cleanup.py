@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.cleanup — workspace hygiene utilities."""
+"""Tests for concinno.cleanup — workspace hygiene utilities."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from cc_cortex.cleanup import (
+from concinno.cleanup import (
     CleanupResult,
     archive_dead_handoffs,
     cleanup_stale_files,

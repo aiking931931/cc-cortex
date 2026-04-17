@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.security.bash_validators — the 24-validator chain.
+"""Tests for concinno.security.bash_validators — the 24-validator chain.
 
 Coverage strategy: at least one positive (accept) test AND one negative
 (reject) test per validator, plus compound-splitting and wrapper-stripping
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from cc_cortex.security.bash_validators import (
+from concinno.security.bash_validators import (
     DEFAULT_VALIDATOR_CHAIN,
     BashValidator,
     BashValidatorConfig,

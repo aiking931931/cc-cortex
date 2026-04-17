@@ -1,7 +1,7 @@
 """Tests for the 11-variant PermissionDecisionReason discriminated union.
 
 P0.7 port of CC's ``types/permissions.ts:271-324`` typed decision reason
-onto cc_cortex's existing 5-mode FSM. Covers:
+onto concinno's existing 5-mode FSM. Covers:
 
   - All 11 enum variants exist with exact string values
   - PermissionDecisionReason immutability & invariants
@@ -20,7 +20,7 @@ import dataclasses
 
 import pytest
 
-from cc_cortex.security.permission_mode import (
+from concinno.security.permission_mode import (
     PermissionAction,
     PermissionDecisionReason,
     PermissionDecisionReasonType,

@@ -1,11 +1,11 @@
-"""Tests for cc_cortex.memory_palace — 空間結構化記憶系統。"""
+"""Tests for concinno.memory_palace — 空間結構化記憶系統。"""
 
 from __future__ import annotations
 
 import pytest
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.memory_palace import (
+from concinno.core.state_store import StateStore
+from concinno.memory_palace import (
     Memory,
     MemoryPalace,
     Room,

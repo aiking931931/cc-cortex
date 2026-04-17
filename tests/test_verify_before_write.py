@@ -1,8 +1,8 @@
 """Tests for verify_before_write — Verify external references before writing."""
 
-from cc_cortex.core.state_store import StateStore
-from cc_cortex.guards.base import GuardAction, GuardContext
-from cc_cortex.verify_before_write import (
+from concinno.core.state_store import StateStore
+from concinno.guards.base import GuardAction, GuardContext
+from concinno.verify_before_write import (
     VerifyBeforeWriteGuard,
     _extract_api_endpoints,
     _extract_packages,

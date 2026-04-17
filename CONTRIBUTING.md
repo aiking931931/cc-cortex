@@ -21,7 +21,7 @@ Thank you for your interest in contributing to CC Cortex! This document outlines
 
 This is the **most important rule** in CC Cortex:
 
-> The `cc_cortex` package must have **zero runtime dependencies** beyond the Python standard library.
+> The `concinno` package must have **zero runtime dependencies** beyond the Python standard library.
 
 Why:
 - Hooks run on every Claude Code tool call. Import latency matters.
@@ -30,7 +30,7 @@ Why:
 
 If your feature needs something outside stdlib, consider:
 1. Can you implement it with stdlib? (Usually yes.)
-2. Can it be an optional extra? (e.g., `pip install cc-cortex[viz]`)
+2. Can it be an optional extra? (e.g., `pip install concinno[viz]`)
 3. If neither works, it probably doesn't belong in core.
 
 ### Code Style
@@ -64,7 +64,7 @@ We use **pytest**. All changes must pass the full test suite:
 pytest
 
 # Run with coverage
-pytest --cov=cc_cortex --cov-report=term-missing
+pytest --cov=concinno --cov-report=term-missing
 
 # Run a specific test file
 pytest tests/test_destruction_guard.py
@@ -107,7 +107,7 @@ chore: update ruff to 0.4.x
 2. **Verify zero new dependencies:**
    ```bash
    # Should show only stdlib imports
-   grep -r "^import\|^from" src/cc_cortex/ | grep -v "cc_cortex" | sort -u
+   grep -r "^import\|^from" src/concinno/ | grep -v "concinno" | sort -u
    ```
 
 3. **Update documentation** if you added/changed public API
@@ -154,14 +154,14 @@ When creating a pull request, please include:
 
 1. Create the module in the appropriate category:
    ```
-   src/cc_cortex/modules/<category>/my_module.py
+   src/concinno/modules/<category>/my_module.py
    ```
 
 2. Follow the module interface:
    ```python
    """One-line description of what this module does."""
 
-   from cc_cortex.core import HookResult
+   from concinno.core import HookResult
 
    def check(tool_name: str, tool_input: dict) -> HookResult:
        """Main hook entry point.
@@ -176,7 +176,7 @@ When creating a pull request, please include:
        ...
    ```
 
-3. Register it in the module catalog (`src/cc_cortex/modules/__init__.py`)
+3. Register it in the module catalog (`src/concinno/modules/__init__.py`)
 
 4. Add tests in `tests/test_my_module.py`
 
@@ -195,7 +195,7 @@ When creating a pull request, please include:
 
 Please include:
 1. Python version (`python --version`)
-2. CC Cortex version (`cc-cortex --version`)
+2. CC Cortex version (`concinno --version`)
 3. OS and Claude Code version
 4. Steps to reproduce
 5. Expected vs actual behavior

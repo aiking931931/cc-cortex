@@ -1,4 +1,4 @@
-"""Tests for cc_cortex.agent.fork_context.
+"""Tests for concinno.agent.fork_context.
 
 Covers:
   - CacheSafeParams immutability, hashability, identical_to semantics
@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from cc_cortex.agent.fork_context import (
+from concinno.agent.fork_context import (
     CacheSafeParams,
     FileStateCache,
     ForkDepthExceeded,
