@@ -11,7 +11,7 @@ Legacy API (v0.5, deprecated — removed in v1.0)::
 Migration guide: https://github.com/aiking931931/concinno/blob/main/docs/migration-v05-v06.md
 """
 
-__version__ = "2.7.2"
+__version__ = "2.8.0"
 
 import warnings as _warnings
 
@@ -36,6 +36,24 @@ from concinno.convention_engine import (  # noqa: F401
     check_naming,
     suggest_path,
 )
+
+# ── 1.14.0 LLM gateway + few-shot + tool loop ────────────
+from concinno.escalation import (  # noqa: F401
+    DEFAULT_CHAIN,
+    EscalationExhausted,
+    EscalationResult,
+    EscalationTier,
+    LLMEscalator,
+    TierResult,
+    escalate,
+)
+from concinno.fewshot import (  # noqa: F401
+    DEFAULT_STOP_WORDS,
+    FewshotBank,
+    FewshotCase,
+    load_bank,
+    retrieve_fewshot,
+)
 from concinno.field_read import (  # noqa: F401
     COMPRESS_BREAKEVEN_TOKENS,
     FieldReadConfig,
@@ -59,6 +77,7 @@ from concinno.guards.rewrite_guards import (  # noqa: F401
     BashPipeToShellRewriter,
     WriteSecretFileRewriter,
 )
+from concinno.library import CortexLibrary, LibraryResult  # noqa: F401
 from concinno.prompt_hooks import (  # noqa: F401
     ALL_JUDGES,
     CODE_QUALITY_JUDGE,
@@ -116,25 +135,6 @@ from concinno.token_zone import (  # noqa: F401
     should_gate_tool,
     write_zone_file,
     zone_injection,
-)
-from concinno.library import CortexLibrary, LibraryResult  # noqa: F401
-
-# ── 1.14.0 LLM gateway + few-shot + tool loop ────────────
-from concinno.escalation import (  # noqa: F401
-    DEFAULT_CHAIN,
-    EscalationExhausted,
-    EscalationResult,
-    EscalationTier,
-    LLMEscalator,
-    TierResult,
-    escalate,
-)
-from concinno.fewshot import (  # noqa: F401
-    DEFAULT_STOP_WORDS,
-    FewshotBank,
-    FewshotCase,
-    load_bank,
-    retrieve_fewshot,
 )
 from concinno.tool_executor import (  # noqa: F401
     ExecutionState,

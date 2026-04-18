@@ -7,6 +7,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-04-18
+
+Six P0 items from the 2026-04-18 night red-blue CBUA session
+(session 648cae48, 4 Opus agents in parallel + user second-pass
+correction). The commander's judgement reframed red B's
+API-cost attack as framing error (CLI lives inside CC
+subscription; Haiku high-frequency binding is a feature, not
+a cost leak) and redirected the hardening to runaway-spawn
+prevention plus Goodhart self-downgrade blocking. Architectural
+dual-axis synthesis ships alongside — the former "5-layer"
+framing v2 is reclassified as a single **enforcement axis**
+(3 tiers) orthogonal to a new **timescale governance axis**
+(L3 / L4 live there, not as enforcement layers). Full record
+at ``_AI_BRAIN/05_Planning/cbua-v3-three-layer-final.md``
+(quoted in this release's commit message).
+
+### Added
+
+- **``concinno.redteam_spawn_guard``** — event-scoped spawn count
+  cap (default 5, env override
+  ``CONCINNO_REDTEAM_MAX_SPAWNS_PER_EVENT``) plus a JSONL ledger
+  at ``{cache_dir | _AI_BRAIN/00_System | ~/.cache/concinno}/
+  redteam_ledger.jsonl`` for audit. Public helper
+  ``before_spawn_redteam(event_id, estimated_spawns)`` raises
+  ``SpawnLimitExceeded`` atomically when a batch would exceed
+  the cap (no partial writes). ``REDTEAM_GRANDCHILD_DIRECTIVE``
+  constant holds the system-prompt fragment forbidding red-team
+  subagents from spawning further subagents (docs-level
+  enforcement while CC L1 keeps subagent spawn unmonitored;
+  Sancio runtime is the breakout path). 12 tests cover cap
+  boundary, batch atomicity, multi-event isolation, env
+  override (inc. junk / zero / non-positive fallback), single-
+  event reset, full ledger reset, malformed JSON tolerance,
+  ``cap`` kwarg trumping env, and record shape.
+- **``C0Router.classify_with_hysteresis``** — ratchet against
+  self-downgrade Goodhart (red team C's FATAL-2). Once a
+  session is classified above Simple, later prompts that look
+  Simple cannot drop the session back down; only upward
+  escalation crosses the lock, and a new ``upgrade_once`` kwarg
+  explicitly refuses to act as a downgrade backdoor. New
+  ``C0Result.hysteresis_locked`` field records the ratchet
+  state and is persisted through ``StateStore``. 6 tests cover
+  fresh-session lock, Simple-prompt refusal, upgrade-to-chaotic
+  acceptance, upgrade_once misuse rejection, same-rank refresh,
+  and redteam_required carry-forward. The original
+  ``classify()`` stays pure for callers that need the unlocked
+  reading (ablation, retrospectives, first-prompt of a new
+  session).
+
+### Changed
+
+- **``cbua_pipeline_guard`` — B1/C1/U1 text regex deleted.**
+  ``_B1_MARKERS`` / ``_C1_MARKERS`` / ``_U1_MARKERS`` /
+  ``_WIREDO_TABLE`` are removed. MEMORY #27 "術語堆疊" proved
+  they were gameable theater (models stuff
+  root/sweet/strategy / 我知道-我不知道-我假設 / 反例 into tool
+  args without actually thinking). B1 now has exactly one
+  signal source — the behavioral silent ack (reads≥3 OR
+  bash≥8 with edits≥3). C1 and U1 reminders retired because
+  they had no behavioral counterpart and would have fired
+  permanently once the text regex was gone. A4 / A5 patterns
+  remain — they are Agent-tool-scoped (``ctx.tool_name ==
+  "Agent"``), a specific behavioral surface rather than a
+  general content scan. The dichotomy hook and delivery-verb
+  Bash scanner also stay (they were never part of the
+  B1/C1/U1 scope). Tests in ``test_cbua_pipeline_guard.py`` now
+  prove the **absence** of text-regex detection: stuffing
+  markers no longer flips state flags, and severity stacking
+  uses the surviving signals (B1 + dichotomy + A5 + WIREDO).
+- **``.claude/hooks/schedule_config.json`` and
+  ``scheduled_launcher.ps1`` (public copy) documentation
+  rebranded.** The scheduled Sonnet self-reflection
+  ($1.50/day, already live) is now explicitly labelled as the
+  per-day node on the CBUA timescale governance axis (軸 B),
+  not a fifth enforcement layer. Adds ``_architecture`` note
+  to ``schedule_config.json`` and a block comment to
+  ``scheduled_launcher.ps1``. No behavioural change — this is
+  a label/doc correction so the per-day, per-week, and
+  per-fine-tune-cycle nodes stop getting mistaken for
+  enforcement-pyramid layers.
+- **``.claude/rules/L1/cbua.md``** — appended a "雙軸架構
+  (v3.1 synthesis)" section describing the enforcement-cost
+  ladder (L1 hook / L2 Opus red-blue / L3 Sancio runtime)
+  alongside the timescale axis (per-tool-call / per-turn-stop
+  / per-event-decision / per-day L3 / per-week L4 / per-fine-
+  tune-cycle). Also syncs ``.claude/rules/public/L1/cbua.md``
+  (operator-scope copy; the existing governance-doc drift
+  between root and public/ is out-of-scope for this release).
+  ``redteam.md`` public/root sync brings the 「有一說一」 2026-
+  04-18 hardening block into both copies.
+
+### Hardened
+
+- Spawn-cap ledger JSONL schema v1 is documented inline at
+  ``SpawnRecord.to_jsonl()`` — additive fields are append-only
+  compatible, field removal is breaking. ``RedteamSpawnLedger``
+  tolerates malformed lines so a corrupted ledger cannot take
+  down the guard.
+
+### Tests
+
+- **5433 → 5447 passing** (+12 new redteam_spawn_guard + 6
+  new C0 hysteresis - 4 cbua regex-detection tests rewritten
+  in place). Full regression ``python -m pytest -q`` green in
+  173s on Python 3.11.9 / win32.
+
+### Known carryover (not 2.8.0 scope)
+
+- Pre-existing 44 manual-fix ruff issues (E501 / E701 / E702
+  / I001 / E722) stay as-is. 15 auto-fixable issues were
+  tidied en passant while running ``ruff check --fix``. These
+  issues predate this release and live in ``gaia_ziq.py`` /
+  ``weekly_evolve.py`` / ``hidden_worker.py`` / legacy test
+  files. Cleanup queued for 2.8.1 or later when there is a
+  dedicated lint pass.
+- CC platform ceilings that block further tightening stay
+  logged: L1 (Agent spawn unmonitored → red team can only be
+  detected, not enforced), L4 (hook cannot read conversation
+  history → content scan limited to ``tool_input`` /
+  ``tool_result``), L6 (PostToolUse cannot DENY → the guard
+  stays advisory). The Sancio runtime is the agreed breakout
+  path; Concinno 2.8.0 uses every hook the current CC platform
+  exposes.
+
 ## [2.7.2] - 2026-04-18
 
 Gap-cleanup follow-up to 2.7.1. A post-ship audit (five Opus agents)

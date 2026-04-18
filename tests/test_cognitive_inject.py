@@ -401,6 +401,7 @@ class TestCognitivePoolIntegration:
     def test_pool_injects_when_sections_available(self):
         """Happy path: a pool with one section surfaces in the context."""
         import time
+
         from concinno.cache.cognitive_pool import CognitivePool
 
         with tempfile.TemporaryDirectory() as td:

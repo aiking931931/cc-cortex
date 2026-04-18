@@ -6,11 +6,19 @@ v2 fix: every task gets web_search FIRST, then stack buffs on top.
 posterior = SPS(structure) * FTRL(outcome) per buff, not per strategy.
 """
 from __future__ import annotations
-import json, math, os, re, sys, time, threading, subprocess
+
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import threading
 
 _SKILLS = os.path.expanduser(r"~/.claude/skills")
 sys.path.insert(0, os.path.join(_SKILLS, "browser"))
-import anthropic, browser as b  # noqa: E402
+import anthropic
+import browser as b  # noqa: E402
 
 CLIENT = anthropic.Anthropic()
 FTRL_PATH = os.path.expanduser("~/.gaia_ftrl_v2.json")
@@ -91,7 +99,7 @@ def _sonnet_final(question, context_parts):
 
 def solve(question, file_content="", file_name=""):
     """Buff-stack solver: always web_search + conditional buffs."""
-    from gaia_runner import web_search, get_youtube_transcript
+    from gaia_runner import get_youtube_transcript, web_search
     sps = sps_buffs(question, file_name)
     # Always start with web search (base)
     ctx = {}
@@ -153,7 +161,7 @@ def train(n="all"):
         sps = sps_buffs(q, fn)
         buffs_used = active_buffs(sps, router)
         box = [""]
-        def _run(): 
+        def _run():
             try: box[0] = solve(q, fc, fn)
             except Exception as e: print(f"  [ERR] {e}", flush=True)
         t = threading.Thread(target=_run, daemon=True); t.start(); t.join(timeout=120)

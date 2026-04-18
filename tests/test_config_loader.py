@@ -29,7 +29,6 @@ import pytest
 
 from concinno import config as cfg
 
-
 # ── Fixtures ─────────────────────────────────────────────────────
 
 

@@ -19,10 +19,10 @@ from pathlib import Path
 _HERE = Path(__file__).parent
 sys.path.insert(0, str(_HERE))
 
-import windows as w  # noqa: E402
 import uiautomation as uia  # noqa: E402
 import win32con  # noqa: E402
 import win32gui  # noqa: E402
+import windows as w  # noqa: E402
 
 PS_SCRIPT = r"""
 Add-Type -AssemblyName System.Windows.Forms

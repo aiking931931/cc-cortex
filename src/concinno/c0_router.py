@@ -94,6 +94,7 @@ class C0Result:
     escalation_reason: str   # "" if no escalation happened
     redteam_required: bool = False  # True → mandatory red team before Act
     a2a_suggested: bool = False     # True → task benefits from A2A agent collab
+    hysteresis_locked: bool = False  # True → held at prior level (no self-downgrade)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -108,6 +109,7 @@ class C0Result:
             escalation_reason=d.get("escalation_reason", ""),
             redteam_required=bool(d.get("redteam_required", False)),
             a2a_suggested=bool(d.get("a2a_suggested", False)),
+            hysteresis_locked=bool(d.get("hysteresis_locked", False)),
         )
 
 
@@ -280,6 +282,110 @@ class C0Router:
         if not data:
             return None
         return C0Result.from_dict(data)
+
+    def classify_with_hysteresis(
+        self,
+        task_prompt: str,
+        cache_dir: str,
+        session_id: str,
+        tool_history: list[str] | None = None,
+        file_paths: list[str] | None = None,
+        context_tokens: int | None = None,
+        upgrade_once: bool = False,
+    ) -> C0Result:
+        """Classify but never self-downgrade below the prior stored level.
+
+        Ratchets the effective complexity within a session so an
+        operator cannot (a) accidentally break out of stricter guards
+        by firing a fresh Simple-looking prompt, or (b) be downgraded
+        by drift in the pure classifier (Goodhart FATAL-2 attack:
+        learn which prompt shapes score lower and rely on them to
+        dodge red-team mandates already triggered upstream).
+
+        Rules
+        -----
+        1. Run the pure ``classify`` first. That gives the intrinsic
+           reading of the current prompt.
+        2. Load the prior ``C0Result`` for this session from StateStore.
+        3. If no prior exists → persist and return the new result.
+        4. If a prior exists and the new rank is **higher** → accept
+           the upgrade (self-escalation always allowed).
+        5. If a prior exists and the new rank is **lower or equal**:
+
+           - ``upgrade_once=False`` (default) → hold at prior level,
+             set ``hysteresis_locked=True``, persist, return.
+           - ``upgrade_once=True`` → allow this ONE bump through.
+             The caller promises the bump is intentional. After this
+             call ``hysteresis_locked`` flips back on for subsequent
+             callers — the override is one-shot, not a session-wide
+             kill switch. (This implementation accepts the new rank
+             only when it is also ≥ prior rank; ``upgrade_once`` is
+             not a downgrade permit, just a way to replace an earlier
+             escalation with an equivalent or higher one when signals
+             demonstrably shift.)
+
+        Note this is additive — ``classify()`` still exists and stays
+        pure for callers that want unlocked behaviour (ablation,
+        retrospective analysis, new-session first call).
+        """
+        fresh = self.classify(
+            task_prompt,
+            tool_history=tool_history,
+            file_paths=file_paths,
+            context_tokens=context_tokens,
+        )
+        prior = self.load(cache_dir, session_id)
+        if prior is None:
+            fresh.hysteresis_locked = True
+            self.persist(fresh, cache_dir, session_id)
+            return fresh
+
+        fresh_rank = _complexity_rank(fresh.complexity)
+        prior_rank = _complexity_rank(prior.complexity)
+
+        if fresh_rank > prior_rank:
+            # Upward escalation — always accepted.
+            fresh.hysteresis_locked = True
+            fresh.escalation_reason = (
+                fresh.escalation_reason
+                or f"upgrade {prior.complexity}->{fresh.complexity}"
+            )
+            self.persist(fresh, cache_dir, session_id)
+            return fresh
+
+        if fresh_rank == prior_rank:
+            # Same level — refresh signals but hold the lock.
+            fresh.hysteresis_locked = True
+            self.persist(fresh, cache_dir, session_id)
+            return fresh
+
+        # fresh_rank < prior_rank → refuse self-downgrade.
+        held = C0Result(
+            complexity=prior.complexity,
+            prompt_budget=prior.prompt_budget,
+            guard_level=prior.guard_level,
+            signals={
+                **prior.signals,
+                "hysteresis_held_from": fresh.complexity,
+            },
+            escalation_reason=(
+                f"hysteresis: held at {prior.complexity} "
+                f"(fresh classified as {fresh.complexity})"
+            ),
+            redteam_required=prior.redteam_required or fresh.redteam_required,
+            a2a_suggested=prior.a2a_suggested or fresh.a2a_suggested,
+            hysteresis_locked=True,
+        )
+
+        if upgrade_once:
+            # Override is a bump gate, not a downgrade gate. A caller
+            # who sets upgrade_once=True while the fresh rank is
+            # lower still gets the held value — we refuse to let
+            # upgrade_once be used as a backdoor downgrade.
+            held.signals["upgrade_once_consumed_no_op"] = True
+
+        self.persist(held, cache_dir, session_id)
+        return held
 
 
 # ── Helpers ──────────────────────────────────────────────

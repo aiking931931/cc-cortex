@@ -1,13 +1,34 @@
-"""concinno.guards.cbua_pipeline_guard — Hardened CBUA pipeline enforcement.
+"""concinno.guards.cbua_pipeline_guard — Behavioral CBUA pipeline enforcement.
 
 Closes text-only CBUA gaps via PostToolUse state tracking + context injection.
 Uses StateStore.read_modify_write for atomic cross-tick persistence.
 
 @module cbua_pipeline_guard
-@responsibility Enforce CBUA B1/C1/U1/A4/A5 steps. Uses behavioral signals
-    (edit count, read count, agent dispatches) + text markers as secondary.
+@responsibility Enforce CBUA B1/A4/A5 steps using **behavioral signals only**:
+    edit_count, read_count, bash_count, agent_count. Text regex for
+    B1/C1/U1 markers was REMOVED in 2.8.0 — MEMORY #27 "術語堆疊" proved
+    that scanning for root/sweet/strategy / 我知道-我不知道-我假設 /
+    反例 keywords was gameable theater (models learned to stuff markers
+    into tool args without actually thinking). Behavioral counters
+    cannot be faked by keyword stuffing.
 @dependencies concinno.guards.base, concinno.core.state_store
 @exports CbuaPipelineGuard
+
+Signals kept (2.8.0)
+-------------------
+- B1 silent_ack: reads>=3 OR bash>=8 with edits>=3 → proves structured
+  iteration (see ``_behavioral_silent_ack``). Only B1 gets a reminder —
+  C1 and U1 retired because they had NO behavioral counterpart and
+  would have fired permanently once the text regex was gone.
+- A4: Agent tool dispatch scan for "要做嗎" ask-user violations — this
+  IS behavioral because it is scoped to the Agent tool_name. Not a
+  general text regex over all content.
+- A5: Agent tool dispatch scan for "紅隊/red-team" content — same as
+  A4, scoped to Agent tool invocation, not general content.
+- Dichotomy / integrative markers: distinct hardening per MEMORY,
+  anchored to a specific RLHF bias pattern. Kept.
+- Delivery keyword: Bash command leading verb match (``git commit``,
+  ``twine upload``, …) — behavioral, not content keyword.
 
 CC ceiling notes:
 - L1 (Agent spawn unmonitored): red team dispatch can only be DETECTED
@@ -32,37 +53,25 @@ from concinno.guards.base import (
 )
 
 # ── Detection patterns ──────────────────────────────────────
+#
+# B1/C1/U1 content regex REMOVED in 2.8.0 (MEMORY #27). They were
+# gameable by keyword stuffing. B1 is now proven by behavioral
+# silent_ack (reads>=3 OR bash>=8 with edits>=3). C1/U1 had no
+# behavioral counterpart and are retired at the reminder layer too —
+# without a signal source they would fire permanently.
 
-_B1_MARKERS = re.compile(
-    r"B1[_\s]*(根因|甜蜜點|策略|root|sweet|strategy)"
-    r"|根因.*甜蜜點.*策略",
-    re.IGNORECASE,
-)
-
-_C1_MARKERS = re.compile(
-    r"我知道.*我不知道.*我假設"
-    r"|known.*unknown.*assumed",
-    re.IGNORECASE,
-)
-
-_U1_MARKERS = re.compile(
-    r"反例|counter.?example|edge.?case|what.?if"
-    r"|失敗場景|failure.?mode",
-    re.IGNORECASE,
-)
-
-# A4: only match in Agent/conversational context, not code content
+# A4: Agent-tool-scoped. Not a general content regex; the caller
+# restricts this to ctx.tool_name == "Agent" so it only fires when
+# the model drafts a question-to-user inside an Agent dispatch.
 _A4_ASK_PATTERNS = re.compile(
     r"要做嗎|要不要繼續|需要我.*嗎|要繼續嗎",
 )
 
+# A5: Agent-tool-scoped. Sets redteam_dispatched when an Agent tool
+# invocation mentions red team / pressure test keywords. Again
+# scoped to tool_name == "Agent" — not a general text scan.
 _A5_REDTEAM = re.compile(
     r"紅隊|red.?team|壓測|pressure.?test",
-    re.IGNORECASE,
-)
-
-_WIREDO_TABLE = re.compile(
-    r"W.*Wired.*I.*Inherited|WIREDO|W/I/R/E/D/O",
     re.IGNORECASE,
 )
 
@@ -197,15 +206,10 @@ def _update_cbua_state(
                 state["polling_streak"] = 0
             state["last_bash_sig"] = sig
 
-    # Text markers (secondary signals)
-    if _B1_MARKERS.search(text):
-        state["b1_shown"] = True
-    if _C1_MARKERS.search(text):
-        state["c1_shown"] = True
-    if _U1_MARKERS.search(text):
-        state["u1_shown"] = True
-    if _WIREDO_TABLE.search(text):
-        state["wiredo_shown"] = True
+    # Dichotomy hardening kept (distinct RLHF-bias anchor per MEMORY).
+    # B1/C1/U1/WIREDO_TABLE content regex removed in 2.8.0 —
+    # behavioral silent_ack is the only B1 signal source; C1/U1 are
+    # retired (no behavioral counterpart, would fire permanently).
     if _DICHOTOMY_MARKERS.search(text):
         state["dichotomy_seen"] = True
     if _INTEGRATIVE_MARKERS.search(text):
@@ -433,19 +437,28 @@ class CbuaPipelineGuard(BaseGuard):
         78711974). Ratio signal stays in ThinkingDepthGuard (single
         source of truth, no duplication here).
 
-        Signals:
-        - B1 marker: "未見（根因→甜蜜點→策略）" once at 3+ edits
-        - C1 marker: "未見（我知道/不知道/假設）" once at 5+ edits (Complex+)
-        - U1 marker: "未見（反例攻擊）" once at 8+ edits (Complex+)
-        - A5 redteam-not-dispatched at 10+ edits (if required)
-        - WIREDO D-dimension delivery reminder at 5-edit multiples
+        Signals (2.8.0 — behavioral only; C1/U1 retired):
+        - B1 marker: "未見（結構思考）" once at 3+ edits — silenced by
+          ``_behavioral_silent_ack`` when reads>=3 OR bash>=8 (proves
+          structured iteration happened).
+        - A5 redteam-not-dispatched at 10+ edits (if required) —
+          detected via Agent tool dispatch, behavioral.
+        - WIREDO D-dimension delivery reminder — one-shot fire on
+          delivery Bash command or edit_count>=20.
+        - Dichotomy / integrative: RLHF-bias hardening, separate from
+          B1/C1/U1 scope.
         """
         edit_count = state.get("edit_count", 0)
         missing: list[str] = []
 
-        # B1: structured thinking marker (after 3+ edits, all Complicated+)
+        # B1: structured thinking marker (after 3+ edits, all Complicated+).
+        # Only signal source now is ``_behavioral_silent_ack`` (reads/bash
+        # threshold). Content regex removed 2.8.0 (MEMORY #27).
         if not state.get("b1_shown") and edit_count >= 3:
-            missing.append("B1 結構思考未見（根因→甜蜜點→策略）")
+            missing.append(
+                "B1 結構思考未見 — 結構化思考預期行為訊號缺席："
+                "reads>=3 OR bash>=8 + edits>=3 才算結構化迭代"
+            )
 
         # Dichotomy framing: fires when binary A-or-B frame appears
         # without accompanying integrative synthesis language. RLHF
@@ -464,21 +477,12 @@ class CbuaPipelineGuard(BaseGuard):
                 "多模式 framework / dual-mode / 融合 是常被跳過的第三選項）"
             )
 
-        # C1: intelligence inventory marker (Complex+ only, 5+ edits)
-        if (
-            not state.get("c1_shown")
-            and edit_count >= 5
-            and complexity in ("complex", "chaotic")
-        ):
-            missing.append("C1 情報盤點未見（我知道/不知道/假設）")
-
-        # U1: counter-example attack marker (Complex+ only, 8+ edits)
-        if (
-            not state.get("u1_shown")
-            and edit_count >= 8
-            and complexity in ("complex", "chaotic")
-        ):
-            missing.append("U1 反例攻擊未見")
+        # C1 / U1 retired 2.8.0: no behavioral counterpart feeds their
+        # state flags, so keeping the reminder would permanently fire
+        # on every Complex+ session. MEMORY #27 hardening: remove the
+        # marker instead of stuffing keywords. If a behavioral signal
+        # for C1 (intelligence-gap inventory) or U1 (counter-example
+        # attack) gets designed later, add it here then.
 
         # A5: redteam required but not dispatched (Agent tool dispatch
         # is observable via tool_name; this stays behavioral).

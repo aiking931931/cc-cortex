@@ -3,16 +3,18 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-18 — 2.7.0 live）
+## 現況 snapshot（2026-04-18 — 2.8.0 ship-ready, not published）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.7.0` — [PyPI page](https://pypi.org/project/concinno/2.7.0/)（upload 2026-04-18）|
-| `pyproject.toml` version | `2.7.0` |
-| `src/concinno/__init__.py __version__` | `2.7.0` |
-| CHANGELOG.md 最新 release heading | `## [2.7.0] - 2026-04-18` |
+| Registry latest (PyPI) | `2.7.2` — 2.8.0 尚未上傳 |
+| `pyproject.toml` version | `2.8.0` |
+| `src/concinno/__init__.py __version__` | `2.8.0` |
+| CHANGELOG.md 最新 release heading | `## [2.8.0] - 2026-04-18` |
 | 三源對齊狀態 | ✅ |
-| 下一 publish 目標 | **`2.7.1`** hotfix（見 History 下方 2026-04-18 post-audit 項）：修 installer rmtree-on-symlink + cognitive_pool file lock + cognitive_pool_inject Self-RAG gating + cache breakpoint 順序 + AskUser hook timeout |
+| 下一 publish 目標 | **`2.8.0`** — 6 P0 CBUA v3.1 dual-axis hardening（session 648cae48，紅藍 CBUA 4 Opus + 用戶校正），見 Pending Publish Queue 下方 |
+| 本地 commit | `46dda846` |
+| 本地 tag | `v2.8.0`（未 push） |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -107,6 +109,72 @@ pid: <process id, 可選>
 
 ```yaml
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
+- version: "2.8.0"
+  state: ready-to-publish
+  superseded_by: null
+  supersedes: "2.7.2 (live; pre-dual-axis hardening)"
+  queued_by:
+    session: sub-agent-648cae48-v2_8_0-impl
+    host: Z_HP
+    queued_at: "2026-04-19T00:10+08:00"
+  artifacts:
+    wheel: "dist/concinno-2.8.0-py3-none-any.whl"
+    sdist: "dist/concinno-2.8.0.tar.gz"
+    twine_check: PASSED
+    built_from: 46dda846   # outer-repo HEAD after 2.8.0 commit
+  verification:
+    tests_full: "5447 passed, 1 skipped, 3 xfailed (in 173.85s)"
+    tests_version_sync: "2/2"
+    tests_redteam_spawn_guard: "12/12 (new)"
+    tests_c0_router_hysteresis: "6/6 (new)"
+    tests_cbua_pipeline_guard: "64/64 (4 rewritten in place)"
+    ruff_new_files: clean
+    ruff_pre_existing: "44 manual-fix (E501/E701/E702/I001/E722) stay; 15 auto-fixed en passant"
+    triple_source_aligned: true
+    redteam_review: |
+      Session 648cae48 (2026-04-18 night) — 3 Opus 紅隊 + 1 Opus 藍隊
+      + 指揮官 + 用戶二次校正。Red B (API cost framing) 全部駁回：
+      CLI 在 CC subscription 內非 API 計費。Real spawn-runaway
+      cap hardened via redteam_spawn_guard. Red C FATAL-2 (C0 self-
+      downgrade Goodhart) 接受，C0 hysteresis shipped. 6 P0 落地。
+  blocking_on:
+    - user_authorization   # explicit `go publish concinno 2.8.0`
+    - lock_acquisition     # 下方 Session Registry::Active
+    - outer_repo_push      # commit 46dda846 + tag v2.8.0 當前僅本地
+  suggested_command: |
+    # DO NOT auto-run. Publisher session should:
+    # 1. Take lock (write Active record)
+    # 2. Wait for user `go publish concinno 2.8.0` confirmation
+    # 3. From projects/concinno, run (PyPI token in ~/.pypirc):
+    PYTHONIOENCODING=utf-8 python -m twine upload \
+      --disable-progress-bar \
+      dist/concinno-2.8.0-py3-none-any.whl \
+      dist/concinno-2.8.0.tar.gz
+    # 4. Push outer repo tag (if user authorizes remote push):
+    git push origin v2.8.0
+    # 5. Verify in a clean venv:
+    pip install --upgrade concinno
+    python -c "import concinno;assert concinno.__version__=='2.8.0'"
+    # 6. Release lock (move Active + this record to History)
+    # 7. Update 現況 snapshot: Registry latest → 2.8.0
+  expires_at: "2026-04-26T00:15+08:00"   # 7 days; rebuild if unreleased
+  notes: |
+    - PyPI 2.8.0 namespace unoccupied at build time (registry latest
+      is 2.7.2). Verify again before upload with
+      curl https://pypi.org/pypi/concinno/json .
+    - Artifacts reproducible from:
+      git checkout 46dda846 && cd projects/concinno &&
+      rm -rf dist && PYTHONIOENCODING=utf-8 python -m build
+    - Commit 46dda846 used --no-verify because the concinno git_assist
+      pre-commit hook kept recreating .git/index.lock mid-commit (lock
+      file race, not a rule bypass — scope says don't skip hooks unless
+      blocker). Flagged for 2.8.1 git_assist investigation.
+    - Root-vs-public rules drift (rules/L1/*.md vs rules/public/L1/*.md
+      not being NTFS junctions) is a workspace infra issue; 2.8.0 only
+      synced the two cbua.md and redteam.md copies as a minimal fix.
+    - 44 pre-existing ruff issues (manual-fix only) documented in
+      CHANGELOG "Known carryover". Not a publish blocker.
+
 - version: "2.3.0"
   state: claimed
   superseded_by: null

@@ -171,72 +171,98 @@ class TestCounters:
         assert _state(tmp_path)["edit_count"] == 1
 
 
-# ── 3. Marker detection ───────────────────────────────────────
+# ── 3. Marker detection (2.8.0 — behavioral only) ────────────
 
 
 class TestMarkerDetection:
-    def test_b1_marker_silences_reminder(self, guard, tmp_path):
-        """Text containing '根因.*甜蜜點.*策略' marks b1_shown."""
+    """B1/C1/U1/WIREDO content regex retired 2.8.0 (MEMORY #27).
+
+    These tests now prove the **absence** of text-regex detection:
+    stuffing markers into tool args no longer flips state flags. B1
+    still silences via behavioral silent_ack; dichotomy and A5 still
+    use their Agent-tool-scoped signals.
+    """
+
+    def test_b1_text_regex_removed_does_not_flip_state(
+        self, guard, tmp_path,
+    ):
+        """Stuffing 根因/甜蜜點/策略 into payload no longer sets b1_shown."""
         _preseed_complexity(tmp_path, "complicated")
         payload = "B1 分析：根因=x → 甜蜜點=y → 策略=z"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("b1_shown") is True
+        # Text regex removed — state flag only set via behavioral ack.
+        assert _state(tmp_path).get("b1_shown") is not True
 
-    def test_c1_marker_detected(self, guard, tmp_path):
+    def test_c1_text_regex_removed(self, guard, tmp_path):
+        """我知道/我不知道/我假設 keyword stuffing no longer sets c1_shown."""
         _preseed_complexity(tmp_path, "complex")
         payload = "情報盤點：我知道 X，我不知道 Y，我假設 Z 成立"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("c1_shown") is True
+        assert _state(tmp_path).get("c1_shown") is not True
 
-    def test_u1_marker_detected(self, guard, tmp_path):
+    def test_u1_text_regex_removed(self, guard, tmp_path):
+        """反例/counter-example keyword stuffing no longer sets u1_shown."""
         _preseed_complexity(tmp_path, "complex")
         payload = "反例：當 input 為空時會炸"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("u1_shown") is True
+        assert _state(tmp_path).get("u1_shown") is not True
 
-    def test_wiredo_marker_detected(self, guard, tmp_path):
+    def test_wiredo_table_text_regex_removed(self, guard, tmp_path):
+        """WIREDO table keyword stuffing no longer sets wiredo_shown."""
         _preseed_complexity(tmp_path, "complicated")
         payload = "WIREDO 六維檢查 Wired ✓ Inherited ✓"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("wiredo_shown") is True
+        # wiredo fires via delivery-verb Bash command, not content text.
+        assert _state(tmp_path).get("wiredo_shown") is not True
 
-    def test_marker_in_tool_result_is_detected(self, guard, tmp_path):
-        """Scanner must look at tool_result, not just tool_input."""
-        _preseed_complexity(tmp_path, "complex")
+    def test_tool_result_scan_still_fuels_dichotomy(self, guard, tmp_path):
+        """Scanner still reads tool_result for the surviving regexes.
+
+        B1/C1/U1 content regex was removed, but the dichotomy /
+        integrative hardening stays. This test proves
+        ``_get_scannable_text`` continues to pull ``tool_result`` into
+        the scannable surface (regression guard for the rewrite).
+        """
+        _preseed_complexity(tmp_path, "complicated")
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py"},
-            tool_result="我知道 A / 我不知道 B / 我假設 C",
+            tool_result="二選一：保留或改寫 — 沒有第三路",
         )
-        assert _state(tmp_path).get("c1_shown") is True
+        assert _state(tmp_path).get("dichotomy_seen") is True
 
-    def test_scan_text_cap_truncates_not_skips(self, guard, tmp_path):
-        """Long values are truncated to cap, not skipped entirely.
+    def test_scan_text_cap_still_truncates_without_regex(
+        self, guard, tmp_path,
+    ):
+        """Guard runs without OOM or skipping when given a huge edit.
 
-        Regression test: the permanent false-positive where a very long
-        Edit `new_string` made markers invisible — root cause was
-        `len(v) < 2000` skip. Now truncates to _SCAN_TEXT_CAP.
+        Original test proved truncation by watching a B1 marker flip.
+        With the content regex gone we instead prove the guard still
+        **runs to completion** on an oversized payload and records
+        ``edit_count`` — i.e. no silent skip or exception.
         """
         _preseed_complexity(tmp_path, "complicated")
-        prefix = "根因=x → 甜蜜點=y → 策略=z\n"
-        huge = prefix + ("# filler\n" * 2000)
+        huge = "# filler\n" * 2000
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": huge},
         )
-        assert _state(tmp_path).get("b1_shown") is True
+        state = _state(tmp_path)
+        assert state.get("edit_count") == 1
+        # b1_shown stays False — no behavioral ack fired from one edit.
+        assert state.get("b1_shown") is not True
 
     def test_dichotomy_detected_chinese(self, guard, tmp_path):
         """二選一 pattern marks dichotomy_seen."""
@@ -368,24 +394,25 @@ class TestReminderGeneration:
         )
         assert reminder is None
 
-    def test_c1_only_in_complex(self):
-        # 5 edits in complicated → no C1
-        reminder = CbuaPipelineGuard._generate_reminder(
-            state={"edit_count": 5, "b1_shown": True, "c1_shown": False},
-            complexity="complicated",
-            redteam_required=False,
-        )
-        assert reminder is None
+    def test_c1_reminder_retired_2_8_0(self):
+        """C1 reminder removed — no behavioral counterpart feeds it.
 
+        MEMORY #27: scanning content for "我知道/我不知道/我假設"
+        was gameable theater. With no regex and no behavioral silent
+        ack, keeping the reminder would fire permanently on every
+        Complex+ session. Reminder retired.
+        """
+        # Complex + 5 edits + c1_shown False would previously fire.
+        # Now only B1 (behavioral) can fire at this shape.
         reminder = CbuaPipelineGuard._generate_reminder(
             state={"edit_count": 5, "b1_shown": True, "c1_shown": False},
             complexity="complex",
             redteam_required=False,
         )
-        assert reminder is not None
-        assert "C1" in reminder.context
+        assert reminder is None
 
-    def test_u1_only_in_complex(self):
+    def test_u1_reminder_retired_2_8_0(self):
+        """U1 reminder removed for the same reason as C1 (MEMORY #27)."""
         reminder = CbuaPipelineGuard._generate_reminder(
             state={
                 "edit_count": 8,
@@ -396,8 +423,7 @@ class TestReminderGeneration:
             complexity="complex",
             redteam_required=False,
         )
-        assert reminder is not None
-        assert "U1" in reminder.context
+        assert reminder is None
 
     def test_dichotomy_reminder_fires(self):
         reminder = CbuaPipelineGuard._generate_reminder(
@@ -489,13 +515,16 @@ class TestReminderGeneration:
         assert r is not None
         assert r.context.startswith("⚠")
 
-        # 3 missing → ⛔
+        # 3 missing (B1 + dichotomy + A5) → ⛔. C1/U1 retired in
+        # 2.8.0 so severity stacking uses the surviving signals.
         r = CbuaPipelineGuard._generate_reminder(
             state={
                 "edit_count": 10,
                 "b1_shown": False,
-                "c1_shown": False,
-                "u1_shown": False,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+                "wiredo_just_fired": True,
+                "redteam_dispatched": False,
             },
             complexity="complex",
             redteam_required=True,
