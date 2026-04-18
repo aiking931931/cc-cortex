@@ -25,9 +25,12 @@ import threading
 
 import anthropic
 
-HF_TOKEN = os.environ.get(
-    "HF_TOKEN", "hf_REDACTED"
-)
+HF_TOKEN = os.environ.get("HF_TOKEN")
+if not HF_TOKEN:
+    raise RuntimeError(
+        "HF_TOKEN env var is required to run gaia_runner — "
+        "set it to your Hugging Face access token before invoking."
+    )
 CLIENT = anthropic.Anthropic()
 
 # ── Tool 1: Search API (Claude WebSearch) ──────────────────

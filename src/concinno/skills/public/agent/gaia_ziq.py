@@ -130,7 +130,11 @@ def solve(question, file_content="", file_name=""):
     return _sonnet_final(question, ctx)
 
 def train(n="all"):
-    os.environ.setdefault("HF_TOKEN", "hf_REDACTED")
+    if not os.environ.get("HF_TOKEN"):
+        raise RuntimeError(
+            "HF_TOKEN env var is required to run gaia_ziq.train — "
+            "set it to your Hugging Face access token before invoking."
+        )
     from datasets import load_dataset
     from gaia_runner import read_file
     from huggingface_hub import hf_hub_download

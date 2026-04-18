@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-04-18
+
+### Security
+
+- **Removed hard-coded Hugging Face token fallbacks** in
+  `skills/public/agent/gaia_agent.py:43`,
+  `skills/public/agent/gaia_runner.py:29`, and
+  `skills/public/agent/gaia_ziq.py:133`. All three now read
+  `HF_TOKEN` from the environment and raise `RuntimeError` with
+  an actionable message when unset, instead of silently using a
+  live fallback token. The token was pinned to a personal
+  HuggingFace account; shipped wheels 2.5.0 and earlier released
+  under the same source tree carry it. This 2.5.1 wheel does not.
+
 ## [2.5.0] - 2026-04-18
 
 Four silent-failure bugs in the auto-commit / squash / gc pipeline

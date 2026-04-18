@@ -39,9 +39,12 @@ GEMMA_URL = os.environ.get(
     "https://rzmegfopppgf50-11434.proxy.runpod.net",
 )
 GEMMA_MODEL = os.environ.get("GEMMA_MODEL", "gemma4:latest")
-HF_TOKEN = os.environ.get(
-    "HF_TOKEN", "hf_REDACTED",
-)
+HF_TOKEN = os.environ.get("HF_TOKEN")
+if not HF_TOKEN:
+    raise RuntimeError(
+        "HF_TOKEN env var is required to run gaia_agent — "
+        "set it to your Hugging Face access token before invoking."
+    )
 
 _anthropic_client = None
 _openai_client = None
