@@ -14,6 +14,7 @@ benchmarks/datasets/
 benchmarks/results/
 .tempero_cache/
 .claude-forge/
+.concinno_cache/
 
 # Red-team batch test fixtures — contain format-valid dummy secrets
 # that GitHub push protection flags. Dev-only, not part of pytest CI.

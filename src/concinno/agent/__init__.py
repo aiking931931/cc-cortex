@@ -27,13 +27,6 @@ from concinno.agent.iterative_retrieve import (
     L1Retriever,
     RetrievalResult,
 )
-from concinno.agent.prompts import (
-    AGENT_GUIDANCE_ARITHMETIC,
-    AGENT_GUIDANCE_NO_REFUSAL,
-    AGENT_GUIDANCE_UNCERTAINTY,
-    default_guidance,
-)
-from concinno.agent.sentinel_parser import extract_sentinel_answer
 from concinno.agent.parallel_dispatch import (
     COORDINATOR_PROMPT_SNIPPET,
     DEFAULT_MAX_FORK_DEPTH,
@@ -50,10 +43,18 @@ from concinno.agent.parallel_dispatch import (
     TeammateCannotSpawnBackground,
     TeammateCannotSpawnTeammate,
 )
+from concinno.agent.prompts import (
+    AGENT_GUIDANCE_ARITHMETIC,
+    AGENT_GUIDANCE_COMPUTE_TOOLS,
+    AGENT_GUIDANCE_NO_REFUSAL,
+    AGENT_GUIDANCE_UNCERTAINTY,
+    default_guidance,
+)
 from concinno.agent.retrieve_pipeline import (
     CascadePipelineResult,
     ZIQCascadePipeline,
 )
+from concinno.agent.sentinel_parser import extract_sentinel_answer
 from concinno.agent_artifact_guard import AgentArtifactGuard
 from concinno.agent_gate import (
     AgentGateGuard,
@@ -70,6 +71,7 @@ from concinno.agent_supervisor import (
 
 __all__ = [
     "AGENT_GUIDANCE_ARITHMETIC",
+    "AGENT_GUIDANCE_COMPUTE_TOOLS",
     "AGENT_GUIDANCE_NO_REFUSAL",
     "AGENT_GUIDANCE_UNCERTAINTY",
     "ANTHROPIC_MAX_CACHE_BREAKPOINTS",

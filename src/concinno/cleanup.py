@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import subprocess
 import sys
@@ -18,6 +20,36 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+from concinno.destruction_guard import destruction_gate
+
+
+@contextlib.contextmanager
+def _gate_escape(*flags: str):
+    """Temporarily raise destruction_gate escape env flags.
+
+    Used by the /tidy orchestrator (``run_cleanup``) so the gated cleanup
+    functions pass through their decorator without requiring a reason
+    kwarg from the CLI caller. Inside the with-block, ``CLAUDE_PROJECT_DIR``
+    is also ensured (fall back to CWD) so ``_hook_context_permits`` returns
+    True.
+    """
+    prev = {name: os.environ.get(name) for name in flags}
+    prev_proj = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not prev_proj:
+        os.environ["CLAUDE_PROJECT_DIR"] = os.getcwd()
+    for name in flags:
+        os.environ[name] = "1"
+    try:
+        yield
+    finally:
+        for name, value in prev.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if prev_proj is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
 
 _TZ = timezone(timedelta(hours=8))
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -177,6 +209,7 @@ def count_auto_commits(
     return sum(1 for line in out.splitlines() if pattern in line)
 
 
+@destruction_gate(risk="R3", op_name="squash_auto_commits")
 def squash_auto_commits(
     repo_dir: str | Path = ".",
     keep: int = 3,
@@ -213,7 +246,9 @@ def squash_auto_commits(
         return result
 
     # Guard: dirty tree → abort (rebase with uncommitted changes = broken state)
-    status = _git(["status", "--short"], cwd)
+    # --ignore-submodules=all: nested repo markers (e.g. skills/last30days) stay
+    # perpetually "modified" at top level and would otherwise block every squash.
+    status = _git(["status", "--short", "--ignore-submodules=all"], cwd)
     if status:
         result.error = "uncommitted changes — stash or commit first"
         return result
@@ -242,15 +277,19 @@ def squash_auto_commits(
             result.error = "rebase failed — run 'git rebase --abort' to recover"
             return result
 
-    # NOTE: reflog expire + gc --aggressive removed from inline path.
-    # These are slow (5+ min on large repos) and block the hook process.
-    # Run them explicitly via /tidy git or scheduled cleanup.
+    # gc --auto: git-throttled maintenance. Fast no-op most calls; only
+    # repacks when gc.auto/autoPackLimit thresholds hit. Without this,
+    # squashed commits leave orphan objects/packs that never shrink —
+    # that's why .git keeps growing despite "keep 3 commits" rule.
+    # Aggressive repack + prune=now stays in /tidy git (user-triggered).
+    _git(["gc", "--auto"], cwd, timeout=60)
 
     result.items_cleaned = to_squash
     result.details.append(f"squashed {to_squash} commits into 1 archive, kept {keep}")
     return result
 
 
+@destruction_gate(risk="R3", op_name="git_gc")
 def git_gc(
     repo_dir: str | Path = ".",
     aggressive: bool = False,
@@ -329,18 +368,20 @@ def detect_large_git_objects(
 
             for line in proc.stdout.splitlines():
                 parts = line.split()
-                if len(parts) >= 3 and parts[1] == "blob":
-                    try:
-                        size = int(parts[2])
-                        if size >= min_bytes:
-                            large.append({
-                                "hash": parts[0][:12],
-                                "size": size,
-                                "size_human": _human_size(size),
-                                "path": hash_to_path.get(parts[0], "unknown"),
-                            })
-                    except ValueError:
-                        pass
+                if len(parts) < 3 or parts[1] != "blob":
+                    continue
+                try:
+                    size = int(parts[2])
+                except ValueError:
+                    continue
+                if size < min_bytes:
+                    continue
+                large.append({
+                    "hash": parts[0][:12],
+                    "size": size,
+                    "size_human": _human_size(size),
+                    "path": hash_to_path.get(parts[0], "unknown"),
+                })
     except Exception:
         pass
 
@@ -352,6 +393,7 @@ def detect_large_git_objects(
 # Stale file cleanup
 # ---------------------------------------------------------------------------
 
+@destruction_gate(risk="R2", op_name="cleanup_stale_files")
 def cleanup_stale_files(
     base_dir: str | Path,
     patterns: list[str] | None = None,
@@ -398,6 +440,7 @@ def cleanup_stale_files(
 # Log rotation
 # ---------------------------------------------------------------------------
 
+@destruction_gate(risk="R2", op_name="rotate_log_files")
 def rotate_log_files(
     log_dir: str | Path,
     max_lines: int = 500,
@@ -460,23 +503,37 @@ def run_cleanup(
     results: list[CleanupResult] = []
     repo = Path(repo_dir)
 
-    # 1. Stale files
-    results.append(cleanup_stale_files(repo, dry_run=dry_run))
+    # /tidy orchestrator is the authorised caller for all gated cleanup
+    # ops. Raise escape flags for the duration of the orchestration so
+    # each decorator passes through without requiring an explicit
+    # reason= kwarg from the CLI user.
+    with _gate_escape(
+        "CONCINNO_STALE_CLEANUP",
+        "CONCINNO_LOG_ROTATE",
+        "CONCINNO_GIT_GC",
+        "CONCINNO_INLINE_SQUASH",
+    ):
+        # 1. Stale files
+        results.append(cleanup_stale_files(repo, dry_run=dry_run))
 
-    # 2. Log rotation
-    if log_dir:
-        results.append(rotate_log_files(log_dir))
+        # 2. Log rotation
+        if log_dir:
+            results.append(rotate_log_files(log_dir))
 
-    # 3. Dead handoffs
-    if handoff_dir:
-        results.append(archive_dead_handoffs(handoff_dir, max_handoff_age_days, dry_run))
+        # 3. Dead handoffs (no gate — archive, not delete)
+        if handoff_dir:
+            results.append(
+                archive_dead_handoffs(handoff_dir, max_handoff_age_days, dry_run)
+            )
 
-    # 4. Git gc (always safe)
-    results.append(git_gc(repo, aggressive=aggressive_gc))
+        # 4. Git gc (always safe)
+        results.append(git_gc(repo, aggressive=aggressive_gc))
 
-    # 5. Git squash (destructive, opt-in)
-    if squash_git:
-        results.append(squash_auto_commits(repo, keep=keep_commits, dry_run=dry_run))
+        # 5. Git squash (destructive, opt-in)
+        if squash_git:
+            results.append(
+                squash_auto_commits(repo, keep=keep_commits, dry_run=dry_run)
+            )
 
     return results
 

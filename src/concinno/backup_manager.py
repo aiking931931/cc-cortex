@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from concinno.destruction_guard import destruction_gate
+
 # UTC+8 for user's timezone
 _TZ = timezone(timedelta(hours=8))
 
@@ -84,12 +86,30 @@ class BackupManager:
 
         Returns the created BackupEntry.
         """
+        import os as _os
+
         stamp = _now_stamp()
         safe_desc = re.sub(r"[^\w\-]", "-", description)
         backup_name = f"backup_{self.scope}_{stamp}_{safe_desc}"
         backup_path = self.base_dir / backup_name
-        # 反熵優先: prune BEFORE creating new backup
-        self.prune(max(self.keep - 1, 1))
+        # 反熵優先: prune BEFORE creating new backup. The in-process
+        # call path raises the destruction_gate escape flag so the
+        # retention policy doesn't demand a reason kwarg on the normal
+        # maintenance path.
+        prev_flag = _os.environ.get("CONCINNO_BACKUP_PRUNE")
+        prev_proj = _os.environ.get("CLAUDE_PROJECT_DIR")
+        if not prev_proj:
+            _os.environ["CLAUDE_PROJECT_DIR"] = _os.getcwd()
+        _os.environ["CONCINNO_BACKUP_PRUNE"] = "1"
+        try:
+            self.prune(max(self.keep - 1, 1))
+        finally:
+            if prev_flag is None:
+                _os.environ.pop("CONCINNO_BACKUP_PRUNE", None)
+            else:
+                _os.environ["CONCINNO_BACKUP_PRUNE"] = prev_flag
+            if prev_proj is None:
+                _os.environ.pop("CLAUDE_PROJECT_DIR", None)
 
         backup_path.mkdir(parents=True, exist_ok=True)
 
@@ -176,10 +196,15 @@ class BackupManager:
             "backup_before_rollback": safety.name,
         }
 
+    @destruction_gate(risk="R2", op_name="prune")
     def prune(self, keep: Optional[int] = None) -> list[str]:
         """Delete old backups, keeping only the newest `keep` versions.
 
         Returns list of deleted backup names.
+
+        Gate: direct calls require ``reason=<keyword>``. In-process calls
+        from :meth:`create` set ``CONCINNO_BACKUP_PRUNE=1`` so the
+        back-entropy maintenance path passes through.
         """
         keep = keep if keep is not None else self.keep
         backups = self.list_backups()

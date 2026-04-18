@@ -7,7 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-04-18
+
+Four silent-failure bugs in the auto-commit / squash / gc pipeline
+caused `.git` to bloat unbounded (observed 5.6 GB / 2443 commits
+before today's fix). Red-team Opus audit uncovered a public-RCE
+class of gaps in the companion `persona-api` service and a
+Plan-style confirmation gap in `destruction_guard`. Everything
+below is the integrated fix set.
+
+### Fixed
+
+- **`cleanup.squash_auto_commits`** now runs `git status` with
+  `--ignore-submodules=all`. Previously any dirty nested repo
+  (e.g. `.claude/skills/last30days`, `benchmarks/E2Rank`) made the
+  top-level status permanently non-empty, so the inline squash
+  aborted on every auto-commit — silently, because
+  `git_assist._inline_squash_if_needed` swallowed the returned
+  error. Net effect: the "keep 3 commits" rule was a no-op in
+  practice and `.git` grew unbounded (observed 5.6 GB after 2440
+  auto-commits).
+- **`cleanup.squash_auto_commits`** now calls `git gc --auto`
+  after a successful squash. Without it, squashed commits left
+  orphan objects/packs that never shrank, so pack bloat
+  accumulated even when the commit graph was compressed. `--auto`
+  is git-throttled (no-op unless thresholds hit) so it stays safe
+  inside an auto-commit hook path. Aggressive repack + explicit
+  prune remain in `/tidy git` for user-triggered maintenance.
+- **`git_assist._inline_squash_if_needed`** now surfaces
+  `CleanupResult.error` and unexpected exceptions to stderr
+  instead of silently `pass`-ing. The prior swallow made the
+  above squash bug undiagnosable from runtime behaviour alone.
+- **`cleanup.detect_large_git_objects`** inner blob-filter loop
+  refactored from 6-level nesting to 3 via early-continue —
+  no behaviour change, quieter structural lint.
+- **`destruction_guard.restore_backup`** refactored from 6-level
+  nesting to 3 via an extracted `_restore_single_target` helper
+  plus a basename→target lookup dict. Same semantics, lint-clean.
+- **`hooks.on_pre_tool`** bare `except Exception: _allow()` now
+  emits a yellow warning to stderr before fail-open. Previously
+  any guard-pipeline crash was invisible — fail-open hid months
+  of regressions from view. Pipeline still fails open (user never
+  gets blocked by a crashed gate), but the failure is observable.
+- **`core.state_store.write` / `write_flat`** failures escalated
+  from `logger.debug` (nobody reads that) to stderr + a
+  destruction_guard audit entry. State corruption that used to
+  surface only when a downstream consumer crashed now screams
+  on the write itself.
+
 ### Added
+
+- **`git_size_monitor`** — lightweight stop-hook module that
+  warns when ``.git/objects/pack/*.pack`` exceeds a GB threshold
+  (default 5 GB, override via `CONCINNO_GIT_SIZE_WARN_GB`).
+  Fast path sums pack sizes only; single-digit ms on 10 GB
+  repos. Wired into `hooks.on_stop` pipeline + whitelisted for
+  stderr emission so the user hears about bloat before push/fetch
+  latency screams. 17 tests including worktree `gitdir:` file
+  support, multi-pack summation, env override, bad-env fallback.
+- **`destruction_guard.confirm_with_options`** — builds an
+  AskUserQuestion template (`{question, options, default}`)
+  that `evaluate()` attaches to R3/R4 deny decisions under
+  `additionalContext.ask_user_question_template`. CC's hook API
+  cannot call AskUserQuestion directly (L6 locked) so the LLM
+  pastes the template on the next turn. Enforces 2–4 options +
+  required `label`/`description` keys.
+- **`destruction_guard.suggest_safer_alternative`** — lookup
+  table (11 patterns) mapping destructive commands to safer
+  alternatives: `rm -f *.lock` → `pathlib.Path.unlink(missing_ok=True)`,
+  `rm -rf dir` → soft `mv` to `_trash/`, `git reset --hard` →
+  `git stash push -u`, `git push --force` → `--force-with-lease`,
+  `git gc --prune=now` → `git gc --auto`, `twine upload` →
+  `--skip-existing`, `DROP TABLE` → `RENAME TO _deprecated_YYYYMMDD`,
+  `kubectl delete ns` → `get all > backup.yaml` first,
+  `docker system prune -a` → without `-a`, `aws s3 rb --force` →
+  enable versioning first, `git filter-repo` → mirror clone +
+  bfg. Results bundled into the deny payload so the LLM has
+  concrete proposals ready.
+- **`destruction_guard.destruction_gate` decorator** +
+  **`DestructionBlockedError`** — applied to
+  `cleanup.squash_auto_commits` (R3),
+  `cleanup.git_gc` (R3), `cleanup.cleanup_stale_files` (R2),
+  `cleanup.rotate_log_files` (R2), `backup_manager.BackupManager.prune`
+  (R2), and `git_assist.rollback` (R3). Direct call paths
+  require a `reason=<keyword>` kwarg drawn from
+  `VALID_REASON_KEYWORDS` (migrate / decommission / archive /
+  redact / retire / ...). In-process hook/orchestrator paths
+  raise per-op escape env flags
+  (`CONCINNO_INLINE_SQUASH`, `CONCINNO_GIT_GC`,
+  `CONCINNO_BACKUP_PRUNE`, `CONCINNO_GIT_ROLLBACK`,
+  `CONCINNO_STALE_CLEANUP`, `CONCINNO_LOG_ROTATE`) so trusted
+  callers (`run_cleanup`, `_inline_squash_if_needed`,
+  `BackupManager.create → .prune`) pass through. Tests exercise
+  direct-call block, valid-reason pass, bogus-reason block,
+  hook-context pass, unknown-op requires reason, and
+  decorator metadata preservation.
+- **`destruction_guard.audit` rotation** — 10 MB / 90-day
+  threshold (stat-cheap common path); rotated archives gzipped
+  to `destruction_audit.log.1.gz` ... `.3.gz`, older archives
+  dropped on shift. Best-effort, never raises.
+- **`tests/conftest.py`** — autouse fixture raising all six
+  destruction_gate escape env flags so the broad test suite
+  runs destructive cleanup / backup / rollback paths without
+  plastering `reason=` kwargs through every test. Gate-specific
+  tests in `TestDestructionGate` pop the flags via
+  `monkeypatch.delenv` to verify the gate actually fires.
+
+#### 2026-04-18 other additions
+
+
 
 - **`concinno.tools.builtin.python_exec.PythonExecTool`** — sandboxed
   Python expression evaluator. AST whitelist (no Attribute / Lambda /

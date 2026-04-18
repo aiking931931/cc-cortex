@@ -283,6 +283,19 @@ def _build_notify(hook_data: dict) -> Callable[[], None]:
     return _run
 
 
+def _build_git_size_monitor() -> Callable[[], str | None]:
+    """Warn when ``.git/objects/pack/`` crosses a GB threshold.
+
+    Added 2026-04-18 after `git gc --prune=now` silent-failure audit:
+    without a visible size signal, users don't notice repo bloat until
+    push/fetch latency screams. Pack-only fast path keeps this <10 ms.
+    """
+    def _run() -> str | None:
+        from concinno.git_size_monitor import git_size_monitor_hook
+        return git_size_monitor_hook()
+    return _run
+
+
 # ── Main Entry Point ────────────────────────────────────────
 
 
@@ -339,7 +352,18 @@ def _emit_stderr_outputs(modules: list[_StopModule]) -> None:
         # Skip block results (already handled by _check_block_decisions)
         if any(result_str.startswith(p) for p in _BLOCK_PREFIXES.values()):
             continue
-        if mod.name in ("stop_guard", "auto_delivery"):
+        # Whitelist modules whose result is a user-facing status/warning.
+        # auto_commit + its inline-squash log go here so silent git failures
+        # (dirty tree, stale rebase-merge, lock contention, squash aborts)
+        # actually surface — previously they went to /dev/null via
+        # asyncio.to_thread, making "keep 3 commits" rule a no-op for months.
+        if mod.name in (
+            "stop_guard",
+            "auto_delivery",
+            "auto_commit",
+            "inline_squash",
+            "git_size_monitor",
+        ):
             print(result_str, file=sys.stderr)
 
 
@@ -396,6 +420,7 @@ def main(hook_data: dict | None = None) -> None:
         _StopModule("handoff_required", _build_handoff_required(hook_data), timeout_s=5.0),
         _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
         _StopModule("orphan_scan", _build_orphan_scan(hook_data), timeout_s=15.0),
+        _StopModule("git_size_monitor", _build_git_size_monitor(), timeout_s=5.0),
         _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
         _StopModule("notify", _build_notify(hook_data), timeout_s=5.0),
     ]

@@ -16,6 +16,7 @@ import subprocess
 import sys
 from typing import Optional
 
+from concinno.destruction_guard import destruction_gate
 from concinno.i18n import msg as i18n_msg
 
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -278,6 +279,7 @@ def ensure_git_repo(
     return result
 
 
+@destruction_gate(risk="R3", op_name="rollback")
 def rollback(
     cwd: str | None = None,
     steps: int = 1,
@@ -461,9 +463,27 @@ def _inline_squash_if_needed(
     # Import here to avoid circular dependency
     try:
         from concinno.cleanup import squash_auto_commits
-        squash_auto_commits(cwd, keep=keep)
-    except Exception:
-        pass  # Non-critical: cleanup failure shouldn't block commits
+        # destruction_gate escape: this is the trusted inline path that
+        # auto-commit invokes from the stop hook pipeline. Set the
+        # per-op flag so the decorator passes through without demanding
+        # a reason kwarg.
+        prev_flag = os.environ.get("CONCINNO_INLINE_SQUASH")
+        os.environ["CONCINNO_INLINE_SQUASH"] = "1"
+        try:
+            result = squash_auto_commits(cwd, keep=keep)
+        finally:
+            if prev_flag is None:
+                os.environ.pop("CONCINNO_INLINE_SQUASH", None)
+            else:
+                os.environ["CONCINNO_INLINE_SQUASH"] = prev_flag
+        # Surface squash errors to stderr — prior `pass` silently masked
+        # dirty-tree aborts so the "keep N commits" rule appeared to work
+        # while .git bloated unbounded.
+        if result.error:
+            sys.stderr.write(f"concinno: inline squash skipped — {result.error}\n")
+    except Exception as e:
+        # Keep hook resilient: any unexpected failure logs, does not raise.
+        sys.stderr.write(f"concinno: inline squash failed — {type(e).__name__}: {e}\n")
 
 
 def generate_report(

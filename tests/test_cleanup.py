@@ -251,6 +251,66 @@ class TestGitOperations:
         assert result.action == "git_gc"
         assert "before:" in result.details[0]
 
+    def test_squash_ignores_dirty_submodule(self, tmp_path: Path):
+        """Regression: nested repos kept squash aborting → .git bloat."""
+        _init_git_repo(tmp_path, n_commits=8)
+        # Simulate a nested repo (like .claude/skills/last30days) with
+        # its own commit, registered as gitlink at top level, then
+        # dirtied again. Top-level `git status` without
+        # --ignore-submodules reports ` m nested_repo`, aborting squash.
+        nested = tmp_path / "nested_repo"
+        nested.mkdir()
+        for cmd in (
+            ["git", "init"],
+            ["git", "config", "user.name", "test"],
+            ["git", "config", "user.email", "test@test"],
+        ):
+            subprocess.run(cmd, cwd=str(nested), capture_output=True)
+        (nested / "inner.txt").write_text("v1")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(nested), capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "inner v1"],
+            cwd=str(nested), capture_output=True,
+        )
+        # Register nested repo as gitlink at top level.
+        subprocess.run(
+            ["git", "add", "nested_repo"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "auto: add nested"],
+            cwd=str(tmp_path), capture_output=True,
+        )
+        # Dirty the nested repo's working tree → top-level sees ` m nested_repo`.
+        (nested / "inner.txt").write_text("v2-dirty")
+
+        # Sanity: without --ignore-submodules status IS dirty at top level.
+        out_no = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=str(tmp_path), capture_output=True, encoding="utf-8",
+        )
+        out_yes = subprocess.run(
+            ["git", "status", "--short", "--ignore-submodules=all"],
+            cwd=str(tmp_path), capture_output=True, encoding="utf-8",
+        )
+        assert "nested_repo" in out_no.stdout
+        assert out_yes.stdout.strip() == "", (
+            f"flag did not suppress: {out_yes.stdout!r}"
+        )
+
+        result = squash_auto_commits(tmp_path, keep=3)
+        assert result.error == "", f"squash aborted: {result.error}"
+        assert result.items_cleaned > 0
+
+    def test_squash_still_aborts_on_tracked_dirt(self, tmp_path: Path):
+        """Real dirty tracked files must still block squash (rebase safety)."""
+        _init_git_repo(tmp_path, n_commits=8)
+        (tmp_path / "file0.txt").write_text("modified")
+        result = squash_auto_commits(tmp_path, keep=3)
+        assert "uncommitted changes" in result.error
+
     def test_detect_large_objects_empty(self, tmp_path: Path):
         _init_git_repo(tmp_path, n_commits=1)
         large = detect_large_git_objects(tmp_path, min_size_mb=10)

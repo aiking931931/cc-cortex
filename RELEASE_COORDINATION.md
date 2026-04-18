@@ -3,42 +3,21 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-17 — 紅藍隊裁決後）
+## 現況 snapshot（2026-04-18 — 2.4.1 live）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.1.0` — https://pypi.org/project/concinno/ |
-| `pyproject.toml` version | `2.2.0` |
-| `src/concinno/__init__.py __version__` | `2.2.0` |
-| CHANGELOG.md 最新 heading | `## [2.2.0] - 2026-04-17` |
-| 三源對齊狀態 | ✅（`test_version_sync` 2/2 綠 — 本 session 修完） |
-| Outer-repo master HEAD | `e836fffe` ccc 2.2.0 紅隊 F1/F2/F3/H2 修正 — ship-ready |
-| Build artifact | `dist/concinno-2.2.0-py3-none-any.whl` + `dist/concinno-2.2.0.tar.gz` (`twine check` PASSED) |
-| 下一 publish 目標 | **`2.3.0`**（紅隊 round 3 的 9 FATAL 全修，2.2.0 artifact 已 retire） |
+| Registry latest (PyPI) | `2.4.1` — [PyPI page](https://pypi.org/project/concinno/2.4.1/)（upload 2026-04-17T12:55Z） |
+| `pyproject.toml` version | `2.4.1` |
+| `src/concinno/__init__.py __version__` | `2.4.1` |
+| CHANGELOG.md 最新 release heading | `## [2.4.1] - 2026-04-17` |
+| 三源對齊狀態 | ✅ |
+| 下一 publish 目標 | **`2.5.0`** WIP（`CHANGELOG.md [Unreleased]`：`python_exec` + `date_calc` builtin tools，GAIA/HAL 用）— 未 bump，等授權 |
 
-## WIP 變更清單
+## WIP 變更清單（towards 2.5.0）
 
-### 本 session (cc_8918_1436 / 2026-04-17) — Concinno 相關 commits
-
-- `3170ce10` ccc 2.2.0 bump + opus47 tokenizer
-- `b16b2dc3` (auto) CHANGELOG 2.0.0/2.2.0 entries + publish.yml 修 + registry register
-- `a1d644d7` VersionSyncGuard + 8 tests
-- `e836fffe` 紅隊 F1/F2/F3/H2 修正（CHANGELOG 2.0.0 重寫 / `WRITE_TOOLS_EXT` SSoT /
-  smoke test assert version==tag / env escape `_audit_escape()`）
-
-### 本 session 新模組
-
-- `src/concinno/version_sync_guard.py` + `tests/test_version_sync_guard.py` (8 tests)
-- `src/concinno/templates/wiredo/recipes/vscode_extension.md`
-- `src/concinno/tools/builtin/web.py` + `tests/test_tools_builtin_web.py`（GAIA `web_search`
-  / `fetch_url`；屬 2.3.0 WIP 非 2.2.0 範圍）
-- `token_counter._estimate_fast(text, tokenizer="opus47")` path
-- `autocompact.DEFAULT_MODEL_BUDGETS["claude-opus-4-7"] = 1_000_000`
-- `wiredo_change_type` `vscode_extension` classifier + `_VSCE_CMD` regex
-
-### Working tree 累積
-
-- `git status --short | wc -l ≈ 577`（含其他 session WIP — benchmark/docs/交接等）
+- `src/concinno/tools/builtin/python_exec.py` + 22 tests（AST + builtin whitelist sandbox）
+- `src/concinno/tools/builtin/date_calc.py` + 14 tests（delta / parse / format，stdlib-only）
 - Release 只 scope `projects/concinno/`，其他不動
 
 ## ⛔ 鐵律（Concinno 專屬）
@@ -57,33 +36,29 @@
 6. **master >30 commit 未 PyPI 才 bump major**：避免 micro release / 版本號浪費。
    2.2.0 是 minor（additive features）。
 
-## 升級前 checklist（2.2.0）
+## 升級前 checklist（通用 — 每次 bump 前重跑）
 
-- [x] tests 全綠 — `4990 passed` + `test_version_sync 2/2` + `test_version_sync_guard 10/10`
-  + `test_wiredo_* 78/78` + `test_token_counter 20/20`
-- [x] ruff clean（`ruff check` + `ruff format` 全綠）
-- [x] `CHANGELOG.md` `## [2.2.0] - 2026-04-17` entry 完整（Added / Changed / Fixed / Tests）
-- [x] 三源 version 對齊
-- [x] `python -m build` 成功 → `dist/concinno-2.2.0-{whl,tar.gz}`
-- [x] `twine check dist/*` PASSED
-- [x] PyPI `2.2.0` 未佔（registry latest = `2.1.0`）
-- [x] 紅藍隊 Opus 壓測 + FATAL 全修（commit `e836fffe`）
-- [x] CHANGELOG 2.0.0 / 2.1.0 歷史補完（誠實版）
+- [ ] `pytest` 全綠（含 `test_version_sync` + `test_version_sync_guard`）
+- [ ] `ruff check` + `ruff format` clean
+- [ ] `CHANGELOG.md` 目標版本 entry 完整（Added / Changed / Fixed / Tests）
+- [ ] 三源 version 對齊（`pyproject.toml` / `__init__.py` / CHANGELOG heading）
+- [ ] `python -m build` 成功 → `dist/concinno-<ver>-{whl,tar.gz}`
+- [ ] `twine check dist/*` PASSED
+- [ ] PyPI `<ver>` 未佔（`curl https://pypi.org/pypi/concinno/json`）
+- [ ] ≥Minor bump 派 Opus 紅藍隊壓測（見 `~/.claude/rules/L1/redteam.md`）
 - [ ] **Lock 取得**（下方 `Session Registry::Active`）
-- [ ] **用戶明確 `go publish concinno 2.2.0`**（不可逆 gate，full 模式不豁免）
+- [ ] **用戶明確 `go publish concinno <ver>`**（不可逆 gate，full 模式不豁免）
 
-## 升級步驟（2.2.0 → PyPI）
+## 升級步驟（通用）
 
-1. 取 lock：本檔 `Active` 段寫 `hostname + session_id + ISO ts + target=2.2.0`
+1. 取 lock：本檔 `Active` 段寫 `hostname + session_id + ISO ts + target=<ver>`
 2. **等用戶明確授權**（不可逆，full 模式禁自主執行）
-3. `python -m twine upload dist/concinno-2.2.0*`（`.pypirc` 或 `TWINE_API_TOKEN` 環境變數）
-4. `git tag v2.2.0 && git push origin v2.2.0`（若 outer repo 有 remote）
-5. GitHub Release publish `v2.2.0` → 觸發 `.github/workflows/publish.yml`
-   （跑 `smoke test + version matches release tag` + `pytest tests/test_version_sync.py`）
-6. Verify：獨立 venv `pip install --upgrade concinno` → `python -c "import concinno;
-   assert concinno.__version__ == '2.2.0'"`
-7. Release lock：把本檔 `Active` 剪到 `History`，補 `result: ok` + PyPI URL
-8. Update 本檔「現況 snapshot」：Registry latest → `2.2.0`
+3. `python -m twine upload dist/concinno-<ver>*`（Windows: `PYTHONIOENCODING=utf-8 --disable-progress-bar`，MEMORY #34b）
+4. `git tag v<ver> && git push origin v<ver>`
+5. GitHub Release publish → 觸發 `.github/workflows/publish.yml`（smoke assert `__version__ == GITHUB_REF_NAME`）
+6. Verify：獨立 venv `pip install --upgrade concinno` → `python -c "import concinno; assert concinno.__version__ == '<ver>'"`
+7. Release lock：`Active` 剪到 `History`，補 `result: ok` + PyPI URL
+8. Update 本檔「現況 snapshot」：Registry latest → `<ver>`
 
 ## Lock 機制
 

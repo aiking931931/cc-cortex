@@ -6,7 +6,9 @@
     append-only audit logging. Used as library and via CLI.
 @dependencies concinno.guards.base
 @exports evaluate, classify_bash, classify_write, backup_targets, backup_file,
-    audit, list_backups, cleanup_backups, restore_backup, DestructionGuard
+    audit, list_backups, cleanup_backups, restore_backup, DestructionGuard,
+    confirm_with_options, suggest_safer_alternative,
+    destruction_gate, DestructionBlockedError
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -257,6 +260,18 @@ R3_PATTERNS = [
     r"sed\s+.*-i.*\s+/etc/(hosts|resolv\.conf|nsswitch\.conf)",
     # Backup destruction
     r"restic\s+forget\b",
+    # Git reachable-object prune (今天踩過：`gc --prune=now` + `--aggressive`
+    # 不可逆移除 reachable 以外的物件 + reflog expire 後舊 commit 永久消失。
+    # Matches bare `git gc`-family invocations that skip the cache/TTL
+    # heuristics and force immediate destruction of pack/reflog state.)
+    r"git\s+gc\s+.*--prune=(now|all|\d+\.\w+\.ago)\b",
+    r"git\s+gc\s+.*--aggressive\b",
+    r"git\s+reflog\s+expire\s+.*--expire=now\b",
+    r"git\s+prune\s+--expire=now\b",
+    r"git\s+filter-(branch|repo)\s+",
+    # BFG repo cleaner — rewrites history irreversibly
+    r"bfg\s+.*--strip-blobs-bigger-than\b",
+    r"bfg\s+.*--delete-files\b",
     # Credential stuffing / offensive tools
     r"\bhydra\s+",
     r"\bmedusa\s+.*-[hHuUPM]",
@@ -636,11 +651,81 @@ def backup_file(file_path: str, config: dict) -> Optional[str]:
 # ─── Audit ───────────────────────────────────────────────────────
 
 
+_AUDIT_ROTATE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+_AUDIT_ROTATE_MAX_AGE_DAYS = 90
+_AUDIT_ROTATE_KEEP = 3  # .log.1.gz .. .log.3.gz
+
+
+def _rotate_audit_log(log_path: Path) -> None:
+    """Rotate audit log when it exceeds size or age threshold.
+
+    Keeps ``_AUDIT_ROTATE_KEEP`` compressed archives (``.log.1.gz`` newest,
+    ``.log.<KEEP>.gz`` oldest). Called from :func:`audit` before each
+    append — best-effort, never raises. Cheap `stat()` on the common
+    "no rotation needed" path.
+    """
+    import gzip
+
+    try:
+        stat = log_path.stat()
+    except OSError:
+        return
+
+    needs_rotate = False
+    if stat.st_size >= _AUDIT_ROTATE_MAX_BYTES:
+        needs_rotate = True
+    else:
+        age_seconds = time.time() - stat.st_mtime
+        if age_seconds >= _AUDIT_ROTATE_MAX_AGE_DAYS * 86400:
+            needs_rotate = True
+
+    if not needs_rotate:
+        return
+
+    # Shift existing archives: .log.(N-1).gz -> .log.N.gz
+    for idx in range(_AUDIT_ROTATE_KEEP, 0, -1):
+        src = log_path.with_name(f"{log_path.name}.{idx}.gz")
+        if idx == _AUDIT_ROTATE_KEEP and src.exists():
+            try:
+                src.unlink()
+            except OSError:
+                pass
+            continue
+        dst = log_path.with_name(f"{log_path.name}.{idx + 1}.gz")
+        if src.exists():
+            try:
+                src.replace(dst)
+            except OSError:
+                pass
+
+    # Compress current log into .log.1.gz
+    try:
+        with open(log_path, "rb") as src_f:
+            archive_path = log_path.with_name(f"{log_path.name}.1.gz")
+            with gzip.open(archive_path, "wb") as dst_f:
+                shutil.copyfileobj(src_f, dst_f)
+    except OSError:
+        return
+
+    # Truncate the active log
+    try:
+        log_path.unlink()
+    except OSError:
+        pass
+
+
 def audit(cmd: str, risk: int, decision: str, detail: str = "") -> None:
-    """Append to audit log."""
+    """Append to audit log with size/age-based rotation.
+
+    Rotation is handled inline (no background thread / cron). Cheap
+    ``stat()`` on every append keeps the common path fast. When the log
+    hits 10 MB or 90 days old, it's gzipped to ``destruction_audit.log.1.gz``
+    and the chain shifts; we keep the last 3 archives.
+    """
     try:
         log_path = _audit_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_audit_log(log_path)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(
                 json.dumps(
@@ -808,7 +893,59 @@ def evaluate(tool_name: str, tool_input: dict) -> dict:
     audit(command, risk, "block", reason)
     msg = block_message(risk, command, reason)
     _notify_deny(msg, config)
-    return {"permissionDecision": "deny", "reason": msg}
+
+    # Preload AskUserQuestion template + safer alternatives so the LLM
+    # can surface concrete choices to the user on the next turn
+    # (CC L6 can't raise AskUser directly from a hook — see
+    # confirm_with_options docstring).
+    extras: dict[str, object] = {}
+    if risk >= R3:
+        alternatives = suggest_safer_alternative(command) or []
+        options: list[dict] = [
+            {
+                "label": "abort",
+                "description": "Cancel — do not run the destructive command.",
+                "preview": None,
+            },
+        ]
+        for alt in alternatives[:2]:
+            options.append(
+                {
+                    "label": alt["label"],
+                    "description": alt["description"],
+                    "preview": alt.get("command"),
+                },
+            )
+        # Always include the "proceed with reason" escape.
+        options.append(
+            {
+                "label": "proceed with #DESTROY_CONFIRMED:<reason>",
+                "description": (
+                    "Retry the original command with a valid reason "
+                    "keyword appended (migrate/decommission/archive/...)."
+                ),
+                "preview": f"{command.strip()} #DESTROY_CONFIRMED:<reason>",
+            },
+        )
+        # confirm_with_options enforces 2-4 options; trim to 4 max.
+        try:
+            template = confirm_with_options(
+                prompt=(
+                    f"{RISK_LABELS[risk]} destructive command intercepted. "
+                    f"Choose how to proceed:"
+                ),
+                options=options[:4],
+                default="abort",
+            )
+            extras["ask_user_question_template"] = template
+        except ValueError:
+            pass
+        if alternatives:
+            extras["safer_alternatives"] = alternatives
+    result: dict = {"permissionDecision": "deny", "reason": msg}
+    if extras:
+        result["additionalContext"] = extras
+    return result
 
 
 # ─── CLI Functions (called by concinno backup ...) ──────────────
@@ -875,6 +1012,21 @@ def cleanup_backups(keep_days: Optional[int] = None) -> str:
     return f"Cleaned {removed} backup(s) older than {days} days."
 
 
+def _restore_single_target(src: Path, dst: Path) -> None:
+    """Copy one backup entry to its original location.
+
+    Directory targets: remove stale dst (if any) then copytree. File
+    targets: copy2 (preserves metadata). Extracted out of restore_backup
+    to flatten 6-deep nesting (butterfly #7, 2026-04-18).
+    """
+    if src.is_dir():
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        return
+    shutil.copy2(src, dst)
+
+
 def restore_backup(backup_id: str) -> str:
     """Restore a backup by ID."""
     config = load_config()
@@ -884,29 +1036,28 @@ def restore_backup(backup_id: str) -> str:
         return f"Backup not found: {backup_id}"
 
     data = json.loads(manifest.read_text(encoding="utf-8"))
-    restored = []
+    restored: list[str] = []
 
     if data.get("type") == "write_overwrite":
         orig_file = data.get("file", "")
         for f in bdir.iterdir():
-            if f.name != "manifest.json":
-                shutil.copy2(f, orig_file)
-                restored.append(orig_file)
-    else:
-        targets = data.get("targets", [])
-        for f in bdir.iterdir():
             if f.name == "manifest.json":
                 continue
-            for t in targets:
-                if Path(t).name == f.name:
-                    if f.is_dir():
-                        if Path(t).exists():
-                            shutil.rmtree(t)
-                        shutil.copytree(f, t)
-                    else:
-                        shutil.copy2(f, t)
-                    restored.append(t)
-                    break
+            shutil.copy2(f, orig_file)
+            restored.append(orig_file)
+        return f"Restored {len(restored)} item(s) from {backup_id}: {restored}"
+
+    # Directory-style backup: match by basename against recorded targets.
+    targets = data.get("targets", [])
+    name_to_target = {Path(t).name: t for t in targets}
+    for f in bdir.iterdir():
+        if f.name == "manifest.json":
+            continue
+        dst = name_to_target.get(f.name)
+        if dst is None:
+            continue
+        _restore_single_target(f, Path(dst))
+        restored.append(dst)
 
     return f"Restored {len(restored)} item(s) from {backup_id}: {restored}"
 
@@ -924,6 +1075,366 @@ def set_pin(backup_id: str, pinned: bool) -> str:
     manifest.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     action = "Pinned" if pinned else "Unpinned"
     return f"{action}: {backup_id}"
+
+
+# ── AskUserQuestion template + safer-alternatives (P1 #5, #6) ───
+
+
+def confirm_with_options(
+    prompt: str,
+    options: list[dict],
+    default: str = "abort",
+) -> dict:
+    """Build an AskUserQuestion template.
+
+    CC's L6 hook API cannot directly call AskUserQuestion from a hook
+    subprocess — it can only return a deny + reason. We therefore
+    package a question-template dict that the LLM is instructed to
+    paste into a real AskUserQuestion call on the next turn.
+
+    Args:
+        prompt: Main question shown to the user.
+        options: List of ``{"label", "description", "preview"}`` entries.
+            Must be 2-4 items to satisfy CC AskUserQuestion schema.
+        default: Label to treat as default when user dismisses.
+            Defaults to ``"abort"`` (always safest).
+
+    Returns:
+        ``{"question", "options", "default"}`` suitable for
+        `additionalContext.ask_user_question_template`.
+
+    Raises:
+        ValueError: If options count is not 2-4.
+    """
+    if not 2 <= len(options) <= 4:
+        raise ValueError(
+            f"options must have 2-4 entries; got {len(options)}",
+        )
+    for opt in options:
+        if "label" not in opt or "description" not in opt:
+            raise ValueError(
+                "each option requires 'label' and 'description' keys",
+            )
+    return {
+        "question": prompt,
+        "options": [
+            {
+                "label": opt["label"],
+                "description": opt["description"],
+                "preview": opt.get("preview"),
+            }
+            for opt in options
+        ],
+        "default": default,
+    }
+
+
+# Static lookup: dangerous commands → safer alternatives.
+# Each entry returns a list of {label, description, command} proposals
+# the LLM can show the user in an AskUserQuestion. Ordering is worst->best.
+_SAFER_ALTERNATIVES: list[tuple[re.Pattern[str], list[dict]]] = [
+    (
+        re.compile(r"\brm\s+-f\s+.*\.lock\b", re.IGNORECASE),
+        [
+            {
+                "label": "python unlink(missing_ok=True)",
+                "description": (
+                    "Idempotent removal with stdlib. Doesn't invoke shell rm "
+                    "so destruction_guard doesn't need to gate it."
+                ),
+                "command": (
+                    "python -c \"from pathlib import Path; "
+                    "Path('<lockfile>').unlink(missing_ok=True)\""
+                ),
+            },
+        ],
+    ),
+    (
+        re.compile(r"\brm\s+-rf\s+(?!/)(?!~)(?!\$HOME)\S+", re.IGNORECASE),
+        [
+            {
+                "label": "soft delete (move to trash)",
+                "description": (
+                    "mv to _trash/<timestamp>/ — reversible for TTL window, "
+                    "cleanup handled by periodic /tidy."
+                ),
+                "command": "mv <path> _trash/$(date +%Y%m%d_%H%M%S)/",
+            },
+        ],
+    ),
+    (
+        re.compile(r"\bgit\s+reset\s+--hard\b", re.IGNORECASE),
+        [
+            {
+                "label": "git stash push -u",
+                "description": (
+                    "Stashes tracked + untracked; recoverable via "
+                    "`git stash pop`. Use --hard only if stash fails."
+                ),
+                "command": (
+                    "git stash push -u -m "
+                    "'pre-reset $(date -Iseconds)'"
+                ),
+            },
+        ],
+    ),
+    (
+        re.compile(r"\bgit\s+push\s+(--force|-f)\b", re.IGNORECASE),
+        [
+            {
+                "label": "git push --force-with-lease",
+                "description": (
+                    "Aborts if upstream moved — prevents clobbering "
+                    "teammate commits invisibly."
+                ),
+                "command": "git push --force-with-lease",
+            },
+        ],
+    ),
+    (
+        re.compile(
+            r"\bgit\s+gc\s+.*--prune=(now|all|\d+\.\w+\.ago)\b",
+            re.IGNORECASE,
+        ),
+        [
+            {
+                "label": "git gc --auto",
+                "description": (
+                    "Respects gc.auto + pack.deltaCacheLimit; only repacks "
+                    "when thresholds hit. Non-destructive."
+                ),
+                "command": "git gc --auto",
+            },
+        ],
+    ),
+    (
+        re.compile(r"\btwine\s+upload\b", re.IGNORECASE),
+        [
+            {
+                "label": "twine upload --skip-existing",
+                "description": (
+                    "PyPI upload is irreversible — `--skip-existing` lets "
+                    "retries be safe when a previous attempt partially "
+                    "published."
+                ),
+                "command": "twine upload --skip-existing dist/*",
+            },
+        ],
+    ),
+    (
+        re.compile(r"\bDROP\s+TABLE\s+(\w+)", re.IGNORECASE),
+        [
+            {
+                "label": "rename to deprecated_<date>",
+                "description": (
+                    "Preserves data for audit + easy undo. Drop for real "
+                    "only after verifying no consumers."
+                ),
+                "command": (
+                    "ALTER TABLE <name> RENAME TO "
+                    "<name>_deprecated_<YYYYMMDD>;"
+                ),
+            },
+        ],
+    ),
+    (
+        re.compile(r"\bkubectl\s+delete\s+(ns|namespace)\s+\S+", re.IGNORECASE),
+        [
+            {
+                "label": "snapshot resources before delete",
+                "description": (
+                    "Dump all resources to YAML so the ns can be rebuilt "
+                    "if the delete turns out to be wrong."
+                ),
+                "command": (
+                    "kubectl get all -n <ns> -o yaml > backup-<ns>.yaml"
+                ),
+            },
+        ],
+    ),
+    (
+        re.compile(r"\bdocker\s+system\s+prune\s+-a\b", re.IGNORECASE),
+        [
+            {
+                "label": "docker system prune (no -a)",
+                "description": (
+                    "Removes stopped containers + dangling images only. "
+                    "`-a` additionally nukes all unused images incl. base "
+                    "layers you'd pull again."
+                ),
+                "command": "docker system prune",
+            },
+        ],
+    ),
+    (
+        re.compile(
+            r"\baws\s+s3\s+rb\s+s3://\S+\s+--force\b",
+            re.IGNORECASE,
+        ),
+        [
+            {
+                "label": "enable versioning first",
+                "description": (
+                    "Turn on bucket versioning so deletes leave tombstones "
+                    "and versioned objects stay recoverable for 30d."
+                ),
+                "command": (
+                    "aws s3api put-bucket-versioning "
+                    "--bucket <bucket> --versioning-configuration "
+                    "Status=Enabled"
+                ),
+            },
+        ],
+    ),
+    (
+        re.compile(r"\bgit\s+filter-(branch|repo)\b", re.IGNORECASE),
+        [
+            {
+                "label": "clone fresh + use bfg --no-blob-protection=false",
+                "description": (
+                    "History rewrites break every existing clone. Do a "
+                    "fresh mirror clone, rewrite there, verify, then "
+                    "force-with-lease push."
+                ),
+                "command": (
+                    "git clone --mirror <repo> && cd <repo>.git && "
+                    "bfg --strip-blobs-bigger-than 10M"
+                ),
+            },
+        ],
+    ),
+]
+
+
+def suggest_safer_alternative(command: str) -> list[dict] | None:
+    """Look up safer alternatives for a destructive command.
+
+    Scans ``command`` against a curated table of known patterns and
+    returns the first match. Callers (``evaluate()`` + ``/tidy``) use
+    this to preload AskUserQuestion options when denying R2+ commands.
+
+    Args:
+        command: Bash command string as received by the hook.
+
+    Returns:
+        List of ``{"label", "description", "command"}`` proposals, or
+        ``None`` when no pattern matches (no free lunch — stay silent).
+    """
+    if not command:
+        return None
+    cleaned = _strip_echo_content(command)
+    for pattern, alternatives in _SAFER_ALTERNATIVES:
+        if pattern.search(cleaned):
+            # Return shallow copy so callers can't mutate the table.
+            return [dict(alt) for alt in alternatives]
+    return None
+
+
+# ── @destruction_gate decorator (P1 #7) ─────────────────────────
+
+
+class DestructionBlockedError(RuntimeError):
+    """Raised when a decorated destructive function is called outside a
+    hook context without a valid reason keyword.
+
+    Hook-context calls (``CLAUDE_PROJECT_DIR`` set AND the per-op escape
+    env flag raised) pass through silently — the hook pipeline itself is
+    the auth layer there.
+    """
+
+
+def _hook_context_permits(op_name: str) -> bool:
+    """Decide whether we're running inside a trusted hook call.
+
+    We treat the combination of ``CLAUDE_PROJECT_DIR`` + a per-op escape
+    env flag as "hook context" — the stop/tool hook pipeline itself gates
+    the operation upstream. Outside that combo, the gate fires.
+
+    Explicit escape flags keep the surface audit-visible — a rogue env
+    var name can be grepped for post-mortem.
+    """
+    if not os.environ.get("CLAUDE_PROJECT_DIR"):
+        return False
+    escape_map = {
+        "squash_auto_commits": "CONCINNO_INLINE_SQUASH",
+        "git_gc": "CONCINNO_GIT_GC",
+        "prune": "CONCINNO_BACKUP_PRUNE",
+        "rollback": "CONCINNO_GIT_ROLLBACK",
+        "cleanup_stale_files": "CONCINNO_STALE_CLEANUP",
+        "rotate_log_files": "CONCINNO_LOG_ROTATE",
+    }
+    flag = escape_map.get(op_name)
+    if not flag:
+        return False
+    return os.environ.get(flag) == "1"
+
+
+def destruction_gate(risk: str, op_name: str):
+    """Decorator — intercept destructive calls outside hook context.
+
+    Usage::
+
+        @destruction_gate(risk="R3", op_name="git_gc")
+        def git_gc(...): ...
+
+    Behavior:
+      * **Hook context** (``CLAUDE_PROJECT_DIR`` set + op-specific escape
+        env flag = ``"1"``): pass-through — the stop/tool hook is the
+        auth layer.
+      * **Direct call** from user code: require ``reason=`` kwarg with
+        a keyword from :data:`VALID_REASON_KEYWORDS` (>3 chars). Missing
+        or invalid → raise :class:`DestructionBlockedError`. Audited
+        either way.
+
+    The gate recognises ``reason`` as an explicit kwarg; positional
+    callers get a clear error.
+    """
+
+    def _decorator(fn):
+        def _wrapper(*args, **kwargs):
+            reason = kwargs.pop("reason", "")
+            if _hook_context_permits(op_name):
+                audit(
+                    f"gated:{op_name}",
+                    R2,
+                    "allow",
+                    f"hook_context|risk={risk}",
+                )
+                return fn(*args, **kwargs)
+
+            # Direct call path — enforce reason keyword.
+            reason_str = (reason or "").strip().lower()
+            has_keyword = any(
+                kw in reason_str for kw in VALID_REASON_KEYWORDS
+            )
+            if reason_str and len(reason_str) > 3 and has_keyword:
+                audit(
+                    f"gated:{op_name}",
+                    R3,
+                    "allow",
+                    f"reason={reason_str[:80]}|risk={risk}",
+                )
+                return fn(*args, **kwargs)
+
+            audit(
+                f"gated:{op_name}",
+                R3,
+                "block",
+                f"missing_reason|risk={risk}",
+            )
+            raise DestructionBlockedError(
+                f"{op_name} is gated ({risk}). Pass reason=<keyword> "
+                f"from: migrate/decommission/archive/redact/retire/... "
+                f"Or run inside the hook pipeline with the op-specific "
+                f"escape env flag."
+            )
+
+        _wrapper.__name__ = getattr(fn, "__name__", "_wrapper")
+        _wrapper.__doc__ = fn.__doc__
+        _wrapper.__wrapped__ = fn  # introspection
+        return _wrapper
+
+    return _decorator
 
 
 # ── BaseGuard adapter ───────────────────────────────────────────
@@ -946,8 +1457,20 @@ class DestructionGuard(BaseGuard):
         """
         result = evaluate(ctx.tool_name, ctx.tool_input)
         if result.get("permissionDecision") == "deny":
+            additional = result.get("additionalContext", "")
+            # evaluate() now returns a dict under additionalContext
+            # (ask_user_question_template + safer_alternatives). Serialize
+            # to JSON string for the GuardResult.context channel so
+            # downstream consumers (hook template renderer, tests) can
+            # parse it back when needed.
+            if isinstance(additional, dict):
+                additional_context = json.dumps(
+                    additional, ensure_ascii=False,
+                )
+            else:
+                additional_context = str(additional) if additional else ""
             return GuardResult.deny(
                 result.get("reason", self.name),
-                context=result.get("additionalContext", ""),
+                context=additional_context,
             )
         return None

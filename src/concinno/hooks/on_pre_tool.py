@@ -70,8 +70,18 @@ def main(hook_data: dict | None = None) -> None:
         # wrappers that bypass this entry point) gets consistent tracking.
 
         json.dump(result, sys.stdout, ensure_ascii=False)
-    except Exception:
-        # Fail-open: never block user due to pipeline crash
+    except Exception as exc:
+        # Fail-open: never block the user due to a pipeline crash, but
+        # surface the failure to stderr so regression in the guard
+        # pipeline isn't silently invisible for months (previously
+        # `except Exception: _allow()` hid every crash).
+        try:
+            sys.stderr.write(
+                f"\033[93m\u26a0 [on_pre_tool] guard pipeline crashed "
+                f"(fail-open): {type(exc).__name__}: {exc}\033[0m\n"
+            )
+        except Exception:
+            pass
         _allow()
 
 
