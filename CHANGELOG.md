@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-04-18
+
+Hotfix ship — five bugs caught by the 2.6.0 S5 red/blue CBUA review
+after the release artifact was already built. Every fix pinned by
+new regression tests so we can't silently undo the wiring later.
+
+### Fixed
+
+- **F1 — `concinno config set mode` now actually takes effect.** In
+  2.6.0 the `handoff_engine.get_handoff_mode()` resolver only read the
+  legacy `cc_config.json::handoff_mode` file and completely ignored
+  the new `concinno.config` loader. `concinno config set mode handoff`
+  would succeed, write the JSON, and change nothing at runtime. The
+  resolver now reads legacy first (for back-compat with existing
+  installs) then falls through to `concinno.config.get("mode")`,
+  mapping `general` → `phase` and `handoff` → `save-token`. 11 new
+  regression tests in `tests/test_handoff_engine_config_wire.py`.
+- **F2 — `concinno.config._write_layer` is now atomic.** Previously
+  used a bare `open(path, "w")` truncate+write which could corrupt
+  the JSON file if two sessions hit `set_user` simultaneously, or if
+  the process crashed mid-write. Now serializes to a per-writer
+  unique `*.<pid>.<tid>.tmp` sibling and `os.replace`s onto the
+  target. On Windows a short retry handles the `PermissionError`
+  that transient reader-lock contention can cause; the file on disk
+  is never torn. 3 new regression tests (valid-write, crash-mid-write
+  preserves original, threaded concurrent writers leave readable JSON).
+- **F3 — `_DEFAULT_CONFIG` is now immutable.** Wrapped in
+  `types.MappingProxyType` so
+  `concinno.config._DEFAULT_CONFIG["mode"] = "handoff"` raises
+  `TypeError` instead of silently flipping the ship default for every
+  other import in the process. `load()` and `default_config()` still
+  return fresh mutable `dict`s (via `dict(_DEFAULT_CONFIG)`) so
+  callers that were in the habit of mutating the result keep working.
+  4 new regression tests including explicit mutation rejection.
+- **F4 — `i18n._BUILTIN_LOCALES` derived from `config._VALID_LOCALES`.**
+  Before 2.6.1 the two lists drifted: `_VALID_LOCALES` accepted `fr`
+  and `de` but `i18n` only loaded five built-ins, so a user who ran
+  `concinno config set locale fr` passed validation then saw English
+  forever. The SSoT is now `config._VALID_LOCALES`, converted to
+  underscore filename form (`zh-TW` → `zh_TW`) by the derivation
+  helper. A declared locale with no translation file on disk falls
+  back to English AND emits one stderr warning per process so the
+  silent-UX-fail is now a visible-UX-fail. 8 new regression tests.
+- **H1 — `field_read.expand()` path-traversal defense.** The hook
+  pipeline can hand `expand()` section ids that cross-reference
+  arbitrary paths; previously nothing stopped
+  `expand("../../../etc/passwd", "x")` from reading up to 50 KB of
+  any file the agent process could touch. Added an opt-in
+  `workspace_root` kwarg; when set, the resolved source path must
+  live under the workspace or `ValueError` is raised. Default stays
+  `None` (no check) for back-compat with callers that legitimately
+  pass absolute handoff paths outside any particular workspace;
+  trusted-input frontends SHOULD pass `workspace_root=Path.cwd()`.
+  Symlink escape is caught because both paths are `resolve()`d before
+  comparison. 6 new regression tests.
+
+### Internal
+
+- `import copy` removed from `concinno.config` (unused after F3).
+- `import threading`, `import time` added to `concinno.config`
+  (needed for F2 per-writer tmp names + retry).
+- `import sys` added to `concinno.i18n` (needed for F4 warning path).
+- `from pathlib import Path` added to `concinno.field_read` (needed
+  for H1 `is_relative_to` resolution).
+- Total new regression tests: **32** (5299 → 5331 green + 1 skipped +
+  3 xfailed, same as 2.6.0 baseline).
+
 ## [2.6.0] - 2026-04-18
 
 Three-layer config system, FieldRead metadata-first redesign, and a

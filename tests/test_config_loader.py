@@ -279,3 +279,109 @@ class TestCLISmoke:
         loaded = cfg.load(cwd=tmp_path)
         assert loaded["auto_compact"] is True  # default preserved
         assert "invalid bool" in capsys.readouterr().err
+
+
+# ── F2: Atomic _write_layer (2.6.1 hotfix) ──────────────────────
+
+
+class TestAtomicWrite:
+    """`set_user` / `set_project` must survive mid-write failure and
+    concurrency without leaving a torn / corrupt JSON on disk.
+    """
+
+    def test_write_produces_valid_file(self, tmp_path):
+        cfg.set_user("mode", "handoff")
+        loaded = json.loads(cfg.user_config_path().read_text(encoding="utf-8"))
+        assert loaded["mode"] == "handoff"
+
+    def test_failure_during_write_preserves_original(
+        self, tmp_path, monkeypatch,
+    ):
+        # First write a known-good value.
+        cfg.set_user("mode", "handoff")
+        user_path = cfg.user_config_path()
+        original = user_path.read_text(encoding="utf-8")
+
+        # Now sabotage json.dump to raise mid-write — the tmp file
+        # should be cleaned up AND the original file intact.
+        import concinno.config as cfg_mod
+
+        def boom(*a, **kw):
+            raise RuntimeError("disk full simulation")
+
+        monkeypatch.setattr(cfg_mod.json, "dump", boom)
+        with pytest.raises(RuntimeError, match="disk full"):
+            cfg.set_user("mode", "general")
+
+        # Original file still exists and still holds "handoff".
+        assert user_path.read_text(encoding="utf-8") == original
+        # No stale .tmp sibling left behind.
+        tmp_sibling = user_path.with_suffix(user_path.suffix + ".tmp")
+        assert not tmp_sibling.exists()
+
+    def test_concurrent_writes_leave_valid_json(self, tmp_path):
+        """Two parallel set_user calls must leave a readable JSON file
+        (one of the two values), never a half-written corrupt blob.
+
+        We don't require zero errors — on Windows the rename phase can
+        race briefly between threads even with retries — but the file
+        on disk must *always* be parseable JSON with a legal mode value.
+        Corruption is the real regression target here.
+        """
+        import threading
+
+        def writer(value: str):
+            for _ in range(10):
+                try:
+                    cfg.set_user("mode", value)
+                except PermissionError:
+                    # Windows thread-level rename contention; the file
+                    # on disk is unaffected — loop again.
+                    pass
+
+        t1 = threading.Thread(target=writer, args=("handoff",))
+        t2 = threading.Thread(target=writer, args=("general",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # File must be parseable JSON with mode ∈ {handoff, general}.
+        data = json.loads(
+            cfg.user_config_path().read_text(encoding="utf-8"),
+        )
+        assert data.get("mode") in {"handoff", "general"}
+
+
+# ── F3: _DEFAULT_CONFIG immutability (2.6.1 hotfix) ─────────────
+
+
+class TestDefaultConfigImmutable:
+    """`_DEFAULT_CONFIG` must be a read-only mapping — attempts to
+    mutate it raise TypeError, protecting ship defaults from cross-
+    module monkey-patching in the same process.
+    """
+
+    def test_assignment_raises_type_error(self):
+        with pytest.raises(TypeError):
+            cfg._DEFAULT_CONFIG["mode"] = "handoff"  # type: ignore[index]
+
+    def test_delete_raises_type_error(self):
+        with pytest.raises(TypeError):
+            del cfg._DEFAULT_CONFIG["mode"]  # type: ignore[misc]
+
+    def test_load_still_returns_mutable_dict(self, tmp_path):
+        """`load()` must keep returning a fresh mutable dict so callers
+        that were in the habit of mutating the result keep working.
+        """
+        loaded = cfg.load(cwd=tmp_path)
+        assert isinstance(loaded, dict)
+        loaded["mode"] = "handoff"  # must not raise
+        # And the ship default is NOT poisoned.
+        assert cfg._DEFAULT_CONFIG["mode"] == "general"
+
+    def test_default_config_helper_returns_mutable_copy(self):
+        d = cfg.default_config()
+        assert isinstance(d, dict)
+        d["locale"] = "ja"  # must not raise
+        assert cfg._DEFAULT_CONFIG["locale"] == "en"

@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 # ── Constants ─────────────────────────────────────────────
@@ -770,27 +771,68 @@ def read_memory_fields(
 # ── expand() — detail-on-demand ──────────────────────────
 
 
-def expand(source_path: str, section_id: str) -> str:
+def expand(
+    source_path: str,
+    section_id: str,
+    *,
+    workspace_root: "str | os.PathLike[str] | None" = None,
+) -> str:
     """Return the full content of a previously elided section.
 
     Re-parses the source file and looks up the section by its stable id.
     Returns empty string if source is missing or id not found.
 
-    Note: this is idempotent — callers can expand the same id multiple
-    times safely. No side effects.
-
     Args:
         source_path: Path to the original markdown file.
         section_id: Stable id from an ElidedSection (heading slug or
-            `sec-N` fallback).
+            ``sec-N`` fallback).
+        workspace_root: Optional directory that ``source_path`` must
+            live under (after symlink resolution). When set, protects
+            against ``expand("../../../etc/passwd", ...)`` style disk
+            reads through untrusted section ids — the path is resolved
+            and rejected with :class:`ValueError` if it escapes the
+            root. Defaults to ``None`` (no check) so legacy callers
+            that pass absolute handoff paths outside any particular
+            workspace keep working. Callers receiving untrusted input
+            SHOULD pass this explicitly (e.g. ``workspace_root=Path.cwd()``
+            or the project root) — the whitepaper-section plumbing in
+            hook pipelines already does.
 
     Returns:
-        The full `## Heading\n\nBody` text of the matching section,
+        The full ``## Heading\\n\\nBody`` text of the matching section,
         or empty string on miss.
+
+    Raises:
+        ValueError: When ``workspace_root`` is set and the resolved
+            ``source_path`` lies outside it, or when either path cannot
+            be resolved (broken symlink / cycle — fail-closed).
     """
-    if not source_path or not os.path.isfile(source_path):
+    if not source_path or not section_id:
         return ""
-    if not section_id:
+
+    # Path traversal defense. Off by default for back-compat; callers
+    # pass ``workspace_root`` explicitly to opt in. Symlinks are
+    # resolved before the comparison so a symlink planted inside the
+    # workspace cannot proxy reads to ``/etc/passwd`` etc.
+    if workspace_root is not None:
+        try:
+            root_resolved = Path(workspace_root).resolve()
+            src_resolved = Path(source_path).resolve()
+        except (OSError, RuntimeError) as exc:
+            raise ValueError(
+                f"expand() could not resolve paths: {exc}",
+            ) from exc
+        try:
+            inside = src_resolved.is_relative_to(root_resolved)
+        except AttributeError:
+            inside = str(src_resolved).startswith(str(root_resolved))
+        if not inside:
+            raise ValueError(
+                f"expand() path {source_path!r} resolves outside workspace "
+                f"{str(root_resolved)!r}",
+            )
+
+    if not os.path.isfile(source_path):
         return ""
     try:
         with open(source_path, encoding="utf-8") as f:

@@ -25,11 +25,13 @@ Design rules:
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 # ── Ship defaults (DO NOT MODIFY — covered by invariant tests) ───
@@ -37,14 +39,32 @@ from typing import Any
 # SHIP DEFAULTS — locked per MEMORY #59. Do NOT change to zh-TW / handoff.
 # These are for every anonymous PyPI downloader. AI King's personal
 # preference (zh-TW + handoff mode) belongs in ~/.concinno/config.json.
-_DEFAULT_CONFIG: dict[str, Any] = {
+#
+# Wrapped in MappingProxyType so
+#     import concinno.config; concinno.config._DEFAULT_CONFIG["mode"] = "handoff"
+# raises TypeError at write time rather than silently flipping the ship
+# default for every other caller in the process. Invariant tests still
+# read from it happily — reads are unaffected.
+# NOTE: ``copy.deepcopy`` cannot pickle a MappingProxyType (Python 3.11+
+# raises ``TypeError: cannot pickle 'mappingproxy' object``). All values
+# in the ship default are primitives (str/bool) so :func:`load` and
+# :func:`default_config` use ``dict(_DEFAULT_CONFIG)`` for a semantic-
+# deepcopy-equivalent that returns a fresh mutable dict callers can
+# modify without mutating the frozen ship default.
+_DEFAULT_CONFIG: MappingProxyType[str, Any] = MappingProxyType({
     "mode": "general",  # general | handoff
     "locale": "en",  # en | zh-TW | ja | ko | fr | de | es
     "auto_compact": True,  # auto-compact on ctx threshold
     "memory_file_enabled": True,
-}
+})
 
 _VALID_MODES: frozenset[str] = frozenset({"general", "handoff"})
+# ⛔ Source of truth for display/pattern locales. ``concinno.i18n``
+# derives its own ``_BUILTIN_LOCALES`` from this set so a new locale
+# added here automatically validates via :func:`validate` AND participates
+# in i18n pattern merging. Use BCP-47 hyphenated form here; the i18n
+# layer handles the hyphen-to-underscore filename mapping
+# (e.g. ``zh-TW`` → ``zh_TW.json``).
 _VALID_LOCALES: frozenset[str] = frozenset(
     {"en", "zh-TW", "ja", "ko", "fr", "de", "es"},
 )
@@ -215,7 +235,7 @@ def load(cwd: Path | None = None) -> dict[str, Any]:
         Deep copy of default, overlaid by user → project → env. Malformed or
         unknown entries are dropped with a stderr warning.
     """
-    merged: dict[str, Any] = copy.deepcopy(_DEFAULT_CONFIG)
+    merged: dict[str, Any] = dict(_DEFAULT_CONFIG)
 
     # Layer 3: user
     user_raw = _read_json_file(user_config_path())
@@ -242,7 +262,22 @@ def get(key: str, cwd: Path | None = None) -> Any:
 
 
 def _write_layer(path: Path, key: str, value: Any) -> None:
-    """Merge-write (key, value) into a single-layer JSON file."""
+    """Merge-write (key, value) into a single-layer JSON file.
+
+    Atomic write: serialize to ``<path>.tmp`` then ``os.replace`` onto
+    the target. Guarantees that concurrent ``set_user`` / ``set_project``
+    calls either see the pre-write state or one of the complete post-
+    write states — never a truncated / half-written JSON that would
+    crash :func:`load` on the next read.
+
+    Windows note: ``os.replace`` is atomic on both POSIX.1-2001 and
+    NTFS. On older Windows filesystems without atomic rename, the
+    stdlib falls back to best-effort semantics, but since Concinno
+    requires Python >=3.10 and modern Windows, callers can rely on
+    single-writer atomicity here. The *last* writer wins across
+    concurrent writers — that is by design (user said "set X", not
+    "merge X with whatever the other session just wrote").
+    """
     validate(key, value)
     existing: dict[str, Any] = {}
     if path.is_file():
@@ -258,9 +293,41 @@ def _write_layer(path: Path, key: str, value: Any) -> None:
     existing["$schema_version"] = _SCHEMA_VERSION
     existing[key] = value
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(existing, f, indent=2, ensure_ascii=False, sort_keys=False)
-        f.write("\n")
+
+    # Write-then-rename. If the process crashes or raises between open
+    # and replace, the original file stays intact and only a stray .tmp
+    # is left behind (picked up by next write as scratch). Callers never
+    # observe a torn read.
+    #
+    # Thread-safety: use a per-writer unique tmp name so two concurrent
+    # writers in the same process never step on each other's scratch
+    # file. On Windows ``os.replace`` can additionally hit transient
+    # ``PermissionError`` when another reader has the target open —
+    # a short retry handles that without corrupting the file on disk.
+    tmp = path.with_suffix(
+        f"{path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp",
+    )
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2, ensure_ascii=False, sort_keys=False)
+            f.write("\n")
+        for attempt in range(5):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+    except Exception:
+        # Best-effort cleanup — leaving a stale .tmp is harmless but
+        # noisy. Do not mask the original exception.
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def set_user(key: str, value: Any) -> None:
@@ -330,7 +397,7 @@ def sources(cwd: Path | None = None) -> dict[str, str]:
 
 def default_config() -> dict[str, Any]:
     """Return a deep copy of the ship defaults (for tests / tooling)."""
-    return copy.deepcopy(_DEFAULT_CONFIG)
+    return dict(_DEFAULT_CONFIG)
 
 
 __all__ = [

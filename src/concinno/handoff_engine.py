@@ -153,19 +153,98 @@ def is_autonomous_or_competition() -> bool:
     return get_handoff_mode() in ("full", "competition")
 
 
-def get_handoff_mode() -> str:
-    """Read handoff_mode from cc_config.json. Returns 'phase' if unset."""
+# Mapping between concinno.config `mode` values (general|handoff) and the
+# richer handoff_engine states (save-token|phase|full|competition).
+# - ``general`` (Concinno 2.6 ship default) == ``phase`` — no gating at
+#   normal context, one reminder near the top, treats handoff as opt-in.
+# - ``handoff`` == ``save-token`` — AI King's personal preference,
+#   conservative gates, early reminders.
+# Legacy ``cc_config.json::handoff_mode`` values (save-token/phase/full/
+# competition) take precedence when present so existing installs keep
+# their exact tuning — we only fall to ``concinno.config`` when the
+# legacy file has no opinion.
+_CONFIG_MODE_TO_HANDOFF: dict[str, str] = {
+    "general": "phase",
+    "handoff": "save-token",
+}
+
+
+def _read_legacy_cc_config_mode() -> str | None:
+    """Return handoff_mode from cc_config.json if present, else None.
+
+    None means "no legacy opinion" → fall through to concinno.config.
+    Invalid values (unknown mode string, bad JSON) also map to None so
+    the caller can degrade gracefully instead of inheriting garbage.
+    """
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
     cfg_path = os.path.join(project_dir, ".claude", "hooks", "cc_config.json")
     if not os.path.isfile(cfg_path):
-        return "phase"
+        return None
     try:
         with open(cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-        mode = cfg.get("handoff_mode", "phase")
-        return mode if mode in HANDOFF_MODES else "phase"
     except Exception:
-        return "phase"
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    mode = cfg.get("handoff_mode")
+    if mode is None:
+        return None
+    if mode in HANDOFF_MODES:
+        return mode
+    return None
+
+
+def _read_concinno_config_mode() -> str | None:
+    """Return handoff mode derived from concinno.config `mode`, else None.
+
+    Runtime-aware: reads env > project > user > ship-default layers via
+    concinno.config.get("mode"). Only ``general`` / ``handoff`` are the
+    documented concinno.config values; anything else (a power-user hand-
+    editing config to "save-token" directly) is also accepted verbatim
+    as long as it's in HANDOFF_MODES so the underlying tuning still
+    works.
+    """
+    try:
+        from concinno.config import get as _cfg_get
+
+        raw = _cfg_get("mode")
+    except Exception:
+        return None
+    if not isinstance(raw, str):
+        return None
+    if raw in _CONFIG_MODE_TO_HANDOFF:
+        return _CONFIG_MODE_TO_HANDOFF[raw]
+    # Power-user override: direct HANDOFF_MODES value written into
+    # concinno.config also honored, for symmetry with legacy.
+    if raw in HANDOFF_MODES:
+        return raw
+    return None
+
+
+def get_handoff_mode() -> str:
+    """Return the effective handoff mode.
+
+    Resolution order (first non-None wins):
+      1. Legacy ``cc_config.json::handoff_mode`` under
+         ``$CLAUDE_PROJECT_DIR/.claude/hooks/`` — preserves exact
+         behavior for existing installs.
+      2. :func:`concinno.config.get` ``mode`` key, mapped via
+         ``_CONFIG_MODE_TO_HANDOFF`` (``general`` → ``phase``,
+         ``handoff`` → ``save-token``). This is the new 2.6.1
+         runtime consumer of ``concinno config set mode``.
+      3. Fallback ``"phase"`` — concinno ship default after mapping.
+
+    Invalid values at any layer are ignored (not propagated) so a
+    single malformed file cannot poison the whole mode decision.
+    """
+    legacy = _read_legacy_cc_config_mode()
+    if legacy is not None:
+        return legacy
+    from_config = _read_concinno_config_mode()
+    if from_config is not None:
+        return from_config
+    return "phase"
 
 
 def set_handoff_mode(mode: str) -> bool:
