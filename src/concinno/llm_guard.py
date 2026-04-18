@@ -40,13 +40,24 @@ def _call_llm(prompt: str) -> str:
     # Anthropic
     try:
         import anthropic
+
+        from concinno.cache.anthropic_helpers import with_cache_control
         key = os.environ.get("ANTHROPIC_API_KEY", "")
         if key:
             client = anthropic.Anthropic(api_key=key)
+            # LLM-as-judge: single-turn, but the prompt template is
+            # stable across every call to this guard. Mark the user
+            # message cacheable via an explicit breakpoint at index 0
+            # so successive calls hit a warm cache on prompt >=1024t.
+            messages = with_cache_control(
+                [{"role": "user", "content": prompt}],
+                strategy="explicit",
+                breakpoints=[0],
+            )
             resp = client.messages.create(
                 model=_DEFAULT_MODEL,
                 max_tokens=_MAX_TOKENS,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
             )
             return resp.content[0].text if resp.content else ""
     except Exception as exc:

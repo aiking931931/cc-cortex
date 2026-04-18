@@ -101,10 +101,19 @@ def _call_anthropic(prompt: str, *, max_tokens: int = 1024) -> str:
 
     model = _LLM_MODEL or "claude-haiku-4-5-20251001"
     client = anthropic.Anthropic(api_key=api_key)
+    from concinno.cache.anthropic_helpers import with_cache_control
+    # A2A safety agent re-asks the same guard prompt every call — mark
+    # the user message cacheable so repeated safety checks hit a warm
+    # cache and drop latency + cost on long-running sessions.
+    messages = with_cache_control(
+        [{"role": "user", "content": prompt}],
+        strategy="explicit",
+        breakpoints=[0],
+    )
     resp = client.messages.create(
         model=model,
         max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
     )
     return resp.content[0].text if resp.content else ""
 

@@ -699,8 +699,15 @@ def _run_streak_ux(
     tool_name: str, tool_input: dict, guard_ctx: str,
     hook_data: dict, fragments: list[str],
 ) -> None:
-    """Track clean-edit streak and append UX message if applicable."""
+    """Track clean-edit streak and append UX message if applicable.
+
+    Respects ``/hook streak_ux off``: when the feature flag is false we
+    skip the streak counter entirely rather than tracking silently.
+    """
     if tool_name not in _WRITE_TOOLS:
+        return
+    from concinno.core.config import get_config
+    if not get_config().feature("streak_ux", "enabled"):
         return
     fp = tool_input.get("file_path") or tool_input.get("path") or ""
     has_errors = "\U0001f534" in guard_ctx  # 🔴

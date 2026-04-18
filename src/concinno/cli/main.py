@@ -107,14 +107,18 @@ HOOK_FILES = [
     ("on_stop.py", "on-stop.py"),
     ("on_pre_tool.py", "on-pre-tool.py"),
     ("on_post_tool.py", "on-post-tool.py"),
+    ("ask_user_toast.py", "ask-user-toast.py"),
 ]
 
-# (installed filename, Claude Code hook event) — for settings.json registration
+# (installed filename, Claude Code hook event, matcher) — settings.json.
+# ``matcher`` defaults to "" (all tools). AskUserQuestion has a
+# dedicated matcher so we don't toast on every tool call.
 HOOK_EVENTS = [
-    ("on-session-start.py", "SessionStart"),
-    ("on-stop.py", "Stop"),
-    ("on-pre-tool.py", "PreToolUse"),
-    ("on-post-tool.py", "PostToolUse"),
+    ("on-session-start.py", "SessionStart", ""),
+    ("on-stop.py", "Stop", ""),
+    ("on-pre-tool.py", "PreToolUse", ""),
+    ("on-post-tool.py", "PostToolUse", ""),
+    ("ask-user-toast.py", "PreToolUse", "AskUserQuestion"),
 ]
 
 
@@ -175,7 +179,15 @@ def _register_hooks_in_settings() -> int:
     hooks = settings.setdefault("hooks", {})
     registered = 0
 
-    for hook_file, event in HOOK_EVENTS:
+    for entry in HOOK_EVENTS:
+        # Accept both legacy 2-tuples (filename, event) and the
+        # 2.7+ 3-tuples (filename, event, matcher) so downstream
+        # forks that import this list keep working.
+        if len(entry) == 2:
+            hook_file, event = entry
+            matcher = ""
+        else:
+            hook_file, event, matcher = entry
         hook_path = HOOKS_DIR / hook_file
         if not hook_path.exists():
             continue
@@ -194,7 +206,7 @@ def _register_hooks_in_settings() -> int:
 
         event_groups.append(
             {
-                "matcher": "",
+                "matcher": matcher,
                 "hooks": [{"type": "command", "command": command}],
             }
         )
@@ -214,7 +226,7 @@ def _unregister_hooks_from_settings() -> int:
     if not hooks:
         return 0
 
-    hook_filenames = {hf for hf, _ in HOOK_EVENTS}
+    hook_filenames = {entry[0] for entry in HOOK_EVENTS}
     removed = 0
 
     for event in list(hooks.keys()):

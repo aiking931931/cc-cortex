@@ -91,6 +91,7 @@ class LintGuard(BaseGuard):
     """PostToolUse: run eslint on JS/JSX files."""
 
     name = "lint_guard"
+    feature_name = "linting"
     category = GuardCategory.QUALITY
 
     def check(self, ctx: GuardContext) -> GuardResult | None:

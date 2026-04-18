@@ -163,7 +163,7 @@ class GuardPipeline:
         rewrite_notes: list[str] = []
 
         for guard in self._guards:
-            if self._is_disabled(guard.name):
+            if not self._is_guard_active(guard):
                 continue
 
             # Path-scope: skip guard if operating on non-matching path
@@ -261,7 +261,7 @@ class GuardPipeline:
         contexts: list[str] = []
 
         for guard in self._guards:
-            if self._is_disabled(guard.name):
+            if not self._is_guard_active(guard):
                 continue
             try:
                 result = guard.on_post_tool(ctx)
@@ -288,7 +288,7 @@ class GuardPipeline:
         contexts: list[str] = []
 
         for guard in self._guards:
-            if self._is_disabled(guard.name):
+            if not self._is_guard_active(guard):
                 continue
             try:
                 result = guard.on_stop(ctx)
@@ -395,8 +395,62 @@ class GuardPipeline:
     # ── Health Tracking ───────────────────────────────────────
 
     def _is_disabled(self, name: str) -> bool:
-        """Guard auto-disabled after max_failures consecutive crashes."""
+        """Guard auto-disabled after max_failures consecutive crashes.
+
+        Health-only check kept for backward compatibility. Callers
+        that have a :class:`BaseGuard` in hand should prefer
+        :meth:`_is_guard_active`, which additionally honours the
+        user-facing ``feature_config.enabled`` flag so ``/hook X off``
+        actually stops the guard running.
+        """
         return self._health.get(name, 0) >= self._max_failures
+
+    def _feature_enabled(self, guard: object) -> bool:
+        """Look up the ``enabled`` flag for ``guard`` via cc_config.
+
+        Resolution order:
+
+        1. ``guard.feature_name`` if set and non-empty.
+        2. ``guard.name`` otherwise.
+
+        When ``feature_config`` has no metadata for the resolved key
+        we default to ``True`` — third-party guards registered without
+        a matching feature entry stay on, matching prior 2.6.x
+        behaviour. A missing / unreadable ``cc_config.json`` also
+        returns ``True`` (fail-open). Any exception is swallowed with
+        a debug log entry.
+
+        This is the wiring point Agent Y flagged as island #2: 26/33
+        feature entries in ``FEATURE_META`` had no runtime consumer
+        before 2.7.0, so ``/hook X off`` persisted to disk but the
+        guards themselves kept running. Routing the flag through the
+        pipeline — one central dispatch — wires every ``BaseGuard``
+        subclass at once without sprinkling ``cfg.feature()`` calls
+        into 26 guard bodies.
+        """
+        try:
+            key = getattr(guard, "feature_name", "") or getattr(
+                guard, "name", "",
+            )
+            if not key:
+                return True
+            from concinno.core.config import get_config
+
+            cfg = get_config()
+            # ``feature()`` returns the configured value or True when
+            # the feature is absent from cc_config.json.
+            return bool(cfg.feature(key, "enabled"))
+        except Exception:  # noqa: BLE001 — fail-open by contract
+            return True
+
+    def _is_guard_active(self, guard: object) -> bool:
+        """Guard should run iff it's healthy AND feature-enabled."""
+        name = getattr(guard, "name", "") or ""
+        if self._is_disabled(name):
+            return False
+        if not self._feature_enabled(guard):
+            return False
+        return True
 
     def _record_failure(self, name: str) -> None:
         prev = self._health.get(name, 0)

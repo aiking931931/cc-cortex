@@ -186,10 +186,20 @@ def _llm_plan(
         })
     content.append({"type": "text", "text": text_part})
 
+    # Batch eval often parses goals for 100+ tasks with the same
+    # framing template — cache the user turn so the per-task call
+    # hits a warm prefix and we pay only for the variable tail.
+    from concinno.cache.anthropic_helpers import with_cache_control
+
+    msgs = with_cache_control(
+        [{"role": "user", "content": content}],
+        strategy="explicit",
+        breakpoints=[0],
+    )
     resp = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=500,
-        messages=[{"role": "user", "content": content}],
+        messages=msgs,
     )
     text = resp.content[0].text.strip()
     # Parse JSON from response

@@ -185,7 +185,12 @@ def _build_stop_guard(hook_data: dict) -> Callable[[], str | None]:
 
 def _build_auto_delivery(hook_data: dict) -> Callable[[], str | None]:
     def _run() -> str | None:
+        from concinno.core.config import get_config
         from concinno.delivery import auto_delivery_gate
+        # ``/hook delivery_gate off`` skips the WIREDO auto-checker
+        # so teams that don't want delivery nagging can opt out.
+        if not get_config().feature("delivery_gate", "enabled"):
+            return None
         sid = hook_data.get("session_id", "")
         return auto_delivery_gate(session_id=sid)
     return _run
@@ -564,10 +569,22 @@ def _orphan_scan(hook_data: dict) -> None:
 
 
 def _session_summary(hook_data: dict) -> None:
-    """Output visual session summary to stderr (user-visible). <10ms."""
+    """Output visual session summary to stderr (user-visible). <10ms.
+
+    Respects ``/hook session_summary off`` — users who find the
+    end-of-session recap noisy can silence it without touching hook
+    registration.
+    """
     session_id = hook_data.get("session_id", "")
     if not session_id:
         return
+
+    try:
+        from concinno.core.config import get_config
+        if not get_config().feature("session_summary", "enabled"):
+            return
+    except Exception:  # noqa: BLE001 — fail-open
+        pass
 
     streak = 0
     try:

@@ -491,16 +491,28 @@ class LLMEscalator:
                 continue
             chat.append({"role": role, "content": content})
 
+        # Mark the escalation prompt cacheable so repeat steps in a
+        # chain (Gemma→Haiku→Sonnet→Opus) re-use the prefix instead of
+        # paying full input cost each tier. Legacy strategy caches the
+        # first user turn; system block goes through a cache wrapper
+        # so the static instructions stay stable across escalations.
+        from concinno.cache.anthropic_helpers import (
+            system_with_cache,
+            with_cache_control,
+        )
+
+        cached_chat = with_cache_control(chat, strategy="legacy")
+
         t0 = _now_ms()
         kwargs: dict[str, Any] = {
             "model": model_id,
             "max_tokens": max_tokens,
-            "messages": chat,
+            "messages": cached_chat,
         }
         if not _is_opus_4_7_plus(model_id):
             kwargs["temperature"] = temperature
         if system_txt:
-            kwargs["system"] = system_txt
+            kwargs["system"] = system_with_cache(system_txt)
         resp = client.messages.create(**kwargs)
         latency = _now_ms() - t0
 

@@ -242,10 +242,24 @@ class ModelBackend:
     def _anthropic_chat(self, system, messages, max_tokens):
         client = _get_anthropic()
         try:
+            # Cache the stable system prompt + legacy-cache the first
+            # user turn so GAIA agent loop iterations (often 10-40
+            # steps per task) stop paying for the same prefix over
+            # and over. Savings compound across 100+ eval tasks.
+            from concinno.cache.anthropic_helpers import (
+                system_with_cache,
+                with_cache_control,
+            )
+            sys_block = (
+                system_with_cache(system) if isinstance(system, str)
+                else system
+            )
+            msgs = with_cache_control(messages, strategy="legacy")
             resp = client.messages.create(
                 model=self._anthropic_model,
                 max_tokens=max_tokens,
-                system=system, messages=messages,
+                system=sys_block,
+                messages=msgs,
             )
             return resp.content[0].text if resp.content else ""
         except Exception as e:

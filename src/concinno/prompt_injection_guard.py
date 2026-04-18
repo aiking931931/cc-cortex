@@ -214,6 +214,7 @@ class PromptInjectionGuard(BaseGuard):
     """
 
     name = "prompt_injection_guard"
+    feature_name = "prompt_guard"
     category = GuardCategory.SECURITY
 
     def check(self, ctx: GuardContext) -> GuardResult | None:

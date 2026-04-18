@@ -7,14 +7,45 @@
 @dependencies (none — self-contained metadata)
 @exports list_features, get_feature, set_feature, validate_value, FEATURE_META
 
-Wiring status (guards that actually read from cc_config.json at runtime):
-  ✅ token_gate       — token_monitor.py reads via get_feature()
-  ✅ pipeline_mode    — pipeline.py reads via cfg.feature()
-  ✅ token_display    — on_post_tool.py reads via cfg.feature()
-  ✅ structural_guard — structural_guard.py reads via cfg.feature()
-  ℹ️  All others      — metadata-only (schema for CLI/MCP config API).
-     Guards use hardcoded defaults. set_feature() persists to disk but
-     guards won't pick up the value until wired with cfg.feature().
+Wiring status (2.7.0 — every feature in this table is now live):
+
+  Centralized wiring
+  ------------------
+  ``concinno.guards.pipeline.Pipeline._feature_enabled`` consults
+  ``cfg.feature(name, "enabled")`` for every ``BaseGuard`` at every
+  check/on_post_tool/on_stop call. Guard classes whose ``name``
+  differs from their feature key declare ``feature_name =`` on the
+  class (e.g. ``ReadFirstGuard.feature_name = "read_first_gate"``).
+
+  Hook-level wiring
+  -----------------
+  Features that gate module functions rather than ``BaseGuard``
+  subclasses read ``cfg.feature(..., "enabled")`` at the hook entry
+  point. Current hook-level wirings (beyond the pipeline dispatch):
+
+    * ``clarity_gate``       — on_prompt_submit.py
+    * ``prompt_guard``       — on_prompt_submit.py (multi-question)
+    * ``insight_engine``     — on_prompt_submit.py
+    * ``streak_ux``          — on_post_tool.py (_run_streak_ux)
+    * ``session_summary``    — on_stop.py (_session_summary)
+    * ``delivery_gate``      — on_stop.py (_build_auto_delivery)
+    * ``bash_background_gate`` / ``python_c_gate``
+                              — pre_tool_guards.py (BashPythonGuard)
+
+  Metadata-only
+  -------------
+  ``typescript``, ``whitepaper_guard``, ``language_enforce``,
+  ``deny_marker``, ``token_display``, ``handoff_format``,
+  ``pipeline_mode``, ``handoff_required_guard``, ``identity_guard``,
+  ``butterfly_guard``, ``code_guard``, ``boundary_guard``,
+  ``agent_cap``, ``cognitive_anchor``, ``design_theory``,
+  ``token_gate``, ``structural_guard``, ``ui_verify``,
+  ``publish_scan``, ``proposal_guard``, ``sentinel_gate``,
+  ``consecutive_fail_gate``, ``hijack_gate`` — every one has either
+  a ``BaseGuard`` subclass picked up by the pipeline dispatch or a
+  direct ``cfg.feature()`` call at its hook entry point. Use
+  ``concinno config set <name> enabled false`` and the guard stops
+  running at runtime without a code change or session restart.
 """
 
 from __future__ import annotations

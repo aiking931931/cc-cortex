@@ -767,6 +767,7 @@ class HijackGuard(BaseGuard):
     """TADS four-level circuit breaker based on hijack_score."""
 
     name = "hijack_guard"
+    feature_name = "hijack_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "attention hijack loop detected"
 
@@ -802,6 +803,7 @@ class ConsecutiveFailGuard(BaseGuard):
     """DENY when consecutive tool failures exceed threshold."""
 
     name = "consecutive_fail"
+    feature_name = "consecutive_fail_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "consecutive tool failures"
 
@@ -832,6 +834,7 @@ class SentinelGuard(BaseGuard):
     """DENY Edit on same file when repeated too many times (stuck loop)."""
 
     name = "sentinel"
+    feature_name = "sentinel_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "repeated edits on same file"
 

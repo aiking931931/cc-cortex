@@ -359,6 +359,7 @@ class ReadFirstGuard(BaseGuard):
     """
 
     name = "read_first"
+    feature_name = "read_first_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "editing unread file"
 
@@ -450,20 +451,24 @@ class BashPythonGuard(BaseGuard):
         """
         if ctx.tool_name != "Bash":
             return None
-        # Check bash background gate
-        result = gate_bash_background(ctx.tool_input)
-        if result is not None:
-            return GuardResult.deny(
-                result.get("reason", self.name),
-                context=result.get("additionalContext", ""),
-            )
-        # Check python -c gate
-        result = gate_python_c(ctx.tool_input)
-        if result is not None:
-            return GuardResult.deny(
-                result.get("reason", self.name),
-                context=result.get("additionalContext", ""),
-            )
+        from concinno.core.config import get_config
+        cfg = get_config()
+        # Check bash background gate (feature: bash_background_gate).
+        if cfg.feature("bash_background_gate", "enabled"):
+            result = gate_bash_background(ctx.tool_input)
+            if result is not None:
+                return GuardResult.deny(
+                    result.get("reason", self.name),
+                    context=result.get("additionalContext", ""),
+                )
+        # Check python -c gate (feature: python_c_gate).
+        if cfg.feature("python_c_gate", "enabled"):
+            result = gate_python_c(ctx.tool_input)
+            if result is not None:
+                return GuardResult.deny(
+                    result.get("reason", self.name),
+                    context=result.get("additionalContext", ""),
+                )
         # Check SSH interactive gate
         result = gate_ssh_interactive(ctx.tool_input)
         if result is not None:

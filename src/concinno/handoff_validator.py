@@ -283,6 +283,7 @@ class HandoffGuard(BaseGuard):
     """PostToolUse: validate handoff file format on Write."""
 
     name = "handoff_guard"
+    feature_name = "handoff_format"
     category = GuardCategory.QUALITY
 
     def check(self, ctx: GuardContext) -> GuardResult | None:

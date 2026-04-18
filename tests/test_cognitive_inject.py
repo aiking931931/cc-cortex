@@ -385,3 +385,92 @@ class TestThreeLayerRouting:
         """L0 should contain the anti-guessing rule."""
         result = build_thinking_directives("minimal")
         assert "guess" in result.lower()
+
+
+class TestCognitivePoolIntegration:
+    """2.7.0 F1 regression — pool inject wired into build_cognitive_context.
+
+    Before 2.7.0 the import at line 446 targeted a module that did not
+    exist, so the ``try/except Exception`` swallowed the ImportError
+    and the entire cross-session pool was unreachable from subagent
+    injection. These three tests prove the happy path, the empty-pool
+    path, and the crash-fail-open path now all go through
+    ``cognitive_pool_inject.build_pool_context``.
+    """
+
+    def test_pool_injects_when_sections_available(self):
+        """Happy path: a pool with one section surfaces in the context."""
+        import time
+        from concinno.cache.cognitive_pool import CognitivePool
+
+        with tempfile.TemporaryDirectory() as td:
+            pool = CognitivePool(root=td)
+            pool.upsert_section(
+                title="session.blockers",
+                body="Wire pool inject before 2.7.0 ships.",
+                tags=("pin",),
+                now=time.time(),
+            )
+            # Patch the lazy-imported class at its source module so the
+            # default constructor inside build_pool_context hands back
+            # our temp-rooted pool instead of the real ~/.claude one.
+            with patch(
+                "concinno.cognitive_inject._load_learnings",
+                return_value=[],
+            ), patch(
+                "concinno.cache.cognitive_pool.CognitivePool",
+                return_value=pool,
+            ):
+                result = build_cognitive_context(
+                    task_prompt="pool inject wire",
+                    workspace="",
+                    agent_type="Explore",
+                )
+        assert "session.blockers" in result, \
+            f"Pool section missing from inject output:\n{result}"
+
+    def test_pool_empty_returns_no_pool_block(self):
+        """Empty pool: inject still succeeds, just omits the pool block."""
+        from concinno.cache.cognitive_pool import CognitivePool
+
+        with tempfile.TemporaryDirectory() as td:
+            pool = CognitivePool(root=td)
+            with patch(
+                "concinno.cognitive_inject._load_learnings",
+                return_value=[],
+            ), patch(
+                "concinno.cache.cognitive_pool.CognitivePool",
+                return_value=pool,
+            ):
+                result = build_cognitive_context(
+                    task_prompt="anything",
+                    workspace="",
+                    agent_type="Explore",
+                )
+        # Thinking directives always ship — just no pool marker.
+        assert "Cross-session pool" not in result
+        assert "CP" in result  # L0 directives present — fail-open works.
+
+    def test_pool_crash_is_fail_open(self):
+        """Pool load blows up → inject still returns a usable context."""
+
+        class _Broken:
+            def read_all(self):
+                raise RuntimeError("simulated pool corruption")
+
+        with patch(
+            "concinno.cognitive_inject._load_learnings",
+            return_value=[],
+        ), patch(
+            "concinno.cache.cognitive_pool.CognitivePool",
+            return_value=_Broken(),
+        ):
+            result = build_cognitive_context(
+                task_prompt="x",
+                workspace="",
+                agent_type="Explore",
+            )
+        # Must NOT raise; must NOT include a pool block; MUST return
+        # core thinking directives.
+        assert "Cross-session pool" not in result
+        assert "CP" in result

@@ -248,32 +248,38 @@ def handle_prompt_submit(
         - "deny": hook deny dict (if clarity gate rejects)
         - "contexts": list[str] of additionalContext fragments
     """
+    from concinno.core.config import get_config
     from concinno.insight_engine import check_insight
     from concinno.prompt_guard import (
         multi_question_injection,
         run_clarity_gate,
     )
 
-    # 1. TADS-3 clarity gate
-    deny = run_clarity_gate(user_prompt, prefs_path=prefs_path)
-    if deny:
-        return {"deny": deny}
+    cfg = get_config()
+
+    # 1. TADS-3 clarity gate — respect /hook clarity_gate off.
+    if cfg.feature("clarity_gate", "enabled"):
+        deny = run_clarity_gate(user_prompt, prefs_path=prefs_path)
+        if deny:
+            return {"deny": deny}
 
     contexts: list[str] = []
 
-    # 2. Multi-question checklist injection
-    mq = multi_question_injection(user_prompt)
-    if mq:
-        contexts.append(mq)
+    # 2. Multi-question checklist injection — gated by prompt_guard.
+    if cfg.feature("prompt_guard", "enabled"):
+        mq = multi_question_injection(user_prompt)
+        if mq:
+            contexts.append(mq)
 
-    # 3. Proactive Insight Engine
-    insight = check_insight(
-        user_prompt,
-        cache_dir=cache_dir,
-        session_id=session_id,
-    )
-    if insight:
-        contexts.append(insight)
+    # 3. Proactive Insight Engine — gated by insight_engine feature.
+    if cfg.feature("insight_engine", "enabled"):
+        insight = check_insight(
+            user_prompt,
+            cache_dir=cache_dir,
+            session_id=session_id,
+        )
+        if insight:
+            contexts.append(insight)
 
     # 4. FTRL-weighted learning injection (top corrections by recency × count)
     ftrl_ctx = _ftrl_learning_injection(cache_dir=cache_dir)

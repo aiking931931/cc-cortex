@@ -7,6 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-04-18
+
+Island-closing release. Agent Y's health audit caught three large
+modules that had been written but never wired to a consumer — the
+kind of silent debt that makes the "tests green" count lie. The user
+also filed two complaints in one session about silent AskUserQuestion
+dialogs. All four fixes land together with pinning regression tests
+so regressions show up loud.
+
+### Added
+
+- **F4 — AskUserQuestion toast notifier.** New
+  ``concinno.hooks.ask_user_toast`` module emits a Windows toast the
+  moment Claude opens an ``AskUserQuestion`` prompt so the operator
+  stops burning 10+ minutes of wall time on silently-waiting dialogs.
+  Registered as a dedicated ``PreToolUse`` hook with the
+  ``AskUserQuestion`` matcher so it doesn't toast on every tool call;
+  body preview is the first 60 chars of the question.
+  ``maybe_show_ask_user_toast`` catches every exception and still
+  ALLOWs — the hook never blocks a question from reaching the user.
+  13 new regression tests in ``tests/test_ask_user_toast.py``
+  covering matcher gating, preview truncation, fail-open on notify
+  crash / import failure, and the hook-protocol contract. Entry
+  point registered as ``concinno-ask-user-toast`` in
+  ``pyproject.toml`` and wired into ``settings.json`` via the CLI
+  installer's 3-tuple ``(filename, event, matcher)`` schema.
+- **Reusable Anthropic cache helper module
+  (``concinno.cache.anthropic_helpers``).** Exports
+  ``with_cache_control``, ``system_with_cache``, and
+  ``cache_breakpoint`` — a single blessed code path for applying
+  Anthropic prompt-cache breakpoints. Supports all five modes the
+  Sancio provider implements (``legacy`` / ``disabled`` / ``explicit``
+  / ``multiturn`` / ``length-guard``) with full index translation
+  (negative-from-end), content-shape handling (string → list-of-blocks
+  promotion, list → last-block mutation), and TTL validation
+  (``None`` / ``"5m"`` / ``"1h"``). Input messages are never mutated
+  so caller retry payloads stay clean. 27 new regression tests in
+  ``tests/test_anthropic_cache_helper.py`` including an identity-
+  across-calls test that pins cache position stability (the whole
+  reason a cache works).
+
+### Fixed
+
+- **F1 island — cognitive pool was written but never read.** ``1.16``
+  introduced ``concinno.cache.cognitive_pool`` as a cross-session /
+  cross-agent shared markdown store, and ``microcompact`` +
+  ``l2_distill`` wrote sections to it from day one. But
+  ``cognitive_inject.build_cognitive_context`` imported
+  ``concinno.cognitive_pool_inject`` inside a ``try/except Exception``
+  — and that module did not exist. The import silently failed on
+  every SubagentStart, so every red/blue CBUA run started from zero
+  shared cognition. Root cause: writer shipped before reader, import
+  guard made the gap invisible. Fix:
+  ``concinno.cognitive_pool_inject.build_pool_context`` now ships —
+  token-bounded (default 3 sections / ~900 tokens), relevance-ranked
+  against the incoming task prompt with a 3×-weighted title overlap
+  heuristic, recency-ordered fallback when the prompt is empty,
+  per-section body truncation at 1500 chars with a visible
+  ``[...truncated]`` marker. Fail-open: a broken pool file returns
+  ``""`` instead of breaking subagent spawn. Tests: 3 new integration
+  tests in ``tests/test_cognitive_inject.py``
+  (``TestCognitivePoolIntegration``) pin happy-path / empty-pool /
+  crash-fail-open through the public ``build_cognitive_context``
+  entry point, plus 19 focused tests in
+  ``tests/test_cognitive_pool_inject.py`` for the adapter itself.
+- **F2 island — ``/hook X off`` now actually stops the guard.**
+  ``FEATURE_META`` shipped with 33 feature entries but only 5-6
+  consulted ``cfg.feature(name, "enabled")`` at runtime. Users who
+  ran ``concinno config set boundary_guard enabled false`` saw the
+  JSON update and the guard keep running. Root cause: 2.x added
+  per-feature ``enabled`` keys to cc_config but only wired them into
+  the four flagship guards; the rest of the surface grew under a
+  "metadata-only" disclaimer that quietly calcified into a bug. Fix:
+  flag routed through two sinks — (a) **centralized pipeline
+  dispatch** (``GuardPipeline._feature_enabled`` looks up
+  ``guard.feature_name or guard.name`` in ``cc_config.json`` before
+  every ``check`` / ``on_post_tool`` / ``on_stop`` call, so every
+  ``BaseGuard`` subclass is wired in one commit); (b) **hook-level
+  direct calls** (``clarity_gate`` / ``prompt_guard`` /
+  ``insight_engine`` / ``streak_ux`` / ``session_summary`` /
+  ``delivery_gate`` / ``bash_background_gate`` / ``python_c_gate``
+  now read ``cfg.feature(..., "enabled")`` at their hook entry).
+  Seven guard classes whose ``name`` diverges from their feature key
+  (``ReadFirstGuard`` → ``read_first_gate``, ``LintGuard`` →
+  ``linting``, ``HijackGuard`` → ``hijack_gate``,
+  ``ConsecutiveFailGuard`` → ``consecutive_fail_gate``,
+  ``SentinelGuard`` → ``sentinel_gate``, ``PromptInjectionGuard`` →
+  ``prompt_guard``, ``AgentGateGuard`` → ``agent_cap``,
+  ``HandoffGuard`` → ``handoff_format``) declare
+  ``feature_name = "..."`` on the class. The stale "metadata-only"
+  disclaimer at the top of ``feature_config.py`` is replaced with an
+  accurate wiring table. Fail-open semantics preserved: a crashing
+  ``cfg.feature`` call treats the guard as enabled so a broken
+  config never silences a safety guard. Tests: 18 new regression
+  tests in ``tests/test_feature_enabled_wiring.py`` covering the
+  pipeline dispatch, ``feature_name`` overrides, pre/post/stop
+  pass-through, fail-open, and each divergent class pin.
+- **F3 island — Concinno-internal Anthropic calls now use prompt
+  caching.** Sancio's ``providers/anthropic.py`` has had
+  ``_cache_control()`` and full breakpoint logic for months, but
+  Concinno's own internal Anthropic callers never plugged in. Root
+  cause: logic lived in the consumer (``persona-api``), not in a
+  reusable Concinno module, so every other caller copy-pasted
+  nothing. Fix: five callsites now go through
+  ``concinno.cache.anthropic_helpers`` — ``escalation.py``
+  (Gemma→Haiku→Sonnet→Opus chain: legacy cache on first user turn +
+  ``system_with_cache``), ``llm_guard.py`` (explicit breakpoint at
+  index 0 so repeat safety checks hit warm cache), ``a2a/agent.py``
+  (same pattern), ``skills/public/agent/gaia_agent.py``
+  (``system_with_cache`` + legacy message cache for multi-step
+  agent loops), and ``skills/public/agent/eval_runner.py`` (explicit
+  cache on goal-parsing prompt reused across 100+ tasks). Expected
+  cache hit rate ≥80% once a chain or loop reaches its second call
+  within the 5-minute TTL window. Tests: 27 helper tests above
+  exercise every strategy / mode / edge case; the five callsites
+  import from a tested core.
+
+### Internal
+
+- ``GuardPipeline._is_disabled`` remains for backward compatibility
+  with third-party callers; new code paths use
+  ``_is_guard_active`` which combines health state + feature-enabled
+  into a single "should-this-guard-run" predicate.
+- ``BaseGuard`` gained a ``feature_name: str = ""`` class attribute
+  so guards whose ``name`` doesn't match the ``FEATURE_META`` key
+  can declare the mapping declaratively.
+- ``HOOK_EVENTS`` in ``concinno.cli.main`` switched from 2-tuples to
+  3-tuples ``(filename, event, matcher)`` so hooks with tool-specific
+  matchers (like ``ask-user-toast.py`` targeting
+  ``AskUserQuestion``) can register without hand-editing
+  ``settings.json``. Old 2-tuples still parse for any forks that
+  imported the list.
+
 ## [2.6.1] - 2026-04-18
 
 Hotfix ship — five bugs caught by the 2.6.0 S5 red/blue CBUA review

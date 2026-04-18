@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "2.6.1"
+version = "2.7.0"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
@@ -112,6 +112,7 @@ concinno-skills = "concinno.skills.installer:main"
 concinno-rag = "concinno.rag:cli_main"
 concinno-handoff-index = "concinno.handoff_index:main"
 concinno-handoff-tag = "concinno.handoff_auto_tag:main"
+concinno-ask-user-toast = "concinno.hooks.ask_user_toast:main"
 
 [tool.hatch.build.targets.sdist]
 include = ["src/concinno", "knowledge"]
