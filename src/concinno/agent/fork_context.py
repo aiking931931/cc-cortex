@@ -514,13 +514,17 @@ def insert_cache_breakpoints(
     Strategy — place markers at these prefix boundaries, in order of
     priority, until the budget is exhausted:
 
-      1. End of the last ``system`` / ``text`` block (the rendered
-         system prompt boundary)
-      2. End of the last block whose ``type`` is ``"tool"`` or
-         ``"tool_definition"`` (tool pool boundary)
+      1. End of the last block whose ``type`` is ``"tool"`` or
+         ``"tool_definition"`` (tool pool boundary — most stable
+         prefix across calls, placed first per Anthropic's prompt
+         caching best practices: cache tools earliest so even a
+         changing system prompt can still hit the tools prefix).
+      2. End of the last ``system`` / ``text`` block (the rendered
+         system prompt boundary — stable within a session but may
+         be rewritten between sessions).
       3. End of the last ``tool_result`` block (conversation replay
-         boundary, right before the per-child directive)
-      4. End of the last block regardless of type (final fallback)
+         boundary, right before the per-child directive).
+      4. End of the last block regardless of type (final fallback).
 
     The strategy is intentionally conservative: if the same boundary
     position is selected twice, the second attempt is skipped so
@@ -557,7 +561,14 @@ def insert_cache_breakpoints(
     )
     fallback_idx = len(blocks) - 1
 
-    candidate_order = [system_idx, tools_idx, history_idx, fallback_idx]
+    # F4 (2.7.1): tools-first priority. Previously this was
+    # [system_idx, tools_idx, ...] but Anthropic's prompt caching
+    # docs recommend caching the most stable prefix (tools) earliest
+    # so even a changing system prompt still hits the tools cache.
+    # Swapping the order does not change cap behaviour — with cap=2
+    # we now land on tools+system, with cap>=3 we include history as
+    # before.
+    candidate_order = [tools_idx, system_idx, history_idx, fallback_idx]
 
     chosen: list[int] = []
     for idx in candidate_order:

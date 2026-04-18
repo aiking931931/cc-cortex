@@ -40,3 +40,36 @@ def _destruction_gate_escape(
     )
     for flag in _ESCAPE_FLAGS:
         monkeypatch.setenv(flag, "1")
+
+
+# F8 (2.7.1): ship-default ``ux_injection=false`` gates every LLM-facing
+# UX inject site. Pre-existing tests were written when UX was always on
+# and assert that inject sites produce non-empty output. A dedicated
+# ``test_ux_gate.py`` verifies the gate itself and overrides this
+# fixture locally; everywhere else we force UX on so the legacy
+# behaviour under test is reachable.
+@pytest.fixture(autouse=True)
+def _enable_ux_injection_for_legacy_tests(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Enable ux_injection for every test except the UX-gate suite itself.
+
+    ``test_ux_gate.py`` owns the ship-default invariants and manages
+    the env var on each test; skipping it here prevents a fixture-
+    ordering fight between autouse fixtures.
+    """
+    module_file = (request.node.fspath.basename
+                   if hasattr(request.node, "fspath") else "")
+    if module_file in {
+        "test_ux_gate.py",
+        "test_config.py",  # owns config default invariants
+        "test_config_loader.py",  # owns config default invariants
+    }:
+        return
+    monkeypatch.setenv("CONCINNO_UX_INJECTION", "1")
+    try:
+        from concinno.cache import ux_gate
+        ux_gate.reset_cache()
+    except Exception:
+        pass

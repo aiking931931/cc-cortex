@@ -197,6 +197,18 @@ def build_pool_context(
         layer is supplementary; subagent injection MUST keep working
         even if the pool file is corrupt or the cache module is gone.
     """
+    # F8 (2.7.1): gate behind ux_injection. Cross-session pool context
+    # is pure UX supplement — safety never depends on it. Ship default
+    # (ux_injection=false) short-circuits to "" so the subagent starts
+    # fresh without AI-King-flavoured pool chatter leaking into
+    # anonymous PyPI downloaders' sessions.
+    try:
+        from concinno.cache.ux_gate import is_ux_enabled
+        if not is_ux_enabled():
+            return ""
+    except Exception:
+        pass
+
     try:
         if pool is None:
             from concinno.cache.cognitive_pool import CognitivePool
@@ -223,7 +235,17 @@ def build_pool_context(
         scored = [(score_section(s, query), s) for s in sections]
         scored.sort(key=lambda pair: (pair[0], pair[1].updated_ts), reverse=True)
         positive = [s for sc, s in scored if sc > 0]
-        ranked = positive if positive else [s for _, s in scored]
+        # F3 (2.7.1): Self-RAG gating. When the query yields zero
+        # positive-scoring sections we GATE the retrieval and return
+        # nothing. Previously we fell through to the full ranking by
+        # recency, which effectively ignored the query signal and
+        # injected stale cross-session memories into unrelated tasks.
+        # Self-RAG says: don't retrieve when you have no signal. The
+        # empty-query branch below keeps the explicit recency fallback
+        # for callers that deliberately pass ``task_prompt=""``.
+        if not positive:
+            return ""
+        ranked = positive
     else:
         ranked = sorted(sections, key=lambda s: s.updated_ts, reverse=True)
 

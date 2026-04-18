@@ -132,7 +132,16 @@ def test_build_pool_context_no_query_falls_back_to_recency(tmp_path: Path) -> No
 
 def test_build_pool_context_zero_score_query_falls_back(tmp_path: Path) -> None:
     """When no section overlaps the query, return the top-N by score
-    order anyway — better to inject something than nothing."""
+    order anyway — better to inject something than nothing.
+
+    F3 (2.7.1): this contract was REVERSED. When the query tokenises
+    cleanly but no section scores positive, Self-RAG says "do not
+    retrieve without signal" and we now return the empty string. Old
+    behaviour injected stale cross-session chatter into unrelated
+    subagent slots; new behaviour gates the retrieval. Explicit empty
+    queries (``task_prompt=""``) still use recency fallback — see
+    :func:`test_build_pool_context_no_query_falls_back_to_recency`.
+    """
     pool = CognitivePool(root=str(tmp_path))
     pool.upsert_section(title="alpha_section", body="alpha beta gamma delta epsilon", now=1.0)
     pool.upsert_section(title="zeta_section", body="zeta eta theta iota kappa", now=2.0)
@@ -140,9 +149,8 @@ def test_build_pool_context_zero_score_query_falls_back(tmp_path: Path) -> None:
 
     p2 = CognitivePool(root=str(tmp_path))
     out = build_pool_context(task_prompt="omega ultra mega", pool=p2)
-    # Both sections have zero score, should still surface at least one.
-    assert out
-    assert "alpha_section" in out or "zeta_section" in out
+    # F3 (2.7.1): zero-positive-score → gated to empty string.
+    assert out == ""
 
 
 # ── build_pool_context — budget caps ─────────────────────────

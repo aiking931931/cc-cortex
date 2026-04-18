@@ -230,6 +230,18 @@ class ThinkInjectGuard(BaseGuard):
         Returns:
             GuardResult.allow with prompt as context, or None.
         """
+        # F8 (2.7.1): gate behind ux_injection. Three-layer-thinking
+        # nudges and Read-before-Edit coaching are pure UX; ship default
+        # for anonymous PyPI downloaders is off. Safety guards (destruction,
+        # butterfly, exfil, secret-scan) run on different channels and are
+        # never gated here.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
+
         if not ctx.cache_dir:
             return None
 

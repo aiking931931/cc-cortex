@@ -3,16 +3,35 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-18 — 2.4.1 live）
+## 現況 snapshot（2026-04-18 — 2.7.0 live）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.4.1` — [PyPI page](https://pypi.org/project/concinno/2.4.1/)（upload 2026-04-17T12:55Z） |
-| `pyproject.toml` version | `2.4.1` |
-| `src/concinno/__init__.py __version__` | `2.4.1` |
-| CHANGELOG.md 最新 release heading | `## [2.4.1] - 2026-04-17` |
+| Registry latest (PyPI) | `2.7.0` — [PyPI page](https://pypi.org/project/concinno/2.7.0/)（upload 2026-04-18）|
+| `pyproject.toml` version | `2.7.0` |
+| `src/concinno/__init__.py __version__` | `2.7.0` |
+| CHANGELOG.md 最新 release heading | `## [2.7.0] - 2026-04-18` |
 | 三源對齊狀態 | ✅ |
-| 下一 publish 目標 | **`2.5.0`** WIP（`CHANGELOG.md [Unreleased]`：`python_exec` + `date_calc` builtin tools，GAIA/HAL 用）— 未 bump，等授權 |
+| 下一 publish 目標 | **`2.7.1`** hotfix（見 History 下方 2026-04-18 post-audit 項）：修 installer rmtree-on-symlink + cognitive_pool file lock + cognitive_pool_inject Self-RAG gating + cache breakpoint 順序 + AskUser hook timeout |
+
+### 2026-04-18 單日 release 軌跡
+
+- `2.5.0` live — WIP python_exec + date_calc builtin tools
+- `2.5.1` live — **security hotfix**: git filter-repo 清 HF token（`hf_cNhIEcsIkpr...` 3 處硬寫 fallback 在 `skills/public/agent/gaia_*.py`）+ force push 乾淨歷史
+- `2.6.0` live — FieldRead v2 metadata-first + `concinno.config` layered loader + `general-mode` skill rename（`competition-mode` 3 月 deprecation redirect）
+- `2.6.1` live — S3 紅隊 5 bug hotfix（F1 config.mode 裝飾品 / F2 atomic `_write_layer` / F3 `MappingProxyType _DEFAULT_CONFIG` / F4 `_BUILTIN_LOCALES` SSoT / H1 `expand()` workspace_root sandbox）
+- `2.7.0` live — 3 islands 接線（cognitive_pool_inject + 29 guard enabled wiring + Concinno Anthropic cache_control helper）+ AskUserQuestion toast hook（`~/.claude/settings.json` 註冊完成）
+
+### 2026-04-18 post-ship 5 Opus audit 發現
+
+紅藍 CBUA S5 發現真 bug（path 無關，2.7.1 修）：
+1. 🔴 `installer.py shutil.rmtree(dest)` 對 junction 無 `os.path.islink` 檢查 — follow symlink 砍用戶 repo（P0 資料遺失）
+2. 🔴 `cognitive_pool.save()` 無 file lock — 3 subagent 並行 stop 丟資料
+3. 🔴 `cognitive_pool_inject.py:225` score 全 0 也硬塞 top-3 — Self-RAG (Asai 2024) 反 pattern
+4. 🟠 `insert_cache_breakpoints` order 反（應 tools>system>messages per Anthropic docs）
+5. 🟠 `installer` non-Windows symlink silent-pass
+6. 🟠 `handoff_engine` 舊 `autonomous`/`save_token` value 無 alias mapping
+7. 🟠 AskUser hook `timeout=3s` Windows COM init 冷啟 2-5s 不夠
 
 ## WIP 變更清單（towards 2.5.0）
 

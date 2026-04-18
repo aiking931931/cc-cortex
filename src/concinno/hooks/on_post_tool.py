@@ -542,6 +542,15 @@ def _run_token_monitor(
     hook_data: dict, fragments: list[str],
 ) -> None:
     """Token monitor: 100K/140K/160K threshold warnings (real API data only)."""
+    # F8 (2.7.1): token-zone hint is pure UX — the hard handoff gate
+    # in handoff_engine.check_token_gate (Agent spawn deny) runs on
+    # its own PreToolUse channel and is unaffected.
+    try:
+        from concinno.cache.ux_gate import is_ux_enabled
+        if not is_ux_enabled():
+            return
+    except Exception:
+        pass
     try:
         from concinno.token_monitor import check_threshold
 

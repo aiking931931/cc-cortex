@@ -236,6 +236,16 @@ class WiredoGuard(BaseGuard):
 
     def check(self, ctx: GuardContext) -> Optional[GuardResult]:
         """Inject WIREDO checklist once per session per asset type."""
+        # F8 (2.7.1): gate behind ux_injection. The checklist is pure
+        # coaching; WiredoEnforcementGuard below handles the hard deny
+        # for missing WIREDO tables and is NOT gated here.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
+
         asset_type = _detect_task_type(ctx)
         if asset_type is None:
             return None

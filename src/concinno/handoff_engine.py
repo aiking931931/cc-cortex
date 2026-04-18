@@ -116,6 +116,35 @@ REMINDER_FILE_MIN = 3
 #     remove every interruption that costs scoreboard cycles.
 #
 HANDOFF_MODES = ("save-token", "phase", "full", "competition")
+
+# F6 (2.7.1): Legacy mode names some 2.5-era cc_config.json files still
+# carry on disk. Normalise them up-front so pre-existing installs keep
+# working after the rename. ``autonomous`` was the 2.5 name for the
+# ``full`` mode; ``save_token`` (with underscore) was an older spelling
+# of ``save-token``. Unknown legacy values fall through and the caller
+# degrades to the ship default.
+_LEGACY_MODE_ALIASES: dict[str, str] = {
+    "autonomous": "full",
+    "save_token": "save-token",
+}
+
+
+def _normalize_legacy_mode(raw: object) -> str | None:
+    """Map a raw legacy mode value to its canonical ``HANDOFF_MODES`` entry.
+
+    Returns ``None`` for non-string, unknown, or empty input so callers
+    can treat "no legacy opinion" the same way as "legacy file absent".
+    Canonical names already in ``HANDOFF_MODES`` pass through unchanged.
+    """
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw in HANDOFF_MODES:
+        return raw
+    return _LEGACY_MODE_ALIASES.get(raw)
+
 # Legacy constants — callers use _model_thresholds() at runtime
 _PHASE_GATE = 180_000
 _PHASE_REMINDER = 150_000
@@ -187,12 +216,10 @@ def _read_legacy_cc_config_mode() -> str | None:
         return None
     if not isinstance(cfg, dict):
         return None
-    mode = cfg.get("handoff_mode")
-    if mode is None:
-        return None
-    if mode in HANDOFF_MODES:
-        return mode
-    return None
+    # F6 (2.7.1): normalise legacy aliases (autonomous → full,
+    # save_token → save-token) so old cc_config.json files keep
+    # working after the rename.
+    return _normalize_legacy_mode(cfg.get("handoff_mode"))
 
 
 def _read_concinno_config_mode() -> str | None:
@@ -216,10 +243,11 @@ def _read_concinno_config_mode() -> str | None:
     if raw in _CONFIG_MODE_TO_HANDOFF:
         return _CONFIG_MODE_TO_HANDOFF[raw]
     # Power-user override: direct HANDOFF_MODES value written into
-    # concinno.config also honored, for symmetry with legacy.
-    if raw in HANDOFF_MODES:
-        return raw
-    return None
+    # concinno.config also honored, for symmetry with legacy. Legacy
+    # aliases (autonomous / save_token) are also normalised here (F6)
+    # so a user flipping between cc_config.json and concinno.config
+    # does not need to remember which spelling each layer accepts.
+    return _normalize_legacy_mode(raw)
 
 
 def get_handoff_mode() -> str:

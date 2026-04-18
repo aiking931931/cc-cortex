@@ -76,6 +76,17 @@ class IntentAnchorGuard(BaseGuard):
 
     def check(self, ctx: GuardContext) -> Optional[GuardResult]:
         """Periodic intent re-injection on write tools."""
+        # F8 (2.7.1): intent-anchor coaching is pure UX; ship default
+        # off for anonymous PyPI users. on_post_tool (state capture)
+        # stays unguarded so the invariant "if UX flips on mid-session
+        # we still have intent to anchor" holds.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
+
         if ctx.tool_name not in WRITE_TOOLS_EXT and ctx.tool_name != "Bash":
             return None
 

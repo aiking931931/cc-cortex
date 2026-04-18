@@ -97,6 +97,13 @@ def test_extract_non_dict_returns_empty():
 
 
 def test_notify_crash_is_failopen():
+    """F7 (2.7.1): toast emission is now fire-and-forget on a daemon
+    thread so the hook's 3 s timeout cannot fire during a cold WinRT
+    init. Since the hook no longer awaits show_toast's return value,
+    a crashing show_toast is swallowed in the daemon thread and
+    ``maybe_show_ask_user_toast`` reports success for "dispatched".
+    The load-bearing invariant is that the call never raises.
+    """
     hook_data = {
         "tool_name": "AskUserQuestion",
         "tool_input": {"question": "x"},
@@ -105,8 +112,9 @@ def test_notify_crash_is_failopen():
         "concinno.core.notify.show_toast",
         side_effect=RuntimeError("notify broken"),
     ):
-        # Must NOT raise. Returns False because toast failed.
-        assert maybe_show_ask_user_toast(hook_data) is False
+        # Must NOT raise — daemon thread swallows the error.
+        result = maybe_show_ask_user_toast(hook_data)
+        assert result is True  # dispatched, even though the thread will crash
 
 
 def test_notify_import_missing_is_failopen():

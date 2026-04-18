@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-04-18
+
+Hotfix release immediately following 2.7.0. Five Opus audit agents +
+the user's own spec review caught seven real bugs in the 2.7.0 island-
+closing work plus one un-landed spec item (``ux_injection`` config key
+from MEMORY #61 D6). All eight land together with pinning regression
+tests so the classes of bug never reappear.
+
+### Added
+
+- **F8 — ``ux_injection`` config key (MEMORY #61 D6).** New
+  ``ux_injection`` entry in ``concinno.config._DEFAULT_CONFIG``,
+  locked to ``False`` at ship time. When disabled (ship default)
+  every LLM-facing UX inject site — CBUA pipeline markers (B1/C1/
+  U1/A4/A5), WIREDO checklists, Read:Edit warnings, token-zone
+  hints, three-layer thinking injects, cognitive anchors, intent
+  anchors, cross-session pool context, and the ``cognitive_inject``
+  thinking-directives router — silently returns the empty string /
+  ``None`` and never reaches the subagent. Safety layer (destruction,
+  butterfly, boundary, exfil, secret-scan, ``WiredoEnforcementGuard``
+  deny, ``handoff_engine`` token gate Agent deny) is **not** gated
+  and continues to fire. AI King's own machine sets the flag via
+  ``concinno config set ux_injection true`` in the user layer; the
+  ``CONCINNO_UX_INJECTION=1`` env var is a one-shot operator override
+  that wins over every layer. New ``concinno.cache.ux_gate`` helper
+  module exposes ``is_ux_enabled`` / ``reset_cache`` / ``CONCINNO_UX_ENV``
+  as the single blessed gating call site; inject modules guard with a
+  three-line ``try / if not is_ux_enabled() / except Exception`` so a
+  broken config degrades to "no UX" rather than poisoning the pipeline.
+  New regression tests in ``tests/test_ux_gate.py``.
+
+### Fixed
+
+- **F1 — ``installer.py`` rmtree could follow symlinks into user
+  repos.** ``shutil.rmtree(dest_dir)`` on Linux/macOS follows
+  symlinks, and on Windows silently follows NTFS directory junctions
+  (``os.path.islink`` returns False for junctions per bpo-37834).
+  A user who had symlinked ``~/.claude/skills/public/<skill>`` to
+  their personal Skill development workspace would see
+  ``concinno-install-skills`` wipe the source tree. The fix splits
+  the destination probe into ``islink → os.unlink`` (link target
+  untouched) and ``isdir → rmtree`` (real directory still replaced),
+  plus a new ``_is_windows_junction`` helper that reads the
+  reparse-point attribute off ``os.lstat`` on win32. New regression
+  tests in ``tests/test_installer_symlink_safety.py``.
+- **F2 — ``CognitivePool.save`` silently last-write-wins under
+  concurrent writers.** The 2.7.0 save path was a simple
+  ``tmp → replace`` sequence with no external locking. Two Claude
+  Code sessions (or a session + a subagent) upserting different
+  titles could both load an empty pool, both save their single
+  section, and the later replace would drop the earlier writer's
+  memory. ``upsert_section`` / ``remove_section`` / ``clear`` /
+  ``prune_stale`` now wrap the read-modify-write cycle in a
+  cross-platform advisory lock (``msvcrt.locking`` on win32,
+  ``fcntl.flock`` on POSIX) held against a sibling ``.lock`` file
+  so readers never contend, and reload the on-disk state inside
+  the lock before persisting. New regression tests in
+  ``tests/test_cognitive_pool_concurrent.py``.
+- **F3 — ``cognitive_pool_inject`` violated Self-RAG with zero-score
+  fallback.** When the task prompt tokenised into words that matched
+  no pool section title or body, the module fell through to
+  ``ranked = [s for _, s in scored]`` — recency-sorted whole pool —
+  and injected unrelated cross-session chatter into the subagent's
+  primacy slot. Self-RAG says: gate the retrieval when you have no
+  signal. The zero-positive-score branch now returns ``""`` outright.
+  Explicit empty queries (``task_prompt=""``) still fall back to
+  recency so callers that deliberately ask for "whatever's fresh"
+  keep working. New regression tests in
+  ``tests/test_cognitive_pool_inject_gating.py``.
+- **F4 — ``insert_cache_breakpoints`` prioritised system over tools.**
+  2.7.0 used ``[system_idx, tools_idx, history_idx, fallback_idx]``.
+  Anthropic's prompt caching best practices recommend caching the
+  most stable prefix first so a changing system prompt still hits
+  the tools cache. The order is now ``[tools_idx, system_idx,
+  history_idx, fallback_idx]``. With ``max_breakpoints=2`` markers
+  land on tools + system (previously system + tools); with cap 3+
+  the history marker position is unchanged. New regression tests
+  in ``tests/test_fork_context_cache_order.py``.
+- **F5 — ``installer.py`` swallowed junction-creation failures
+  silently.** The ``try/except (OSError, CalledProcessError): pass``
+  around ``_ensure_junction`` hid failures behind "skill installed
+  but not discoverable" mysteries. The except block now writes a
+  formatted warning line to ``sys.stderr`` so operators see the
+  failure immediately.
+- **F6 — ``handoff_engine`` silently dropped legacy mode values.**
+  Pre-2.5 ``cc_config.json`` files carrying ``handoff_mode:
+  autonomous`` or ``handoff_mode: save_token`` (underscore) were
+  not in ``HANDOFF_MODES`` and fell through to the phase ship
+  default, silently changing behaviour for long-standing installs.
+  A new ``_LEGACY_MODE_ALIASES`` map + ``_normalize_legacy_mode``
+  helper normalises ``autonomous → full`` and ``save_token →
+  save-token`` before validation; canonical values pass through
+  unchanged and unknown values still fall to the default. New
+  regression tests in ``tests/test_handoff_engine_legacy_alias.py``.
+- **F7 — ``ask_user_toast`` hook could exceed its 3 s timeout on
+  cold WinRT init.** The synchronous ``show_toast`` call chain
+  blocks 2-5 seconds on the first toast in a fresh session while
+  Windows initialises COM/WinRT. The hook's settings.json timeout
+  is 3 seconds and would fire mid-toast, killing the subprocess
+  and the AskUserQuestion would silently never notify the operator.
+  The toast emission is now dispatched onto a daemon
+  ``threading.Thread`` so the hook's main body returns its ALLOW
+  decision in milliseconds while the WinRT pipeline finishes in
+  the background. The hook's 3 s timeout is no longer load-bearing
+  for toast delivery; existing ``test_ask_user_toast.py`` coverage
+  continues to pass without modification.
+
 ## [2.7.0] - 2026-04-18
 
 Island-closing release. Agent Y's health audit caught three large

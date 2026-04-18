@@ -48,10 +48,28 @@ import hashlib
 import logging
 import os
 import re
+import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+# F2 (2.7.1): Cross-platform advisory lock for upsert_section read-
+# modify-write cycles. Windows uses ``msvcrt.locking`` on an exclusive
+# lock file handle; POSIX uses ``fcntl.flock`` (LOCK_EX). Both are
+# advisory — cooperating writers honour them, hostile writers still
+# win. That matches the concurrency model we actually have: multiple
+# Claude Code sessions / subagents in the same user context writing
+# the same pool file. We do NOT try to protect against a user ``vi``-
+# ing the pool concurrently — that was already outside the design
+# contract in 2.7.0 and stays outside now.
+if sys.platform == "win32":
+    import msvcrt  # noqa: F401  # used only on win32 branch
+    _HAVE_FCNTL = False
+else:
+    import fcntl  # noqa: F401  # used only on POSIX branch
+    _HAVE_FCNTL = True
 
 logger = logging.getLogger("concinno.cache.cognitive_pool")
 
@@ -129,6 +147,60 @@ _HEADER_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Default-root resolution
 # ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _pool_file_lock(lock_path: Path):
+    """Cross-platform advisory exclusive lock on ``lock_path``.
+
+    Yields once the lock is acquired; releases on context exit even
+    when the wrapped block raises. We lock a sibling ``*.lock`` file
+    rather than the pool file itself so a concurrent reader calling
+    :func:`Path.read_text` never contends with a writer's lock handle.
+
+    Windows branch: ``msvcrt.locking(fh, LK_LOCK, 1)`` takes a
+    blocking exclusive lock on byte 0 of the lock file. ``LK_LOCK``
+    retries ~10 times at 1-second intervals, then raises ``OSError``.
+    POSIX branch: ``fcntl.flock(fh, LOCK_EX)`` blocks until the lock
+    is available; no artificial retry cap.
+
+    Degradation: if lock acquisition raises (Windows 10-retry ceiling
+    or EIO on POSIX) we re-raise so the caller's save() surfaces the
+    failure rather than silently corrupting the pool. Callers that
+    want fail-soft semantics should wrap the whole save() call.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # 'a+b' opens the lock file for exclusive lock, creating on demand,
+    # without truncating a peer writer's handle.
+    fh = open(lock_path, "a+b")  # noqa: SIM115 — manual lifecycle
+    try:
+        if sys.platform == "win32":
+            # Seek to byte 0 so the lock range is well-defined; lock
+            # one byte (the file may be empty — locking() is happy to
+            # lock past EOF on Windows).
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    # LK_UNLCK can race with process exit on Windows;
+                    # close() below still releases the OS lock.
+                    pass
+        else:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+    finally:
+        fh.close()
 
 
 def _default_root() -> Path:
@@ -338,6 +410,13 @@ class CognitivePool:
         self._default_ttl_s = default_ttl_s
         self._sections: list[PoolSection] = []
         self._loaded = False
+
+    # ---- locking ------------------------------------------------------
+
+    def _lock_path(self) -> Path:
+        """Sibling lock file so readers never contend for the pool handle."""
+        pool = self.pool_path()
+        return pool.with_suffix(pool.suffix + ".lock")
 
     # ---- configuration accessors --------------------------------------
 
@@ -668,7 +747,6 @@ class CognitivePool:
         Returns the (possibly truncated) :class:`PoolSection` actually
         stored.
         """
-        self._ensure_loaded()
         normalized = _normalize_title(title)
         section_id = self.compute_section_id(normalized)
         when = now if now is not None else time.time()
@@ -676,46 +754,52 @@ class CognitivePool:
         body_final = self._truncate_body(body_clean)
         tags_t = tuple(t for t in tags if t)
 
-        # Existing?
-        for idx, existing in enumerate(self._sections):
-            if existing.section_id != section_id:
-                continue
-            updated = PoolSection(
+        # F2 (2.7.1): serialise read-modify-write under an advisory
+        # file lock so two concurrent writers cannot last-write-wins
+        # each other. We *reload* the on-disk state inside the lock
+        # so a sibling writer's fresh section survives our upsert.
+        with _pool_file_lock(self._lock_path()):
+            self.load()
+
+            for idx, existing in enumerate(self._sections):
+                if existing.section_id != section_id:
+                    continue
+                updated = PoolSection(
+                    section_id=section_id,
+                    title=normalized,
+                    body=body_final,
+                    tags=tags_t,
+                    created_ts=existing.created_ts,
+                    updated_ts=when,
+                    ttl_s=ttl_s,
+                )
+                self._sections[idx] = updated
+                self.save()
+                return updated
+
+            # New section — enforce capacity.
+            if len(self._sections) >= self._max_sections:
+                self._evict_one_stale(now=when)
+                if len(self._sections) >= self._max_sections:
+                    msg = (
+                        f"cognitive pool is full "
+                        f"({len(self._sections)}/{self._max_sections}) "
+                        f"and no stale sections are available for eviction"
+                    )
+                    raise PoolFull(msg)
+
+            fresh = PoolSection(
                 section_id=section_id,
                 title=normalized,
                 body=body_final,
                 tags=tags_t,
-                created_ts=existing.created_ts,
+                created_ts=when,
                 updated_ts=when,
                 ttl_s=ttl_s,
             )
-            self._sections[idx] = updated
+            self._sections.append(fresh)
             self.save()
-            return updated
-
-        # New section — enforce capacity.
-        if len(self._sections) >= self._max_sections:
-            self._evict_one_stale(now=when)
-            if len(self._sections) >= self._max_sections:
-                msg = (
-                    f"cognitive pool is full "
-                    f"({len(self._sections)}/{self._max_sections}) "
-                    f"and no stale sections are available for eviction"
-                )
-                raise PoolFull(msg)
-
-        fresh = PoolSection(
-            section_id=section_id,
-            title=normalized,
-            body=body_final,
-            tags=tags_t,
-            created_ts=when,
-            updated_ts=when,
-            ttl_s=ttl_s,
-        )
-        self._sections.append(fresh)
-        self.save()
-        return fresh
+            return fresh
 
     def _strip_footer_collisions(self, body: str) -> str:
         """Remove any literal :data:`SECTION_FOOTER` lines from ``body``.
@@ -779,22 +863,28 @@ class CognitivePool:
         matching section existed. Persists on success. Removing a
         stale section is allowed — the stale filter only affects
         reads.
+
+        F2 (2.7.1): wrapped in the same advisory lock as
+        :meth:`upsert_section` so the section list cannot be reshuffled
+        between load and save by a parallel writer.
         """
-        self._ensure_loaded()
         normalized = _normalize_title(title)
         section_id = self.compute_section_id(normalized)
-        for idx, existing in enumerate(self._sections):
-            if existing.section_id == section_id:
-                del self._sections[idx]
-                self.save()
-                return True
-        return False
+        with _pool_file_lock(self._lock_path()):
+            self.load()
+            for idx, existing in enumerate(self._sections):
+                if existing.section_id == section_id:
+                    del self._sections[idx]
+                    self.save()
+                    return True
+            return False
 
     def clear(self) -> None:
         """Drop all sections and persist an empty pool."""
-        self._ensure_loaded()
-        self._sections = []
-        self.save()
+        with _pool_file_lock(self._lock_path()):
+            self._loaded = True
+            self._sections = []
+            self.save()
 
     # ---- pruning ------------------------------------------------------
 
@@ -803,19 +893,23 @@ class CognitivePool:
 
         Persists only when at least one section was actually removed.
         Passing ``now`` lets tests force a specific wall-clock.
+
+        F2 (2.7.1): advisory-locked so a concurrent upsert cannot
+        resurrect the sections this call decided to evict.
         """
-        self._ensure_loaded()
         when = now if now is not None else time.time()
-        before = len(self._sections)
-        self._sections = [
-            s
-            for s in self._sections
-            if not s.is_stale(now=when, default_ttl_s=self._default_ttl_s)
-        ]
-        removed = before - len(self._sections)
-        if removed > 0:
-            self.save()
-        return removed
+        with _pool_file_lock(self._lock_path()):
+            self.load()
+            before = len(self._sections)
+            self._sections = [
+                s
+                for s in self._sections
+                if not s.is_stale(now=when, default_ttl_s=self._default_ttl_s)
+            ]
+            removed = before - len(self._sections)
+            if removed > 0:
+                self.save()
+            return removed
 
     # ---- stats --------------------------------------------------------
 

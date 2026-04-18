@@ -56,6 +56,17 @@ _DEFAULT_CONFIG: MappingProxyType[str, Any] = MappingProxyType({
     "locale": "en",  # en | zh-TW | ja | ko | fr | de | es
     "auto_compact": True,  # auto-compact on ctx threshold
     "memory_file_enabled": True,
+    # ux_injection (MEMORY #61 D6, 2.7.1): gate for all LLM-facing UX
+    # hints — CBUA pipeline markers, WIREDO checklists, streak counters,
+    # Read:Edit warnings, token-zone hints, three-layer thinking injects,
+    # cognitive anchors, and every other additionalContext "coach signal".
+    # Ship default is ``False`` so anonymous PyPI downloaders do NOT see
+    # AI King's personal coaching tone — they see only safety guards
+    # (deny / warn / rewrite) and the tool calls themselves. AI King's
+    # own machine sets ``concinno config set ux_injection true`` in the
+    # user layer. The safety layer (deny/warn/rewrite paths) is NEVER
+    # gated by this flag — it only gates supplementary UX context.
+    "ux_injection": False,
 })
 
 _VALID_MODES: frozenset[str] = frozenset({"general", "handoff"})
@@ -68,7 +79,9 @@ _VALID_MODES: frozenset[str] = frozenset({"general", "handoff"})
 _VALID_LOCALES: frozenset[str] = frozenset(
     {"en", "zh-TW", "ja", "ko", "fr", "de", "es"},
 )
-_BOOL_KEYS: frozenset[str] = frozenset({"auto_compact", "memory_file_enabled"})
+_BOOL_KEYS: frozenset[str] = frozenset({
+    "auto_compact", "memory_file_enabled", "ux_injection",
+})
 _SCHEMA_VERSION: int = 1
 
 # Env var prefix and keys that are read through env overrides.

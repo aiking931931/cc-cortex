@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from typing import Any
 
 __all__ = ["main", "maybe_show_ask_user_toast"]
@@ -106,12 +107,34 @@ def maybe_show_ask_user_toast(hook_data: dict) -> bool:
         except Exception:  # noqa: BLE001 — fail-open
             return False
 
-        return bool(show_toast(
-            title=_TOAST_TITLE,
-            message=message,
-            tag=_TOAST_TAG,
-            group=_TOAST_GROUP,
-        ))
+        # F7 (2.7.1): detach toast emission onto a daemon thread so
+        # the hook's 3s settings.json timeout cannot fire during a
+        # cold Windows COM / WinRT initialisation (2-5s on first
+        # call in a fresh session). The AskUserQuestion still reaches
+        # the user synchronously via the ALLOW decision below; the
+        # toast is pure notification side-effect and can arrive a
+        # beat later. Returning ``True`` before the thread finishes
+        # matches the hook protocol — the boolean is for test
+        # instrumentation only.
+        def _fire() -> None:
+            try:
+                show_toast(
+                    title=_TOAST_TITLE,
+                    message=message,
+                    tag=_TOAST_TAG,
+                    group=_TOAST_GROUP,
+                )
+            except Exception:
+                # Daemon thread swallows errors — toast failure must
+                # never tombstone the interpreter.
+                pass
+
+        threading.Thread(
+            target=_fire,
+            name="concinno-ask-user-toast",
+            daemon=True,
+        ).start()
+        return True
     except Exception:  # noqa: BLE001 — fail-open
         return False
 

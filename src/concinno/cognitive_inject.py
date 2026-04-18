@@ -403,6 +403,18 @@ def build_cognitive_context(
         agent_type: Subagent type (empty for parent session).
         cognition_depth: Override from subagent identity assignment.
     """
+    # F8 (2.7.1): gate behind ux_injection. This is the router for the
+    # thinking-directives + RAG + delivery UX block that lands in a
+    # subagent's primacy slot; it is NOT safety. Anonymous PyPI users
+    # (ship default: ux_injection=false) see an empty string here and
+    # the subagent starts with only the workspace ctx block.
+    try:
+        from concinno.cache.ux_gate import is_ux_enabled
+        if not is_ux_enabled():
+            return ""
+    except Exception:
+        pass
+
     sections: list[str] = []
 
     # Determine complexity: identity-driven > agent_type > C0Router > parent

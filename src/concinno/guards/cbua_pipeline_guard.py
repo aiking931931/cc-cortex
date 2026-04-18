@@ -274,6 +274,17 @@ class CbuaPipelineGuard(BaseGuard):
         All state mutations happen inside StateStore.read_modify_write
         to prevent concurrent-subprocess data loss.
         """
+        # F8 (2.7.1): gate behind ux_injection. CBUA markers are pure
+        # coaching — safety guards run through a different code path
+        # (destruction_guard / butterfly_guard / boundary_guard) and
+        # are never gated here. Ship default (ux_injection=false) →
+        # anonymous PyPI users never see the B1/C1/U1 markers.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
         # Competition mode: silence reminders and skip state bookkeeping.
         # Benchmark/bounty iterations explicitly waive cognitive anchors;
         # see handoff_engine.HANDOFF_MODES.

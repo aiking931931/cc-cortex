@@ -218,6 +218,16 @@ class CognitiveAnchorGuard(BaseGuard):
 
     def check(self, ctx: GuardContext) -> Optional[GuardResult]:
         """Inject gas-state anchoring on high-risk operations."""
+        # F8 (2.7.1): gas-state anchoring is pure UX coaching; safety
+        # layer (destruction_guard, butterfly_guard) handles the real
+        # deny/warn paths and is never gated here.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
+
         if not ctx.cache_dir:
             return None
         if ctx.tool_name not in WRITE_TOOLS_EXT and ctx.tool_name != "Bash":

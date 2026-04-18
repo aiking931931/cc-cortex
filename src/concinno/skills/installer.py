@@ -111,23 +111,62 @@ def install_skills(target_dir: str | None = None) -> list[str]:
     # Directory-bundled Skills — copied whole from the bundled public/
     # tree (src/concinno/skills/public/<name>/) into the consumer's
     # <target>/public/<name>/, then junctioned from the skills root.
+    #
+    # F1 (2.7.1): Previously this called ``shutil.rmtree(dest_dir)``
+    # when a destination existed, which on POSIX follows symlinks and
+    # on Windows follows junctions. If a user had manually symlinked
+    # ``<target>/public/<name>`` to their personal workspace repo
+    # (e.g. for live Skill development) the rmtree would wipe the
+    # target. We now unlink links and only recurse into real dirs.
     src_public = SKILLS_DIR / "public"
     if src_public.is_dir():
         for entry in sorted(src_public.iterdir()):
             if not entry.is_dir():
                 continue
             dest_dir = os.path.join(public_dir, entry.name)
-            if os.path.isdir(dest_dir):
+            if os.path.islink(dest_dir) or _is_windows_junction(dest_dir):
+                # Unlink the link itself. os.unlink handles symlinks
+                # on POSIX and Windows (NTFS junction) alike.
+                try:
+                    os.unlink(dest_dir)
+                except OSError:
+                    # Best-effort: skip this skill rather than clobber
+                    # whatever the link resolves to.
+                    continue
+            elif os.path.isdir(dest_dir):
                 shutil.rmtree(dest_dir)
             shutil.copytree(str(entry), dest_dir)
             installed.append(dest_dir)
             junction = os.path.join(target_dir, entry.name)
             try:
                 _ensure_junction(junction, dest_dir)
-            except (OSError, subprocess.CalledProcessError):
-                pass
+            except (OSError, subprocess.CalledProcessError) as exc:
+                # F5 (2.7.1): surface the failure instead of silent-pass.
+                sys.stderr.write(
+                    f"warning: failed to create junction at "
+                    f"{junction!r} → {dest_dir!r}: {exc}\n",
+                )
 
     return installed
+
+
+def _is_windows_junction(path: str) -> bool:
+    """Return True if ``path`` is a Windows NTFS directory junction.
+
+    Junctions are reparse points that behave like directory symlinks
+    but are NOT detected by :func:`os.path.islink` on Windows Python
+    (see https://bugs.python.org/issue37834). We probe via
+    :func:`os.lstat` for the reparse-point attribute on Windows,
+    returning False everywhere else.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        st = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    # FILE_ATTRIBUTE_REPARSE_POINT = 0x400 on Windows.
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
 
 
 def main() -> None:
