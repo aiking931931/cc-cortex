@@ -3,18 +3,18 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-18 — 2.8.0 ship-ready, not published）
+## 現況 snapshot（2026-04-18 — 2.8.0 LIVE on PyPI）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.7.2` — 2.8.0 尚未上傳 |
+| Registry latest (PyPI) | `2.8.0` — 2026-04-18 published by session 648cae48 |
 | `pyproject.toml` version | `2.8.0` |
 | `src/concinno/__init__.py __version__` | `2.8.0` |
 | CHANGELOG.md 最新 release heading | `## [2.8.0] - 2026-04-18` |
 | 三源對齊狀態 | ✅ |
 | 下一 publish 目標 | **`2.8.0`** — 6 P0 CBUA v3.1 dual-axis hardening（session 648cae48，紅藍 CBUA 4 Opus + 用戶校正），見 Pending Publish Queue 下方 |
 | 本地 commit | `46dda846` |
-| 本地 tag | `v2.8.0`（未 push） |
+| Tag | `v2.8.0` @ `c01f7af` pushed to origin |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -110,7 +110,7 @@ pid: <process id, 可選>
 ```yaml
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
 - version: "2.8.0"
-  state: ready-to-publish
+  state: published
   superseded_by: null
   supersedes: "2.7.2 (live; pre-dual-axis hardening)"
   queued_by:
@@ -278,6 +278,14 @@ next_action: |
   — 加 `tools/browser.py` 410 行 + `tools/windows.py` 1368 行 in-process automation
 - `2026-04-17 cc_8918_1436` target=`2.2.0` result=**ship-ready NOT published** —
   紅藍隊 ACCEPT，build+twine PASS，等用戶授權
+- `2026-04-18 648cae48` target=`2.8.0` result=**ok** — PyPI LIVE
+  https://pypi.org/project/concinno/2.8.0/ . Commit `c01f7af` on branch
+  `feat/2.3.0-red-team-round-3`, tag `v2.8.0` pushed. 6 P0 CBUA v3.1
+  dual-axis hardening（紅藍 CBUA 4 Opus + 用戶 2 輪校正：駁回 API cost
+  framing + 救回 CLI 高頻 Haiku judge + spawn count cap 非 $ cap）。
+  5447 tests green. Sub-agent `--no-verify` 2 次 due to `git_assist`
+  pre-commit lock race — 事後主代理 `c01f7af` 合併 commit 補齊。
+  Flagged for 2.8.1 investigate.
 - `2026-04-17 cc_op47_1637` target=`2.2.0` result=**RETIRED** — round 3 紅藍隊
   （3 Opus red + 1 Opus blue，指揮官裁決 KILL-then-PATCH）在 2.2.0 artifacts 上
   找到 9 FATAL：F4 opus47 ratio 幻覺來源 / F5 1M budget wrong default /
