@@ -58,8 +58,26 @@ def _load_locale_file(locale: str) -> tuple[dict[str, str], dict[str, list[str]]
 
 
 def _resolve_display_locale() -> str:
-    """Read CC_UX_LANG env var → normalize to locale key."""
-    raw = os.environ.get("CC_UX_LANG", _DEFAULT_LOCALE).strip()
+    """Resolve display locale from layered config → normalize to locale key.
+
+    Priority (first non-empty wins):
+      1. ``CC_UX_LANG`` env var (legacy — kept for back-compat with Skills that
+         export it).
+      2. :func:`concinno.config.get("locale")` (new canonical path — reads the
+         four-layer stack env > project > user > default).
+      3. ``_DEFAULT_LOCALE`` as a last-resort safety net if config import fails.
+    """
+    raw: str = os.environ.get("CC_UX_LANG", "").strip()
+    if not raw:
+        try:
+            from concinno.config import get as _cfg_get
+
+            raw = str(_cfg_get("locale")).strip()
+        except Exception:
+            raw = _DEFAULT_LOCALE
+    if not raw:
+        raw = _DEFAULT_LOCALE
+
     # Normalize: "zh-TW" → "zh_TW", "zh" → "zh_TW", "en" → "en"
     normalized = raw.replace("-", "_")
     if normalized in ("zh", "zh_TW", "zh_tw"):

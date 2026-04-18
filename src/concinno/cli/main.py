@@ -1392,6 +1392,10 @@ def main() -> None:
     )
     p_evolve.set_defaults(func=cmd_evolve)
 
+    # config — layered user/project/env config for mode, locale, flags
+    from .config_cmd import register as _register_config
+    _register_config(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)

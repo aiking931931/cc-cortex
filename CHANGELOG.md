@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-04-18
+
+Three-layer config system, FieldRead metadata-first redesign, and a
+handful of plumbing fixes discovered during the 2.5.x security
+postmortem. Ship default locked to `mode=general + locale=en` so
+anyone `pip install concinno` gets the globally sensible defaults;
+AI King's local preferences (zh-TW + handoff mode) now live in
+`~/.concinno/config.json` and no longer leak into the source tree.
+
+### Added
+
+- **`concinno.config`** — layered config loader (env > project > user
+  > package default). Priorities: `CONCINNO_<KEY>` env var
+  > `<cwd>/.concinno/config.json` > `~/.concinno/config.json` > source
+  `_DEFAULT_CONFIG = {"mode": "general", "locale": "en",
+  "auto_compact": True, "memory_file_enabled": True}`. Validated
+  against `_VALID_MODES = {general, handoff}` and `_VALID_LOCALES =
+  {en, zh-TW, ja, ko, fr, de, es}`. `load()` never raises — malformed
+  user config falls back to defaults with a stderr warning so a
+  corrupt JSON file can't brick the library for a downstream agent.
+  23 regression tests including two invariant locks on the ship
+  defaults.
+- **`concinno config` CLI subcommand** — `concinno config` (show
+  merged + per-key source), `get <key>`, `set <key> <value>` (writes
+  user layer), `set --project <key> <value>`, `unset <key>`, `path`.
+  Replaces the ad-hoc "set an env var and hope" workflow.
+- **Layer-aware `i18n._resolve_display_locale()`** — now consults
+  `concinno.config.get("locale")` before falling back. Legacy
+  `CC_UX_LANG` env var still honored as the top-priority override for
+  back-compat.
+- **`general-mode` Skill** (`.claude/skills/general-mode/`) — the
+  PyPI ship default documented as its own Skill. Triggers on
+  "general" / "一般" / "normal" / "預設" / "standard".
+- **FieldRead v2 (metadata-first)** —
+  `concinno.field_read.ElidedSection` + `FieldReadResult` + new
+  `read_handoff_fields_v2` / `read_memory_fields_v2` /
+  `build_field_context_v2` / `expand(source_path, section_id)`
+  functions. Output now includes `sections_kept`, `sections_elided`
+  (each with `id`, `heading`, `lines`, `gist`, `confidence`),
+  overall `confidence`, and an `expand_hint` string so the LLM can
+  see what was trimmed and call `expand()` when user references an
+  elided topic. Closes the "cognitive desync" gap documented in
+  MEMORY #15 — the reader no longer has to guess whether important
+  content was silently dropped. Legacy `read_handoff_fields` /
+  `read_memory_fields` / `build_field_context` still return `str`
+  (they delegate to the v2 functions and extract `.content`), so
+  every existing call site keeps working bytewise-unchanged.
+  36 new tests covering the v2 API plus 4 dedicated backward-compat
+  tests asserting `legacy_output == v2_result.content`.
+
+### Changed
+
+- **`competition-mode` Skill renamed to `general-mode`** — the old
+  name framed Concinno as a benchmark/competition tool, which is
+  wrong: the ship default targets the general LLM-usage workflow
+  (context runs to the limit, auto-compacts, memory files, new
+  conversations). `competition-mode/SKILL.md` is now a thin
+  deprecation redirect that will be removed three months from today
+  (2026-07-18). Migration: anywhere you see `competition-mode`,
+  swap to `general-mode`.
+- **Honest `mode` / `locale` semantics** —
+  `_DEFAULT_CONFIG["mode"] = "general"` is intentionally pinned at
+  the source level. AI King's personal preferences (zh-TW +
+  `handoff` mode for the structured-handoff workflow) live in
+  `~/.concinno/config.json`, never in package source. The invariant
+  is now enforced by
+  `tests/test_config_loader.py::TestShipDefaults` so a stray
+  `mode=handoff` or `locale=zh-TW` in source fails CI.
+
+### Fixed
+
+- **`tests/test_scheduler.py::test_install_skills`** — pre-existing
+  failure that predated this release (the installer now returns a
+  directory path for `general-mode` style bundled Skills, and the
+  assertion was still checking for `SKILL.md` as the final path
+  component). Now asserts `isdir(path)` and `(path / "SKILL.md").exists()`.
+
+### Migration notes
+
+- **For PyPI consumers**: nothing to do. Default behaviour is
+  unchanged (English output, general mode). New config module is
+  opt-in.
+- **For AI King / AI King's friends who already use Concinno**:
+  create `~/.concinno/config.json` via
+  `concinno config set mode handoff && concinno config set locale zh-TW`
+  to preserve your current experience. The package no longer
+  auto-detects Chinese or "handoff-style" users.
+- **Skill references**: search your transcripts / notes for
+  `competition-mode` and replace with `general-mode`. The old
+  redirect Skill expires 2026-07-18.
+
+### Notes
+
+- Ship defaults rationale: MEMORY #59 (linked `general` to wide
+  audience, `handoff` to AI King's personal structured workflow).
+  Any future refactor that changes these defaults must preserve
+  the ship-defaults invariants in `test_config_loader.py`.
+- No breaking public-API changes. All existing imports and call
+  sites continue to work. FieldRead v2 is additive; the v1 names
+  are still canonical.
+
 ## [2.5.1] - 2026-04-18
 
 ### Security

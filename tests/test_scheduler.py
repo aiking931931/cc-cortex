@@ -187,4 +187,13 @@ class TestSkillInstaller:
             assert len(installed) >= 1
             for path in installed:
                 assert os.path.exists(path)
-                assert path.endswith("SKILL.md")
+                # installer.install_skills documents two return shapes:
+                #   * Legacy single-file Skills -> path to SKILL.md
+                #   * Directory-bundled Skills  -> path to the skill dir
+                # Both are valid. Dir entries must contain a SKILL.md inside.
+                if os.path.isdir(path):
+                    assert os.path.isfile(os.path.join(path, "SKILL.md")), (
+                        f"skill dir {path} missing SKILL.md"
+                    )
+                else:
+                    assert path.endswith("SKILL.md")
