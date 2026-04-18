@@ -42,6 +42,47 @@ def _destruction_gate_escape(
         monkeypatch.setenv(flag, "1")
 
 
+# 2.7.2 Gap 5: AI King's personal ``~/.concinno/config.json`` (locale=zh-TW,
+# mode=handoff) was leaking into the test run and breaking three invariant
+# tests that assume PyPI ship defaults (locale=en, mode=general). The env
+# layer wins over every JSON layer in :func:`concinno.config.load` so
+# pinning the env vars here gives every test the shipped defaults without
+# needing to rewrite ``Path.home``. Tests that deliberately exercise the
+# config loader (``test_config.py`` / ``test_config_loader.py``) already
+# manage these vars themselves, so we skip them to avoid fixture-ordering
+# fights.
+@pytest.fixture(autouse=True)
+def _pin_ship_default_config(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Force shipped defaults (locale=en, mode=general) for every test.
+
+    Uses env layer overrides because :func:`concinno.config.load`
+    resolves env > project > user > default — so even a stale
+    ``~/.concinno/config.json`` on the developer's machine cannot
+    change the values a test sees.
+    """
+    module_file = (request.node.fspath.basename
+                   if hasattr(request.node, "fspath") else "")
+    if module_file in {
+        "test_config.py",
+        "test_config_loader.py",
+    }:
+        return
+    monkeypatch.setenv("CONCINNO_LOCALE", "en")
+    monkeypatch.setenv("CONCINNO_MODE", "general")
+    # Reset cached i18n state so previous tests' locale doesn't bleed in.
+    try:
+        from concinno import i18n
+        i18n._loaded = False  # type: ignore[attr-defined]
+        i18n._display_locale = ""  # type: ignore[attr-defined]
+        i18n._message_cache.clear()  # type: ignore[attr-defined]
+        i18n._pattern_cache.clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
 # F8 (2.7.1): ship-default ``ux_injection=false`` gates every LLM-facing
 # UX inject site. Pre-existing tests were written when UX was always on
 # and assert that inject sites produce non-empty output. A dedicated

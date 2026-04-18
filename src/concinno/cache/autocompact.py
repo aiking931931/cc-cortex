@@ -598,6 +598,19 @@ class AutoCompactor:
             return "noop"
         if self._context_collapse_active:
             return "noop"
+        # 2.7.2 Gap 4: user-facing ``auto_compact`` kill switch.
+        # :func:`concinno.config.get("auto_compact")` is False when the
+        # operator ran ``concinno config set auto_compact false`` (or
+        # set ``CONCINNO_AUTO_COMPACT=0``). Treat as permanent ``"noop"``
+        # so :meth:`run` short-circuits before touching the sink.
+        # Fail-soft: any config error falls back to "enabled" (current
+        # behaviour) — the gate never blocks compaction on its own.
+        try:
+            from concinno.config import get as _cfg_get
+            if _cfg_get("auto_compact") is False:
+                return "noop"
+        except Exception:
+            pass
 
         threshold = self.get_autocompact_threshold()
         tokens = int(current_tokens)

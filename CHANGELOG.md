@@ -7,6 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-04-18
+
+Gap-cleanup follow-up to 2.7.1. A post-ship audit (five Opus agents)
+found nine remaining gaps; one was already covered by 2.7.1 F8
+(``ux_injection`` D6) and three are blocked on wiring decisions that
+need product input. The five actionable gaps all land here as a single
+release so the 2.6-series "claimed-but-not-shipped" items stop
+accumulating.
+
+### Fixed
+
+- **Gap 1 — ``general-mode`` Skill now ships inside the wheel.**
+  CHANGELOG 2.6.0 claimed ``competition-mode → general-mode`` had
+  been renamed, but the new Skill only existed in AI King's
+  user-global ``~/.claude/skills/`` directory — the PyPI wheel
+  bundled only ``agent`` / ``browser`` / ``windows`` under
+  ``src/concinno/skills/public/``. Anonymous downloaders ran
+  ``/general-mode`` and got "unknown skill". The SKILL.md is now
+  present at ``src/concinno/skills/public/general-mode/SKILL.md``,
+  picked up automatically by ``[tool.hatch.build.targets.wheel]
+  packages = ["src/concinno"]`` (no force-include — force-include
+  would trigger PyPI's duplicate-filename warning). Verified via
+  ``python -m zipfile -l dist/concinno-2.7.2-py3-none-any.whl``.
+
+- **Gap 2 — ``competition-mode`` deprecation redirect now ships
+  inside the wheel.** Same root cause as Gap 1 — the SKILL.md
+  existed only in AI King's user-global layout. The redirect is now
+  at ``src/concinno/skills/public/competition-mode/SKILL.md`` and
+  points every invocation at ``/general-mode`` + ``/agent``. The
+  redirect itself is scheduled for removal on **2026-07-18**
+  (three months from 2026-04-18 per MEMORY #45-era naming SOP).
+
+- **Gap 4 — ``auto_compact`` and ``memory_file_enabled`` now have
+  real consumers.** Both keys shipped in ``_DEFAULT_CONFIG`` since
+  2.6.0 but had no runtime consumer — grep across ``src/concinno/``
+  only found them in ``config.py`` and CLI help. Users flipping
+  either key saw the JSON update and no behaviour change. 2.7.2
+  wires both:
+
+  * ``auto_compact`` is now read in
+    :meth:`AutoCompactor.should_trigger`
+    (``concinno.cache.autocompact``). When False, ``should_trigger``
+    returns ``"noop"`` before the token-threshold check, which
+    cascades into :meth:`AutoCompactor.run` returning ``None``
+    without touching the sink. Fail-soft: a ``concinno.config.get``
+    crash falls back to the previous "enabled" behaviour so a
+    broken config cannot silently break compaction.
+  * ``memory_file_enabled`` is now read in
+    :meth:`SessionMemory.should_update`
+    (``concinno.cache.session_memory``). When False,
+    ``should_update`` returns ``False`` unconditionally and
+    :meth:`SessionMemory.update` short-circuits before the distill
+    sink is invoked. Same fail-soft contract.
+
+  New regression tests in
+  ``tests/test_feature_enabled_wiring_part2.py`` pin both the
+  disabled-kills-behaviour path and the fail-soft fallback path.
+
+- **Gap 5 — test suite isolated from AI King's user config.**
+  Three pre-existing tests had been failing on AI King's machine
+  because ``~/.concinno/config.json`` (``locale: zh-TW`` +
+  ``mode: handoff``) was leaking into the pytest run through
+  :func:`concinno.config.load`: ``test_file_tracker::
+  TestSessionFormat::test_invalid_session_id`` (i18n string came
+  back in Traditional Chinese), ``test_git_assist::TestGt::
+  test_english_default`` (same), and ``test_handoff_engine::
+  TestHandoffMode::test_get_mode_default`` (got ``save-token``
+  instead of ``phase``). ``tests/conftest.py`` gains an
+  autouse fixture ``_pin_ship_default_config`` that sets
+  ``CONCINNO_LOCALE=en`` + ``CONCINNO_MODE=general`` (the env
+  layer wins over every JSON layer) and resets ``concinno.i18n``'s
+  module-level caches so previous tests' locale cannot bleed in.
+  ``test_config.py`` / ``test_config_loader.py`` own the config
+  default invariants and manage these vars themselves, so the
+  fixture skips them to avoid fixture-ordering fights.
+
+### Meta
+
+- **2.6.0 skill rename claim was ship-incomplete.** The original
+  CHANGELOG entry claimed ``competition-mode → general-mode`` was
+  live, but the rename only landed in AI King's user-global layout
+  — the wheel never carried either Skill. 2.7.2 Gap 1 + Gap 2 fix
+  the shipped artifact, and this meta entry documents the lag
+  transparently so downstream users can see exactly which release
+  they need.
+
+- **Post-audit gap list**: nine gaps total from the five-agent
+  audit. One was already covered by 2.7.1 F8 (``ux_injection``).
+  Five are addressed in this release (Gaps 1, 2, 4, 5, and the
+  Gap 3 "hook-level direct call" verification below). The other
+  three need product decisions and stay on the backlog with
+  explicit notes in the handoff.
+
+- **Gap 3 was already wired.** The audit flagged ``streak_ux`` /
+  ``session_summary`` / ``delivery_gate`` as missing their
+  ``cfg.feature(..., "enabled")`` gate at the hook entry point,
+  but a fresh grep confirmed all three land in 2.7.0's codebase
+  (``on_post_tool.py:719``, ``on_stop.py:584``,
+  ``on_stop.py:192``). The audit was working off a stale snapshot.
+  The existing ``tests/test_feature_enabled_wiring.py::
+  test_streak_ux_respects_feature_flag`` + ``_session_summary_*``
+  + ``_auto_delivery_*`` tests continue to pin the invariant; no
+  new code was needed. This entry records the verification so the
+  audit's flagged item is closed explicitly.
+
 ## [2.7.1] - 2026-04-18
 
 Hotfix release immediately following 2.7.0. Five Opus audit agents +
