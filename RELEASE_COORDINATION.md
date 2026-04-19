@@ -3,18 +3,18 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-18 — 2.8.0 ship-ready, not published）
+## 現況 snapshot（2026-04-19 — 2.9.0 LIVE）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.7.2` — 2.8.0 尚未上傳 |
-| `pyproject.toml` version | `2.8.0` |
-| `src/concinno/__init__.py __version__` | `2.8.0` |
-| CHANGELOG.md 最新 release heading | `## [2.8.0] - 2026-04-18` |
+| Registry latest (PyPI) | `2.9.0` — <https://pypi.org/project/concinno/2.9.0/> |
+| `pyproject.toml` version | `2.9.0` |
+| `src/concinno/__init__.py __version__` | `2.9.0` |
+| CHANGELOG.md 最新 release heading | `## [2.9.0] - 2026-04-19` |
 | 三源對齊狀態 | ✅ |
-| 下一 publish 目標 | **`2.8.0`** — 6 P0 CBUA v3.1 dual-axis hardening（session 648cae48，紅藍 CBUA 4 Opus + 用戶校正），見 Pending Publish Queue 下方 |
-| 本地 commit | `46dda846` |
-| 本地 tag | `v2.8.0`（未 push） |
+| 下一 publish 目標 | `2.10.0` — rename pass (Cerno→Iudico / Redigo→Compono) + I6-I8 + I19-I21 deferred bucket |
+| 本地 commit | `8dc089b` (`feat/2.3.0-red-team-round-3`) |
+| 本地 tag | `v2.9.0` (pushed to origin) |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -247,29 +247,23 @@ pid: <process id, 可選>
 
 ### Active
 
-```yaml
-hostname: Z_HP
-session: cc_subagent_2_9_0_impl_20260419
-started: "2026-04-19T10:30:00+08:00"
-target: "2.9.0"
-pid: null
-state: claimed-publishing
-claimed_queue_record: "2.9.0 (see Pending Publish Queue below)"
-user_authorization: |
-  Pre-authorized per session 648cae48 final line: "FULL 模式跑到底
-  CBUA 最佳解" + this sub-agent brief: "自己 twine upload".
-next_action: |
-  Execute publish flow and settle result:
-    1. PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-2.9.0*
-    2. git tag v2.9.0 && git push origin feat/2.3.0-red-team-round-3 + v2.9.0
-       (inner concinno repo; outer ai-king repo not pushed — separate concern)
-    3. Verify: pip install --upgrade concinno && python -c "import concinno;assert concinno.__version__=='2.9.0'"
-    4. Move this Active block + queue record to History with result: ok + PyPI URL
-    5. Update 現況 snapshot::Registry latest → 2.9.0
-```
+無
 
 ### History
 
+- `2026-04-19 cc_subagent_2_9_0_impl_20260419` target=`2.9.0` result=**ok** —
+  PyPI LIVE <https://pypi.org/project/concinno/2.9.0/> . Commit `8dc089b` on
+  branch `feat/2.3.0-red-team-round-3` (pushed), tag `v2.9.0` pushed to
+  origin. Scope: (a) `_detect_embedded_nested_repos` treatment for
+  outer-repo squash overwriting inner working tree (the documented
+  `2.9.0-draft-WIP-blocked-by-outer-squash` race); (b) positioning/
+  compliance reframe (I1-I5 from session 648cae48 — README tagline,
+  badge purge, keyword narrowing, prompt_hooks docstring,
+  Observability/Positioning sections, trademark_clearance doc).
+  Tests 5457→5461 green (+4 new cleanup tests), ruff clean, build +
+  twine check PASSED. Deferred to 2.10.0: rename pass
+  (Cerno→Iudico / Redigo→Compono), SECURITY.md + detect-secrets /
+  gitleaks, ai_act_compliance full text, pip-licenses snapshot.
 - `2026-04-16 ~16:00 cc_{fd781b11}` target=`2.0.0` result=**ok** — PyPI LIVE
   — CHANGELOG 當時未寫，2.2.0 release 補完誠實版歷史（無虛構 commit hash）
 - `2026-04-16 ~20:00 cc_{17f097ca}` target=`2.1.0` result=**ok** — PyPI LIVE
