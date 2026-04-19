@@ -209,6 +209,90 @@ def count_auto_commits(
     return sum(1 for line in out.splitlines() if pattern in line)
 
 
+def _detect_embedded_nested_repos(cwd: str, max_depth: int = 4) -> list[str]:
+    """Find nested `.git` directories that live under paths tracked by `cwd`.
+
+    Why this exists (2.9.0 治本):
+        Some outer repos intentionally track files that live *inside* another
+        repo's working tree (e.g. `ai-king/.gitignore` has `!projects/concinno/`
+        so the outer repo snapshots Concinno's source). When this outer repo
+        runs `squash_auto_commits`, its rebase replays commits whose tree
+        contains the outer's old snapshot of those paths — **overwriting the
+        inner working tree** with stale content and silently blowing away
+        work-in-progress. Stashed draft `2.9.0-draft-WIP-blocked-by-outer-squash`
+        is evidence of exactly this race.
+
+    Fix: detect this configuration and refuse to squash. Squashing a repo
+    that embeds another repo's working tree is never safe — the outer rebase
+    cannot distinguish "stale snapshot replay" from "user-intended rollback",
+    and the inner repo has no say in the matter.
+
+    Returns list of embedded repo paths (relative to `cwd`) whose contents
+    are tracked by the outer index. Empty list = safe to squash.
+
+    Set `CONCINNO_SKIP_NESTED_REPOS=0` to bypass (not recommended; only for
+    the rare case where the caller is sure outer does not track inner paths).
+    """
+    if os.environ.get("CONCINNO_SKIP_NESTED_REPOS", "1") == "0":
+        return []
+
+    root = Path(cwd)
+    if not root.is_dir():
+        return []
+
+    # Walk depth-limited; `.git` matches are either real repos or gitlink
+    # files (submodules). We only care about real repos with a working tree
+    # that the outer repo also tracks.
+    embedded: list[str] = []
+    try:
+        for dot_git in root.rglob(".git"):
+            # Depth limit to keep cost bounded on large trees.
+            try:
+                rel = dot_git.relative_to(root)
+            except ValueError:
+                continue
+            if len(rel.parts) == 0 or len(rel.parts) > max_depth:
+                continue
+            # Skip the outer repo's own .git
+            if rel == Path(".git"):
+                continue
+            # Skip submodule gitlinks (those are files, not directories) —
+            # submodules are safe because outer stores only the commit SHA.
+            if not dot_git.is_dir():
+                continue
+
+            nested_root_rel = rel.parent  # path relative to outer cwd
+            nested_root_abs = dot_git.parent
+            # Does the outer index track paths *inside* this nested repo?
+            # Use a trailing-slash pathspec to require hits beneath the
+            # nested root — plain `ls-files path` would also match a
+            # gitlink entry (submodule) at that exact path, which is
+            # safe (outer stores only commit SHA, not tree contents).
+            nested_rel_str = str(nested_root_rel).replace(os.sep, "/")
+            ls = _git(
+                ["ls-files", "--", f"{nested_rel_str}/"],
+                cwd,
+            )
+            # Filter: path must be strictly below nested_root_rel (not
+            # the gitlink itself). `ls-files path/` already excludes the
+            # gitlink, but double-check against accidental matches.
+            tracked_inside = [
+                ln for ln in (ls or "").splitlines()
+                if ln and ln != nested_rel_str
+                and ln.startswith(f"{nested_rel_str}/")
+            ]
+            if tracked_inside:
+                embedded.append(nested_rel_str)
+            # Bounded: if we already found too many, stop — no point in
+            # enumerating further, the squash is already unsafe.
+            if len(embedded) >= 8:
+                break
+            _ = nested_root_abs  # keep for future extensions (ignore-list)
+    except OSError:
+        return embedded
+    return embedded
+
+
 @destruction_gate(risk="R3", op_name="squash_auto_commits")
 def squash_auto_commits(
     repo_dir: str | Path = ".",
@@ -221,6 +305,11 @@ def squash_auto_commits(
     then rebase the last `keep` commits on top of it.
 
     ⚠ DESTRUCTIVE: rewrites git history. Only safe for single-user repos.
+
+    2.9.0 治本: skip when outer repo embeds another repo's working tree
+    (e.g. ai-king/.gitignore carve-out for projects/concinno/). See
+    ``_detect_embedded_nested_repos`` for the full rationale — replaying
+    outer commits overwrites inner working tree with stale snapshots.
     """
     result = CleanupResult(action="squash_auto_commits")
     cwd = str(repo_dir)
@@ -240,8 +329,29 @@ def squash_auto_commits(
     result.items_found = to_squash
 
     if dry_run:
+        # Surface embedded-repo detection in dry-run too so operators can
+        # see the risk before enabling the escape hatch.
+        embedded = _detect_embedded_nested_repos(cwd)
+        if embedded:
+            result.details.append(
+                f"[dry-run] WOULD SKIP: outer repo embeds {len(embedded)} "
+                f"nested repo(s) with tracked paths: {', '.join(embedded[:3])}"
+            )
+            return result
         result.details.append(
             f"[dry-run] would squash {to_squash} commits, keeping newest {keep}"
+        )
+        return result
+
+    # Treatment: if outer repo embeds another repo's working tree, refuse.
+    # Without this check, the outer rebase replays old snapshots of
+    # inner's source files and silently overwrites the inner working tree.
+    embedded = _detect_embedded_nested_repos(cwd)
+    if embedded:
+        result.error = (
+            "nested repo(s) with tracked paths detected — refusing squash "
+            "to avoid overwriting inner working tree (set "
+            f"CONCINNO_SKIP_NESTED_REPOS=0 to bypass): {', '.join(embedded[:3])}"
         )
         return result
 

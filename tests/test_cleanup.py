@@ -311,6 +311,157 @@ class TestGitOperations:
         result = squash_auto_commits(tmp_path, keep=3)
         assert "uncommitted changes" in result.error
 
+    def test_squash_skips_when_outer_embeds_inner(self, tmp_path: Path):
+        """2.9.0 治本 regression: outer repo that tracks paths inside an
+        inner repo's working tree must refuse to squash.
+
+        Scenario reproduction (ai-king embedding projects/concinno):
+          outer .gitignore carve-out tracks projects/concinno/src/**
+          inner projects/concinno/.git is a full repo
+          outer squash without this guard = replays old inner snapshots =
+          blows away inner WIP. This test verifies the guard trips.
+        """
+        # Scenario: outer tracks files that later get covered by an
+        # inner .git. This reproduces ai-king embedding projects/concinno
+        # where .gitignore has `!projects/concinno/` carve-out.
+        path = tmp_path
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init"], cwd=str(path), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.name", "outer"],
+            cwd=str(path), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "outer@test"],
+            cwd=str(path), capture_output=True,
+        )
+        # Seed the inner path as tracked BEFORE inner .git exists.
+        inner_rel = Path("projects") / "concinno"
+        (path / inner_rel).mkdir(parents=True)
+        (path / inner_rel / "important.py").write_text("outer-seed")
+        for i in range(8):
+            (path / f"f{i}.txt").write_text(f"{i}")
+            subprocess.run(
+                ["git", "add", "-A"], cwd=str(path), capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"auto: {i}"],
+                cwd=str(path), capture_output=True,
+            )
+
+        # Now initialize inner repo — outer still tracks the file; inner
+        # owns the working tree going forward.
+        inner_dir = path / inner_rel
+        for cmd in (
+            ["git", "init"],
+            ["git", "config", "user.name", "inner"],
+            ["git", "config", "user.email", "inner@test"],
+        ):
+            subprocess.run(cmd, cwd=str(inner_dir), capture_output=True)
+        (inner_dir / "important.py").write_text("inner-wip")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(inner_dir), capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "inner v1"],
+            cwd=str(inner_dir), capture_output=True,
+        )
+        # Discard the outer's dirty view so the dirty-tree guard doesn't
+        # short-circuit ahead of the nested-repo guard. In the real
+        # ai-king case, `auto_commit` commits the diff first, then calls
+        # squash on a clean tree.
+        subprocess.run(
+            ["git", "checkout", "--", str(inner_rel / "important.py")],
+            cwd=str(path), capture_output=True,
+        )
+
+        result = squash_auto_commits(path, keep=3)
+        assert "nested repo" in result.error, (
+            f"expected nested-repo guard to trip, got: {result.error!r}"
+        )
+        assert result.items_cleaned == 0
+
+    def test_squash_nested_skip_bypass_env(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """CONCINNO_SKIP_NESTED_REPOS=0 bypasses the nested-repo guard.
+
+        Only for operators who explicitly know the outer does not track
+        inner paths (rare). Default behavior stays safe.
+        """
+        path = tmp_path
+        path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init"], cwd=str(path), capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.name", "o"],
+            cwd=str(path), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "o@t"],
+            cwd=str(path), capture_output=True,
+        )
+        inner_rel = Path("projects") / "concinno"
+        (path / inner_rel).mkdir(parents=True)
+        (path / inner_rel / "x.py").write_text("seed")
+        for i in range(8):
+            (path / f"f{i}.txt").write_text(f"{i}")
+            subprocess.run(
+                ["git", "add", "-A"], cwd=str(path), capture_output=True
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"auto: {i}"],
+                cwd=str(path), capture_output=True,
+            )
+        inner_dir = path / inner_rel
+        for cmd in (
+            ["git", "init"],
+            ["git", "config", "user.name", "i"],
+            ["git", "config", "user.email", "i@t"],
+        ):
+            subprocess.run(cmd, cwd=str(inner_dir), capture_output=True)
+        (inner_dir / "x.py").write_text("wip")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=str(inner_dir), capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "v1"],
+            cwd=str(inner_dir), capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "--", str(inner_rel / "x.py")],
+            cwd=str(path), capture_output=True,
+        )
+
+        monkeypatch.setenv("CONCINNO_SKIP_NESTED_REPOS", "0")
+        result = squash_auto_commits(path, keep=3)
+        # With bypass, guard is off. Whether the squash itself
+        # succeeds depends on downstream git state — we only assert
+        # the nested-repo guard did NOT trip.
+        assert "nested repo" not in result.error
+
+    def test_detect_embedded_nested_repos_clean_tree(
+        self, tmp_path: Path
+    ):
+        """detect helper returns [] for a repo with no nested .git."""
+        from concinno.cleanup import _detect_embedded_nested_repos
+        _init_git_repo(tmp_path, n_commits=3)
+        assert _detect_embedded_nested_repos(str(tmp_path)) == []
+
+    def test_detect_embedded_nested_repos_submodule_gitlink_ok(
+        self, tmp_path: Path
+    ):
+        """Submodule gitlinks (where .git is a *file* not dir) are safe —
+        outer only stores commit SHA, rebase can't overwrite inner tree."""
+        from concinno.cleanup import _detect_embedded_nested_repos
+        _init_git_repo(tmp_path, n_commits=3)
+        # Simulate a submodule's .git *file* (not directory)
+        (tmp_path / "submod").mkdir()
+        (tmp_path / "submod" / ".git").write_text(
+            "gitdir: ../.git/modules/submod\n"
+        )
+        # Outer does not track anything inside submod/
+        assert _detect_embedded_nested_repos(str(tmp_path)) == []
+
     def test_detect_large_objects_empty(self, tmp_path: Path):
         _init_git_repo(tmp_path, n_commits=1)
         large = detect_large_git_objects(tmp_path, min_size_mb=10)

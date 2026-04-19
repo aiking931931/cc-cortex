@@ -2,20 +2,23 @@
 
 > *Previously known as CC Cortex (CCC)*
 
-**The Cognitive Layer for Claude Code**
+**A hook-based governance toolkit compatible with Anthropic's Claude Code CLI**
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#zero-dependency-philosophy)
-[![Tests: 3430](https://img.shields.io/badge/tests-3430-brightgreen.svg)](#architecture)
-[![Guards: 55+](https://img.shields.io/badge/guards-55%2B-orange.svg)](#guard-pipeline--eslint-for-ai-behavior)
 [![PyPI](https://img.shields.io/pypi/v/concinno.svg)](https://pypi.org/project/concinno/)
-[![A2A](https://img.shields.io/badge/A2A-v1.0-blue.svg)](#why-concinno)
-[![Skills: 66](https://img.shields.io/badge/skills-66-blueviolet.svg)](#modules)
-[![Agents: 36](https://img.shields.io/badge/agents-36-blue.svg)](#modules)
-[![NIST AI RMF](https://img.shields.io/badge/NIST_AI_RMF-aligned-blue.svg)](#enterprise-governance)
+[![Tests](https://github.com/aiking931931/concinno/actions/workflows/ci.yml/badge.svg)](https://github.com/aiking931931/concinno/actions/workflows/ci.yml)
 
-> **concinno** is a modular hook toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). It gives your AI coding assistant safety guardrails, memory, multi-instance coordination, and autonomous self-improvement — all through a zero-dependency, drop-in Python package.
+> **concinno** is a modular hook toolkit that plugs into
+> [Anthropic's Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
+> It adds opt-in dev-time scaffolding — guardrails against destructive
+> commands, session memory, multi-instance coordination, and structured
+> handoffs — through a drop-in Python package.
+>
+> Concinno is a complementary add-on, **not** a replacement for Claude Code
+> or Anthropic's managed safety features. It interoperates with the
+> official hook contract documented at
+> <https://docs.anthropic.com/en/docs/claude-code/hooks>.
 
 ---
 
@@ -316,20 +319,23 @@ See [examples/cc_config_example.jsonc](examples/cc_config_example.jsonc) for a f
 
 ---
 
-## Enterprise Governance
+## Observability & Audit Logs
 
-Concinno provides built-in alignment with enterprise AI governance standards:
+Concinno is an **observability / monitoring layer** for Claude Code tool
+calls. It emits structured evidence that the *deployer* can map to whatever
+governance framework their organisation follows. Concinno itself is not
+audited, certified, or endorsed by any standards body, and makes no claim
+to confer compliance on downstream systems.
 
-| Standard | Alignment | Concinno Feature |
-|----------|-----------|-------------------|
-| **NIST AI RMF** (Govern/Map/Measure/Manage) | Measure + Manage | Guard audit logs (JSONL) + gate deny enforcement |
-| **NIST AI Agent Standards** (2026) | Auth + Privilege Control | Identity guard + agent gate + confidence gate |
-| **ISO/IEC 42001** | AI Management System | Feature config + delivery gate + structured handoffs |
-| **EU AI Act** | Human Oversight + Audit Trail | Destruction guard confirm flow + immutable audit log |
-
-**Audit trail**: Every guard deny is logged to `~/.claude/destruction_audit.log` (JSONL, immutable append-only).
-
-**Delivery gate**: `delivery.py` enforces binary pass/fail exit criteria, mechanical verification, and three-state reporting (pass/partial/fail with evidence).
+- **Audit trail**: every guard deny is appended to
+  `~/.claude/destruction_audit.log` (JSONL, append-only).
+- **Delivery gate**: `delivery.py` enforces binary pass/fail exit
+  criteria with mechanical verification and three-state reporting.
+- **Deployer responsibility**: if your use-case falls under NIST AI RMF,
+  ISO/IEC 42001, or EU AI Act Annex III, the deployer is solely
+  responsible for mapping Concinno's logs onto those frameworks. See
+  [docs/ai_act_compliance.md](docs/ai_act_compliance.md) for the
+  disclaimer Concinno itself operates under.
 
 ---
 
@@ -387,13 +393,70 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before 
 
 ---
 
-## License
+## Positioning
 
-Apache-2.0 License. See [LICENSE](LICENSE) for details.
+**What Concinno is**
+
+- Dev-time scaffolding for the Claude Code CLI.
+- An individual-developer / small-team tool for guardrails, session
+  memory, multi-instance coordination, and structured handoffs.
+- A zero-API-cost add-on (it runs inside the user's Claude Code
+  subscription; no additional tokens are billed by Concinno itself).
+- Opinionated primitives you can override — every guard is subclassable,
+  every feature can be disabled through `cc_config.json`.
+
+**What Concinno is NOT**
+
+- A cloud SaaS governance platform (that is the territory of
+  managed agent offerings such as Anthropic's managed agents and
+  NeMo Guardrails).
+- A safety circumvention tool. Concinno guards are observability
+  and dev-time guardrails; they do not bypass Anthropic's own safety
+  systems or the Claude Code CLI's built-in policies.
+- A certified compliance product. Alignment claims map onto the
+  deployer, not onto Concinno (see *Observability & Audit Logs* above).
+- An "AI system" within the meaning of EU AI Act Art 3(1) — it ships
+  no model weights and makes no autonomous decisions. See
+  [docs/ai_act_compliance.md](docs/ai_act_compliance.md).
+
+---
+
+## Security
+
+Security-sensitive questions, including historical disclosure of
+secrets in prior releases, are documented in
+[SECURITY.md](SECURITY.md). PyPI uploads for Concinno use Trusted
+Publishers with WebAuthn 2FA; no long-lived API tokens are stored in
+CI.
+
+---
+
+## Export Control Notice
+
+This software is subject to the U.S. Export Administration Regulations
+(EAR). Users are responsible for compliance. Concinno is not for use
+by entities on the U.S. Specially Designated Nationals (SDN) list or
+in embargoed jurisdictions (Cuba, Iran, North Korea, Syria, or the
+Crimea region of Ukraine).
+
+---
+
+## License & Trademarks
+
+Apache-2.0 License. See [LICENSE](LICENSE) for details, including the
+AI Ethics addendum that prohibits use in EU AI Act Annex III "high
+risk" contexts (social scoring, biometric surveillance, real-time
+law enforcement).
+
+Claude Code is a trademark of Anthropic PBC. Concinno is an
+independent open-source project and is **not affiliated with,
+endorsed by, or sponsored by Anthropic PBC**. References to Claude
+Code are made solely for interoperability and identification
+purposes.
 
 ---
 
 <p align="center">
-  <strong>Concinno</strong> — The Cognitive Layer for Claude Code<br>
-  <em>Stop re-explaining. Start remembering.</em>
+  <strong>Concinno</strong> — hook-based governance for Claude Code<br>
+  <em>Observable, local, opinionated.</em>
 </p>

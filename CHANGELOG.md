@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-04-19
+
+Minor release. Two parallel axes:
+
+1. **Root-cause fix** for a destructive interaction between Concinno's
+   ``_inline_squash_if_needed`` and outer repositories that intentionally
+   track files inside another repo's working tree (e.g. an umbrella
+   workspace with a ``.gitignore`` carve-out for ``projects/concinno/``).
+   Without this fix, the outer repo's squash rebase replayed stale
+   snapshots of inner source files and silently overwrote the inner
+   working tree, blowing away sub-agent work-in-progress.
+2. **Positioning and compliance text** clean-up driven by a five-Opus
+   red/blue CBUA review (session 648cae48). Narrative, keyword, and
+   citation framing are pulled back from claims Concinno cannot
+   independently substantiate; an explicit observability-not-safety-
+   circumvention disclaimer is added.
+
+### Fixed
+
+- **Outer-repo squash no longer overwrites embedded inner repos.**
+  ``concinno.cleanup.squash_auto_commits`` now detects when the caller's
+  repository tracks paths that lie beneath another repository's
+  ``.git`` directory, and refuses to squash with a clear error message.
+  A new helper ``_detect_embedded_nested_repos`` performs the detection
+  (depth-limited ``rglob``, gitlinks treated as safe, bypass via
+  ``CONCINNO_SKIP_NESTED_REPOS=0`` for operators who know their
+  configuration is safe). Corresponding four-test suite added to
+  ``tests/test_cleanup.py`` covering the positive trip, the bypass
+  environment variable, clean-tree no-op, and submodule-gitlink safety.
+
+### Changed
+
+- **README tagline** pulled back from "The Cognitive Layer for Claude
+  Code" to "A hook-based governance toolkit compatible with Anthropic's
+  Claude Code CLI", with an explicit disclaimer that Concinno is not
+  affiliated with or endorsed by Anthropic.
+- **Self-assigned certification badges removed** (NIST AI RMF and
+  hard-coded counts such as "Tests: 3430" / "Guards: 55+" / "Skills:
+  66"). These were self-declared, not independently attested, and the
+  shields implied a certification that does not exist.
+- **PyPI keywords** narrowed to generic terms (``hooks``,
+  ``guardrails``, ``python``, ``governance``, ``agent``,
+  ``developer-tools``). Removed ``claude-code``, ``anthropic``,
+  ``ai-safety``, ``llm-guard``, ``llm-security``, ``prompt-injection``,
+  ``agent-governance``, ``agent-safety``, ``a2a``, ``multi-instance``,
+  ``ai-assistant`` to avoid brand-adjacency confusion on PyPI search.
+- **``concinno.prompt_hooks`` module docstring** now cites the public
+  hooks documentation (``https://docs.anthropic.com/en/docs/claude-code/hooks``)
+  for the prompt-type hook runtime, and clarifies Concinno does not
+  call any LLM directly.
+- **Enterprise Governance section in README** reframed as
+  "Observability & Audit Logs" with explicit language that Concinno is
+  not audited, certified, or endorsed by any standards body and makes
+  no claim to confer compliance on downstream systems. A new
+  Positioning section now spells out what Concinno is and is not
+  (dev-time scaffolding for the CLI; not a cloud SaaS governance
+  platform; not a safety circumvention tool).
+
+### Added
+
+- ``docs/trademark_clearance_2026-04.md`` records a preliminary
+  knock-out search for five Latin-style names (Concinno, Sancio,
+  Cerno, Redigo, Perpetuo) across US (USPTO), EU (EUIPO), and WIPO
+  public sources, with explicit caveats about paid-search coverage.
+  This document is not legal advice.
+
+### Tests
+
+- ``tests/test_cleanup.py`` +4 tests for the new embedded-nested-repo
+  guard. Total ``test_cleanup.py`` goes 24 → 28.
+
+### Deferred to 2.10.0
+
+The following items from the session 648cae48 shipping roadmap were
+intentionally kept out of 2.9.0 so the root-cause fix and the
+disclaimer text land cleanly without an invasive cross-file rename
+hiding the diff:
+
+- Rename pass (Cerno → Iudico, Redigo → Compono) based on the
+  trademark clearance findings.
+- ``SECURITY.md`` + ``detect-secrets`` / ``gitleaks`` pre-commit (I6–I8).
+- ``docs/ai_act_compliance.md`` full text + ``LICENSE`` AI Ethics
+  Notice + Export Control Notice (I19–I20).
+- ``pip-licenses`` snapshot to ``docs/licenses.md`` (I21).
+
 ## [2.8.1] - 2026-04-19
 
 Patch release. Two items: (1) root-cause fix for the ``.git/index.lock``

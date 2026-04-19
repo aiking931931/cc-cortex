@@ -1,25 +1,26 @@
 """concinno.prompt_hooks — LLM-as-Judge via Claude Code prompt hooks.
 
 @module prompt_hooks
-@responsibility Curated judge prompts + settings.json installer for
-    Claude Code's ``type: "prompt"`` hook runtime. CCC never calls an
-    LLM directly (core is zero-dep and L3 forbids hook-side LLM calls);
-    instead this module emits ``hooks`` config that the CC runtime
-    executes with its own Haiku-class evaluator.
+@responsibility Curated judge prompts + settings.json installer targeting
+    the prompt-type hook runtime documented at
+    https://docs.anthropic.com/en/docs/claude-code/hooks. Concinno never
+    calls an LLM directly (core is zero-dep and L3 forbids hook-side LLM
+    calls); instead this module emits ``hooks`` config that the Claude
+    Code CLI executes with its own evaluator.
 @dependencies stdlib only (``json``, ``pathlib``, ``dataclasses``)
 @exports PromptJudge, HALLUCINATION_JUDGE, EXCUSE_SCANNER_JUDGE,
     CODE_QUALITY_JUDGE, ALL_JUDGES, build_hook_config,
     install_prompt_hooks, uninstall_prompt_hooks
 
 Rationale (1.4.0 C6 — H1 reopen):
-  H1 ``LLM-as-Judge`` was killed in 1.3.0 because CCC's core cannot
-  import an LLM SDK (zero runtime deps + L3 hook-side LLM ban). The
-  2026-04 Claude Code release shipped an official ``type: "prompt"``
-  hook that runs a short single-turn evaluation against a fast model
-  inside the CC runtime itself — the KILL premise no longer holds.
+  The H1 ``LLM-as-Judge`` idea had previously been shelved in 1.3.0
+  because Concinno's core cannot import an LLM SDK (zero runtime deps +
+  L3 hook-side LLM ban). Per the public hooks documentation above, the
+  prompt-type hook runs a short single-turn evaluation inside the user's
+  CLI runtime, which removes the original blocker.
 
-  CCC's role is narrow on purpose: ship *well-written judge prompts*
-  as module constants plus a settings.json installer. The user's CC
+  Concinno's role is narrow on purpose: ship *well-written judge prompts*
+  as module constants plus a settings.json installer. The user's CLI
   runtime does the actual evaluation. Judges and installer are fully
   tested; integration with the live runtime is the user's choice.
 
