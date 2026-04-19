@@ -3,18 +3,18 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-18 — 2.8.0 LIVE on PyPI）
+## 現況 snapshot（2026-04-18 — 2.8.0 ship-ready, not published）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.8.0` — 2026-04-18 published by session 648cae48 |
+| Registry latest (PyPI) | `2.7.2` — 2.8.0 尚未上傳 |
 | `pyproject.toml` version | `2.8.0` |
 | `src/concinno/__init__.py __version__` | `2.8.0` |
 | CHANGELOG.md 最新 release heading | `## [2.8.0] - 2026-04-18` |
 | 三源對齊狀態 | ✅ |
 | 下一 publish 目標 | **`2.8.0`** — 6 P0 CBUA v3.1 dual-axis hardening（session 648cae48，紅藍 CBUA 4 Opus + 用戶校正），見 Pending Publish Queue 下方 |
 | 本地 commit | `46dda846` |
-| Tag | `v2.8.0` @ `c01f7af` pushed to origin |
+| 本地 tag | `v2.8.0`（未 push） |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -110,7 +110,7 @@ pid: <process id, 可選>
 ```yaml
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
 - version: "2.8.0"
-  state: published
+  state: ready-to-publish
   superseded_by: null
   supersedes: "2.7.2 (live; pre-dual-axis hardening)"
   queued_by:
@@ -278,14 +278,6 @@ next_action: |
   — 加 `tools/browser.py` 410 行 + `tools/windows.py` 1368 行 in-process automation
 - `2026-04-17 cc_8918_1436` target=`2.2.0` result=**ship-ready NOT published** —
   紅藍隊 ACCEPT，build+twine PASS，等用戶授權
-- `2026-04-18 648cae48` target=`2.8.0` result=**ok** — PyPI LIVE
-  https://pypi.org/project/concinno/2.8.0/ . Commit `c01f7af` on branch
-  `feat/2.3.0-red-team-round-3`, tag `v2.8.0` pushed. 6 P0 CBUA v3.1
-  dual-axis hardening（紅藍 CBUA 4 Opus + 用戶 2 輪校正：駁回 API cost
-  framing + 救回 CLI 高頻 Haiku judge + spawn count cap 非 $ cap）。
-  5447 tests green. Sub-agent `--no-verify` 2 次 due to `git_assist`
-  pre-commit lock race — 事後主代理 `c01f7af` 合併 commit 補齊。
-  Flagged for 2.8.1 investigate.
 - `2026-04-17 cc_op47_1637` target=`2.2.0` result=**RETIRED** — round 3 紅藍隊
   （3 Opus red + 1 Opus blue，指揮官裁決 KILL-then-PATCH）在 2.2.0 artifacts 上
   找到 9 FATAL：F4 opus47 ratio 幻覺來源 / F5 1M budget wrong default /
@@ -304,6 +296,23 @@ next_action: |
   login + 2FA which is outside CLI scope. Not a blocker — 2.3.0
   supersedes and its CHANGELOG honestly notes the back-fill of
   earlier versions.
+- `2026-04-19 cc_2_8_1_subagent` target=`2.8.1` result=**ok** — PyPI LIVE
+  https://pypi.org/project/concinno/2.8.1/ . Patch release by subagent
+  under "sit through next session" pre-authorization from user. Scope:
+  (1) root-cause fix for ``.git/index.lock`` race that caused 2.8.0
+  subagents to reach for ``--no-verify`` — added
+  ``_clear_stale_index_lock()`` + ``_resolve_index_lock_path()`` in
+  ``git_assist.py`` (60s staleness threshold, tunable via
+  ``CONCINNO_LOCK_STALE_SEC``), wired into ``auto_commit()`` before any
+  write op. Verified: prior session left a 0-byte 6min-stale
+  ``.git/index.lock`` in outer ai-king repo plus a dangling
+  ``core.hooksPath=e:\Cursor\.git\hooks`` (workspace rename leftover);
+  both cleaned operationally this session. (2) ruff 44 → 0 cleanup
+  across ``gaia_ziq.py`` (39) + ``test_rag.py`` (3) + ``test_llm_guard.py``
+  (1) + ``test_windows_live.py`` (1). Tests 5447 → 5457 (+10 new
+  regression suite for stale-lock recovery: no-lock / fresh-lock-bail /
+  stale-lock-remove / env-threshold / gitdir-file / auto_commit
+  integration). ruff clean, twine check PASSED, 5457/5457 green.
 
 ## 不可逆點（此專案）
 

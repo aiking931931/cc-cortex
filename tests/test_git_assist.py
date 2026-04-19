@@ -7,11 +7,13 @@ from unittest.mock import patch
 import pytest
 
 from concinno.git_assist import (
+    _clear_stale_index_lock,
     _format_section,
     _gt,
     _is_secret,
     _is_trivial_path,
     _parse_status,
+    _resolve_index_lock_path,
     auto_commit,
     generate_report,
 )
@@ -691,3 +693,150 @@ class TestAutoCommitSkipGates:
 
         assert result is not None
         assert "auto: update 2 files" in result
+
+
+# ── stale .git/index.lock recovery ────────────────────────
+
+
+class TestResolveIndexLockPath:
+    """``.git`` layout resolution — normal dir vs worktree gitdir-file."""
+
+    def test_normal_repo_layout(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        resolved = _resolve_index_lock_path(str(tmp_path))
+        assert resolved.endswith(".git" + __import__("os").sep + "index.lock") or \
+               resolved.endswith(".git/index.lock")
+
+    def test_no_dotgit_falls_back_safely(self, tmp_path):
+        # no .git anywhere — helper must not explode; caller's stat will miss.
+        resolved = _resolve_index_lock_path(str(tmp_path))
+        assert resolved.endswith("index.lock")
+
+    def test_worktree_gitdir_file(self, tmp_path):
+        """Worktrees and submodules write ``.git`` as a file of form ``gitdir: <abs>``."""
+        import os as _os
+        real_gitdir = tmp_path / "real_gitdir"
+        real_gitdir.mkdir()
+        dot_git_file = tmp_path / "wt" / ".git"
+        dot_git_file.parent.mkdir()
+        dot_git_file.write_text(f"gitdir: {real_gitdir}\n", encoding="utf-8")
+        resolved = _resolve_index_lock_path(str(dot_git_file.parent))
+        assert resolved == _os.path.join(str(real_gitdir), "index.lock")
+
+
+class TestClearStaleIndexLock:
+    """Orphan lock recovery — the 2.8.1 root cause fix.
+
+    Prior failure: a killed ``git commit`` leaves ``.git/index.lock`` on
+    disk; every subsequent commit returns
+    ``fatal: Unable to create '.git/index.lock': File exists`` until a
+    human intervenes. Sub-agents misread this as "pre-commit hook
+    recreating the lock" and reach for ``--no-verify``, which bypasses
+    nothing because no hook is involved. This test suite locks down the
+    recovery contract so the misdiagnosis can't recur.
+    """
+
+    def _make_lock(self, tmp_path, age_sec: float) -> str:
+        """Create a .git/index.lock with mtime == now - age_sec."""
+        import os as _os
+        import time as _time
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        lock = git_dir / "index.lock"
+        lock.write_text("", encoding="utf-8")  # zero-byte, like real git
+        when = _time.time() - age_sec
+        _os.utime(str(lock), (when, when))
+        return str(lock)
+
+    def test_no_lock_returns_true(self, tmp_path):
+        (tmp_path / ".git").mkdir()
+        assert _clear_stale_index_lock(str(tmp_path)) is True
+
+    def test_missing_dotgit_returns_true(self, tmp_path):
+        # not a repo at all → nothing to clear, caller may proceed
+        assert _clear_stale_index_lock(str(tmp_path)) is True
+
+    def test_fresh_lock_bails(self, tmp_path):
+        """A lock 5s old means a sibling is mid-op — must NOT remove."""
+        import os as _os
+        lock = self._make_lock(tmp_path, age_sec=5)
+        assert _clear_stale_index_lock(str(tmp_path), max_age=60) is False
+        assert _os.path.exists(lock), "fresh lock must survive"
+
+    def test_stale_lock_removed(self, tmp_path):
+        """A lock 120s old is orphaned — remove and return True."""
+        import os as _os
+        lock = self._make_lock(tmp_path, age_sec=120)
+        assert _clear_stale_index_lock(str(tmp_path), max_age=60) is True
+        assert not _os.path.exists(lock), "stale lock must be cleared"
+
+    def test_env_threshold_override(self, tmp_path, monkeypatch):
+        """``CONCINNO_LOCK_STALE_SEC`` reconfigures staleness threshold."""
+        import os as _os
+        lock = self._make_lock(tmp_path, age_sec=15)
+        # default 60 → still fresh
+        assert _clear_stale_index_lock(str(tmp_path)) is False
+        assert _os.path.exists(lock)
+        # tighten to 10s → now stale
+        monkeypatch.setenv("CONCINNO_LOCK_STALE_SEC", "10")
+        assert _clear_stale_index_lock(str(tmp_path)) is True
+        assert not _os.path.exists(lock)
+
+    def test_auto_commit_clears_stale_lock_then_proceeds(self, tmp_path):
+        """End-to-end: auto_commit runs lock-clear before any write op."""
+        import os as _os
+
+        # Set up a stale orphan lock
+        lock = self._make_lock(tmp_path, age_sec=120)
+
+        status = " M src/main.py"
+        calls: list[list[str]] = []
+
+        def recording_git(args, cwd, timeout=10):
+            calls.append(list(args))
+            if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:2] == ["status", "--short"]:
+                return status
+            if args[:2] == ["add", "-A"]:
+                # By the time add runs, the lock must be gone
+                assert not _os.path.exists(lock), (
+                    "auto_commit tried to stage while stale lock present"
+                )
+                return ""
+            if args[:2] == ["commit", "-m"]:
+                return "ok"
+            if args[:2] == ["rev-list", "--count"]:
+                return "1"
+            return ""
+
+        with patch("concinno.git_assist._git", side_effect=recording_git):
+            result = auto_commit(str(tmp_path))
+
+        assert result is not None
+        assert not _os.path.exists(lock), "stale lock should be cleared"
+        # rev-parse ran first, then status, then the clear happened, then add
+        assert any(c[:1] == ["add"] for c in calls)
+
+    def test_auto_commit_bails_on_fresh_lock_no_race(self, tmp_path):
+        """Fresh lock → auto_commit bails early without racing ``add``."""
+        self._make_lock(tmp_path, age_sec=5)
+
+        status = " M src/main.py"
+        calls: list[list[str]] = []
+
+        def recording_git(args, cwd, timeout=10):
+            calls.append(list(args))
+            if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:2] == ["status", "--short"]:
+                return status
+            return ""
+
+        with patch("concinno.git_assist._git", side_effect=recording_git):
+            result = auto_commit(str(tmp_path))
+
+        assert result is None
+        # We must NOT have invoked add / commit while a peer was active
+        assert not any(c[:1] == ["add"] for c in calls)
+        assert not any(c[:2] == ["commit", "-m"] for c in calls)

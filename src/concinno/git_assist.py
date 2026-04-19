@@ -214,6 +214,120 @@ def _is_trivial_path(path: str) -> bool:
     return any(frag in norm for frag in _TRIVIAL_PATH_FRAGMENTS)
 
 
+# Default staleness threshold. A real `git commit` or `git add` holds
+# ``.git/index.lock`` for milliseconds; any lock older than 60s with no
+# live progress is orphaned (process killed, parent session died, etc.)
+# and must be cleared before subsequent commits will ever succeed.
+# Override via ``CONCINNO_LOCK_STALE_SEC`` for tests / unusual setups.
+_DEFAULT_LOCK_STALE_SEC = 60
+
+
+def _stale_lock_threshold() -> int:
+    """Read the staleness threshold (seconds) from env, falling back to default."""
+    try:
+        return max(1, int(os.environ.get("CONCINNO_LOCK_STALE_SEC", "")))
+    except (TypeError, ValueError):
+        return _DEFAULT_LOCK_STALE_SEC
+
+
+def _resolve_index_lock_path(cwd: str) -> str:
+    """Return the absolute path of ``.git/index.lock`` for *cwd*.
+
+    Handles three layouts:
+        1. Normal repo: ``cwd/.git/`` is a directory → lock at ``cwd/.git/index.lock``.
+        2. Worktree / submodule: ``cwd/.git`` is a file containing ``gitdir: <path>``
+           → lock at ``<path>/index.lock``.
+        3. Unresolvable → fall back to layout #1 (caller's stat will miss and bail).
+    """
+    default = os.path.join(cwd, ".git", "index.lock")
+    dot_git = os.path.join(cwd, ".git")
+    if os.path.isdir(dot_git):
+        return default
+    if not os.path.isfile(dot_git):
+        return default
+    try:
+        with open(dot_git, encoding="utf-8") as fh:
+            line = fh.readline().strip()
+    except OSError:
+        return default
+    if not line.startswith("gitdir: "):
+        return default
+    real = line[len("gitdir: "):]
+    if not os.path.isabs(real):
+        real = os.path.normpath(os.path.join(cwd, real))
+    return os.path.join(real, "index.lock")
+
+
+def _clear_stale_index_lock(cwd: str, max_age: Optional[int] = None) -> bool:
+    """Remove ``{cwd}/.git/index.lock`` if it is an orphan.
+
+    Returns True when it is now safe to proceed (no lock, or we removed a
+    stale one). Returns False when a *live* lock exists (someone is mid-
+    commit): caller must bail rather than racing.
+
+    Why this exists: when a prior ``git add -A`` / ``git commit`` is
+    SIGKILLed (CC session crash, Ctrl-C during startup, Windows reboot,
+    sub-agent timeout), it leaves behind a zero-byte lock file that
+    blocks every subsequent commit with
+    ``fatal: Unable to create '.git/index.lock': File exists``.
+    Sub-agents mis-diagnose this as a pre-commit hook recreating the
+    lock and reach for ``--no-verify``, which bypasses nothing because
+    no hook is involved — the root cause is the orphan.
+
+    Safety model:
+        - Only remove locks older than ``max_age`` (default 60s). A
+          real op completes in milliseconds, so 60s = comfortably past
+          any legitimate git call.
+        - If removal fails (another process actually owns it or the
+          filesystem denies delete), return False. Caller must skip
+          this commit cycle rather than spinning.
+        - Zero-age lock or mid-op writes are left alone.
+
+    Tunable via env ``CONCINNO_LOCK_STALE_SEC``.
+    """
+    import time
+
+    if max_age is None:
+        max_age = _stale_lock_threshold()
+
+    lock_path = _resolve_index_lock_path(cwd)
+    try:
+        st = os.stat(lock_path)
+    except (FileNotFoundError, OSError):
+        return True  # no lock, proceed
+
+    age = time.time() - st.st_mtime
+    if age < max_age:
+        # Lock is fresh → a real op is in progress elsewhere. Do not
+        # race; caller bails.
+        return False
+
+    # Orphan: remove and report stderr breadcrumb so operators can
+    # correlate with the crashed session.
+    try:
+        os.remove(lock_path)
+    except OSError as exc:
+        _safe_stderr(
+            f"[git_assist] stale lock present but unremovable "
+            f"({lock_path}, age={int(age)}s): {exc}\n",
+        )
+        return False
+    _safe_stderr(
+        f"[git_assist] cleared stale .git/index.lock "
+        f"(age={int(age)}s) — prior git op was killed mid-write\n",
+    )
+    return True
+
+
+def _safe_stderr(msg: str) -> None:
+    """Write to stderr, never raising (sys.stderr can be None under Windows GUI hosts)."""
+    try:
+        if sys.stderr is not None:
+            sys.stderr.write(msg)
+    except Exception:
+        pass
+
+
 def ensure_git_repo(
     cwd: str | None = None,
     timeout: int = 10,
@@ -390,6 +504,12 @@ def auto_commit(
     op_timeout = max(60, timeout)
 
     if _git(["rev-parse", "--is-inside-work-tree"], cwd, timeout=timeout) != "true":
+        return None
+
+    # Clear stale .git/index.lock orphans before any write op. A fresh
+    # lock (age < threshold) means a sibling is mid-commit: bail rather
+    # than race. See ``_clear_stale_index_lock`` for the full rationale.
+    if not _clear_stale_index_lock(cwd):
         return None
 
     status = _git(["status", "--short"], cwd, timeout=timeout)

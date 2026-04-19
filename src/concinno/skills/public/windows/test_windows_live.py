@@ -56,7 +56,10 @@ def test_notepad_type_copy_screenshot_roundtrip(tmp_path):
         # Verify window exists
         wins = [win for win in w.window_list()
                 if "notepad" in win["title"].lower() or "記事本" in win["title"]]
-        assert len(wins) >= 1, f"notepad window not found; windows={[w_['title'] for w_ in w.window_list()]}"
+        assert len(wins) >= 1, (
+            f"notepad window not found; "
+            f"windows={[w_['title'] for w_ in w.window_list()]}"
+        )
 
         # Click into the window to ensure focus (title bar center -> then body)
         win = wins[0]

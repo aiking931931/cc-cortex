@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-04-19
+
+Patch release. Two items: (1) root-cause fix for the ``.git/index.lock``
+race that caused sub-agents in 2.8.0 to reach for ``--no-verify``, and
+(2) cleanup of 44 accumulated ``ruff`` findings across ``gaia_ziq.py``,
+``test_rag.py``, ``test_llm_guard.py``, and ``test_windows_live.py``.
+
+### Fixed
+
+- **Stale ``.git/index.lock`` orphan recovery** in
+  ``concinno.git_assist`` — a killed ``git commit`` (session crash,
+  Ctrl-C during startup, sub-agent timeout, Windows reboot) leaves
+  behind a zero-byte lock file that blocks every subsequent commit
+  with ``fatal: Unable to create '.git/index.lock': File exists``.
+  Sub-agents misread this as "pre-commit hook recreating the lock"
+  and reached for ``--no-verify``, which bypasses nothing because
+  no hook is involved — the root cause is the orphan itself.
+  ``auto_commit()`` now calls ``_clear_stale_index_lock()`` before
+  any write op: locks older than 60s (tunable via
+  ``CONCINNO_LOCK_STALE_SEC``) are removed with an stderr breadcrumb;
+  fresh locks mean a sibling is mid-commit, so the caller bails
+  rather than racing. Worktree / submodule layouts (``.git`` as a
+  ``gitdir:`` pointer file) are resolved correctly via the new
+  ``_resolve_index_lock_path()`` helper. 13 regression tests cover
+  the happy path, fresh-lock bail, env override, gitdir resolution,
+  and the end-to-end ``auto_commit`` integration.
+- **ruff zero-tolerance restored** — 44 accumulated findings cleaned
+  to 0. Breakdown: ``gaia_ziq.py`` (39: E701/E702/E501/I001/E722),
+  ``test_rag.py`` (3: E501 monkeypatch long lines), ``test_llm_guard.py``
+  (1: E501 mock JSON payload), ``test_windows_live.py`` (1: E501
+  assertion message). Behavioural changes are zero — only formatting
+  / line-wrap / explicit exception types. ``except:`` bare handlers
+  upgraded to ``except Exception:`` in ``gaia_ziq.py``.
+
+### Tests
+
+- **5457 passed, 1 skipped, 3 xfailed** (5447 → 5457, +10 net from the
+  new lock-recovery suite in ``tests/test_git_assist.py``).
+
 ## [2.8.0] - 2026-04-18
 
 Six P0 items from the 2026-04-18 night red-blue CBUA session
