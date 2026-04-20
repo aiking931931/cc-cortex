@@ -311,20 +311,12 @@ class TestGitOperations:
         result = squash_auto_commits(tmp_path, keep=3)
         assert "uncommitted changes" in result.error
 
-    def test_squash_skips_when_outer_embeds_inner(self, tmp_path: Path):
-        """2.9.0 治本 regression: outer repo that tracks paths inside an
-        inner repo's working tree must refuse to squash.
-
-        Scenario reproduction (ai-king embedding projects/concinno):
-          outer .gitignore carve-out tracks projects/concinno/src/**
-          inner projects/concinno/.git is a full repo
-          outer squash without this guard = replays old inner snapshots =
-          blows away inner WIP. This test verifies the guard trips.
+    def _build_outer_with_inner(
+        self, path: Path, inner_rel: Path, inner_wip: str = "inner-v1"
+    ) -> Path:
+        """Build the ai-king-style fixture: outer tracks paths later
+        covered by an inner repo's working tree. Returns inner abs path.
         """
-        # Scenario: outer tracks files that later get covered by an
-        # inner .git. This reproduces ai-king embedding projects/concinno
-        # where .gitignore has `!projects/concinno/` carve-out.
-        path = tmp_path
         path.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init"], cwd=str(path), capture_output=True)
         subprocess.run(
@@ -335,8 +327,6 @@ class TestGitOperations:
             ["git", "config", "user.email", "outer@test"],
             cwd=str(path), capture_output=True,
         )
-        # Seed the inner path as tracked BEFORE inner .git exists.
-        inner_rel = Path("projects") / "concinno"
         (path / inner_rel).mkdir(parents=True)
         (path / inner_rel / "important.py").write_text("outer-seed")
         for i in range(8):
@@ -348,9 +338,6 @@ class TestGitOperations:
                 ["git", "commit", "-m", f"auto: {i}"],
                 cwd=str(path), capture_output=True,
             )
-
-        # Now initialize inner repo — outer still tracks the file; inner
-        # owns the working tree going forward.
         inner_dir = path / inner_rel
         for cmd in (
             ["git", "init"],
@@ -358,7 +345,7 @@ class TestGitOperations:
             ["git", "config", "user.email", "inner@test"],
         ):
             subprocess.run(cmd, cwd=str(inner_dir), capture_output=True)
-        (inner_dir / "important.py").write_text("inner-wip")
+        (inner_dir / "important.py").write_text(inner_wip)
         subprocess.run(
             ["git", "add", "-A"], cwd=str(inner_dir), capture_output=True
         )
@@ -366,19 +353,118 @@ class TestGitOperations:
             ["git", "commit", "-m", "inner v1"],
             cwd=str(inner_dir), capture_output=True,
         )
-        # Discard the outer's dirty view so the dirty-tree guard doesn't
-        # short-circuit ahead of the nested-repo guard. In the real
-        # ai-king case, `auto_commit` commits the diff first, then calls
-        # squash on a clean tree.
+        # Checkout outer's dirty view so dirty-tree guard doesn't trip.
         subprocess.run(
             ["git", "checkout", "--", str(inner_rel / "important.py")],
             cwd=str(path), capture_output=True,
         )
+        return inner_dir
 
-        result = squash_auto_commits(path, keep=3)
-        assert "nested repo" in result.error, (
-            f"expected nested-repo guard to trip, got: {result.error!r}"
+    def test_squash_protects_inner_when_outer_embeds(self, tmp_path: Path):
+        """2.10.2 治本 (direction D): outer squash now snapshots and
+        restores the inner repo instead of refusing. Inner HEAD and
+        working tree must be identical before and after outer squash.
+
+        This is the MEMORY #77 / .git bloat fix: 2.9.0 refused, which
+        starved outer squash and let .git grow unbounded. The new
+        default protects inner via stash + reset --hard.
+        """
+        inner_rel = Path("projects") / "concinno"
+        inner_dir = self._build_outer_with_inner(
+            tmp_path, inner_rel, inner_wip="inner-v1-clean"
         )
+
+        # Record inner state before outer squash.
+        inner_head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(inner_dir), capture_output=True, text=True,
+        ).stdout.strip()
+        inner_file_before = (inner_dir / "important.py").read_text()
+
+        result = squash_auto_commits(tmp_path, keep=3)
+
+        assert result.error == "", f"squash aborted: {result.error!r}"
+        assert result.items_cleaned > 0, "outer squash did not run"
+
+        # Inner repo HEAD + working tree must be identical.
+        inner_head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(inner_dir), capture_output=True, text=True,
+        ).stdout.strip()
+        assert inner_head_before == inner_head_after, (
+            f"inner HEAD changed: {inner_head_before} → {inner_head_after}"
+        )
+        assert (inner_dir / "important.py").read_text() == inner_file_before, (
+            "inner working tree content was not restored"
+        )
+
+    def test_squash_protects_inner_with_dirty_wip(self, tmp_path: Path):
+        """Inner repo with uncommitted WIP (tracked + untracked files)
+        must be stashed before outer squash and popped after.
+        """
+        inner_rel = Path("projects") / "concinno"
+        inner_dir = self._build_outer_with_inner(
+            tmp_path, inner_rel, inner_wip="inner-v1-clean"
+        )
+
+        # Add WIP inside inner: modify tracked + add untracked.
+        (inner_dir / "important.py").write_text("DIRTY-WIP")
+        (inner_dir / "new_untracked.py").write_text("untracked content")
+
+        inner_head_before = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(inner_dir), capture_output=True, text=True,
+        ).stdout.strip()
+
+        result = squash_auto_commits(tmp_path, keep=3)
+
+        assert result.error == "", f"squash aborted: {result.error!r}"
+        assert result.items_cleaned > 0
+
+        inner_head_after = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(inner_dir), capture_output=True, text=True,
+        ).stdout.strip()
+        assert inner_head_before == inner_head_after
+        # Dirty WIP restored.
+        assert (inner_dir / "important.py").read_text() == "DIRTY-WIP", (
+            "inner tracked-file WIP was lost"
+        )
+        assert (inner_dir / "new_untracked.py").exists(), (
+            "inner untracked file was lost"
+        )
+
+    def test_squash_legacy_refuse_mode(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """CONCINNO_PROTECT_NESTED_REPOS=0 restores 2.9.0 refuse behavior.
+
+        Some operators may prefer the refuse-outright policy (no stash/
+        reset happens inside inner repos at all). This opt-out is there
+        for that.
+        """
+        inner_rel = Path("projects") / "concinno"
+        self._build_outer_with_inner(tmp_path, inner_rel)
+
+        monkeypatch.setenv("CONCINNO_PROTECT_NESTED_REPOS", "0")
+        result = squash_auto_commits(tmp_path, keep=3)
+        assert "refusing squash" in result.error
+        assert result.items_cleaned == 0
+
+    def test_squash_refuses_when_inner_in_rebase(self, tmp_path: Path):
+        """Inner repo mid-rebase cannot be safely snapshotted — outer
+        must refuse to protect the in-progress rebase state.
+        """
+        inner_rel = Path("projects") / "concinno"
+        inner_dir = self._build_outer_with_inner(tmp_path, inner_rel)
+
+        # Simulate inner mid-rebase by creating the sentinel directory.
+        # The _snapshot_inner_repo helper looks for `.git/rebase-merge`
+        # or `.git/rebase-apply`.
+        (inner_dir / ".git" / "rebase-merge").mkdir()
+
+        result = squash_auto_commits(tmp_path, keep=3)
+        assert "unsafe to snapshot" in result.error
         assert result.items_cleaned == 0
 
     def test_squash_nested_skip_bypass_env(

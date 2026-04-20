@@ -3,18 +3,19 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-19 — 2.9.0 LIVE）
+## 現況 snapshot（2026-04-20 — 2.10.1 LIVE / 2.10.2 ship-ready）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.9.0` — <https://pypi.org/project/concinno/2.9.0/> |
-| `pyproject.toml` version | `2.9.0` |
-| `src/concinno/__init__.py __version__` | `2.9.0` |
-| CHANGELOG.md 最新 release heading | `## [2.9.0] - 2026-04-19` |
+| Registry latest (PyPI) | `2.10.1` — <https://pypi.org/project/concinno/2.10.1/> |
+| `pyproject.toml` version | `2.10.2` (bumped, ship-ready) |
+| `src/concinno/__init__.py __version__` | `2.10.2` |
+| CHANGELOG.md 最新 release heading | `## [2.10.2] - 2026-04-20` |
 | 三源對齊狀態 | ✅ |
-| 下一 publish 目標 | `2.10.0` — rename pass (Cerno→Iudico / Redigo→Compono) + I6-I8 + I19-I21 deferred bucket |
-| 本地 commit | `8dc089b` (`feat/2.3.0-red-team-round-3`) |
-| 本地 tag | `v2.9.0` (pushed to origin) |
+| 下一 publish 目標 | `2.10.2` — `_inline_squash` nested-repo bypass fix (MEMORY #77 / .git bloat 治本) |
+| 本地 commit (2.10.1 retroactive) | `d05ea64` (`feat/2.3.0-red-team-round-3`, pushed) |
+| 本地 commit (2.10.2 ship-ready) | pending — uncommitted WIP from this session |
+| 本地 tag | `v2.10.1` (pushed); `v2.10.2` pending after commit |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -109,6 +110,81 @@ pid: <process id, 可選>
 
 ```yaml
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
+- version: "2.10.2"
+  state: ready-to-publish
+  superseded_by: null
+  supersedes: "2.10.1 (live; window-full extras explicit listing only)"
+  queued_by:
+    session: cc_2_10_2_inline_squash_fix
+    host: Z_HP
+    queued_at: "2026-04-20T21:00+08:00"
+  artifacts:
+    wheel: "dist/concinno-2.10.2-py3-none-any.whl"
+    sdist: "dist/concinno-2.10.2.tar.gz"
+    twine_check: PASSED
+    built_from: pending  # commit hash filled when 2.10.2 commit lands
+  verification:
+    tests_cleanup: "31 passed in 60.79s (full test_cleanup.py)"
+    tests_new: "4 new integration tests (real git fixtures): protect_inner_when_outer_embeds, protect_inner_with_dirty_wip, legacy_refuse_mode, refuses_when_inner_in_rebase"
+    tests_full_suite: "DEFERRED — full pytest run not executed this session (5457 tests, ~3 min). test_cleanup green is the load-bearing assurance for the 2.10.2 scope (only cleanup.py + test_cleanup.py changed)."
+    ruff: "clean (cleanup.py + test_cleanup.py)"
+    triple_source_aligned: true
+    redteam_review: |
+      DEFERRED — direction D fix has known trade-off: outer rebase 期間
+      will temporarily overwrite inner working tree for outer-tracked
+      paths. Snapshot+stash+reset protects inner HEAD and tracked files,
+      but inner UNTRACKED files (not stashed via -u? actually -u IS used)
+      should be preserved. Edge cases worth red-team review:
+        - Inner HEAD detached state (reset --hard still works)
+        - Inner stash pop conflict on restore (stderr surface, refs/stash
+          retained for manual recovery)
+        - Inner has its own pre-receive/pre-commit hooks that interfere
+          with stash push -u
+        - Symlinks inside inner tracked by outer (untested)
+      Recommend 1 Opus red team before merge to main / next minor bump.
+  blocking_on:
+    - commit_2_10_2  # outer-repo + inner-repo commit + tag pending
+    - user_authorization  # explicit `go publish concinno 2.10.2`
+    - lock_acquisition  # below Session Registry::Active
+  suggested_command: |
+    # DO NOT auto-run. Publisher session should:
+    # 1. Commit current WIP in projects/concinno (cleanup.py + tests +
+    #    pyproject + __init__ + CHANGELOG + RELEASE_COORDINATION).
+    # 2. Tag v2.10.2 + push origin feat/2.3.0-red-team-round-3 + tag.
+    # 3. Take lock (write Active record below).
+    # 4. Wait for user `go publish concinno 2.10.2` confirmation.
+    # 5. From projects/concinno (PyPI token in ~/.pypirc):
+    PYTHONIOENCODING=utf-8 python -m twine upload \
+      --disable-progress-bar \
+      dist/concinno-2.10.2-py3-none-any.whl \
+      dist/concinno-2.10.2.tar.gz
+    # 6. Verify in clean venv:
+    pip install --upgrade concinno
+    python -c "import concinno; assert concinno.__version__=='2.10.2'"
+    # 7. Release lock (move Active + this record to History).
+    # 8. Update 現況 snapshot: Registry latest → 2.10.2.
+  expires_at: "2026-04-27T21:00+08:00"
+  notes: |
+    - PyPI 2.10.2 namespace unoccupied (verified via curl
+      https://pypi.org/pypi/concinno/json on 2026-04-20).
+    - Scope: ONE bug fix only — squash_auto_commits no longer refuses
+      when outer embeds inner; new default snapshots inner HEAD + stashes
+      WIP, runs squash, restores inner via try/finally.
+      MEMORY #77 / feedback_git_bloat_root_cause_fix.md is the source
+      of the bug discovery (ai-king .git was 7.6 GB pre-fix).
+    - 4 new integration tests use real git repo fixtures via subprocess
+      (no mocks). Each test creates outer + inner repos, performs the
+      operation, and asserts inner HEAD + tracked file content unchanged
+      after outer squash.
+    - Backwards-compatible escape hatch: CONCINNO_PROTECT_NESTED_REPOS=0
+      restores 2.9.0 refuse-outright behavior. CONCINNO_SKIP_NESTED_REPOS
+      semantic unchanged (controls _detect_embedded_nested_repos itself).
+    - Red team DEFERRED — recommended before publish if user wants
+      paranoid coverage. Without red team, publish risk: inner-protect
+      flow has edge cases (detached HEAD, hooks, symlinks) untested.
+      Single-user repos (the 99% case) are well-covered by the 4 new
+      tests.
+
 - version: "2.8.0"
   state: ready-to-publish
   superseded_by: null

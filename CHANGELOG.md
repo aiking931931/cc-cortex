@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.2] - 2026-04-20
+
+Patch: `squash_auto_commits` now protects embedded inner repos instead of
+refusing outright when one is detected. The 2.9.0 `_detect_embedded_nested_repos`
+guard was strictly correct (outer rebase could overwrite inner working tree
+with stale snapshots) but caused unbounded outer `.git` bloat — inner-tracking
+outer repos (e.g. `ai-king` with `!projects/concinno/` carve-out) could never
+squash and grew 7.6 GB before this fix landed (MEMORY #77). The new default
+snapshots inner HEAD + stashes any inner WIP, lets outer squash proceed, then
+restores inner via `reset --hard HEAD` + `stash pop` in a `finally` block so
+inner is protected even on rebase failure. Set
+`CONCINNO_PROTECT_NESTED_REPOS=0` to restore the 2.9.0 refuse behavior.
+
+### Added
+
+- `_snapshot_inner_repo()` / `_restore_inner_repo()` helpers in
+  `cleanup.py`. Snapshot records inner HEAD + creates a marked stash
+  (`concinno-outer-squash-protect`) when inner has uncommitted state.
+  Refuses when inner is mid-rebase / mid-merge (rebase-merge, rebase-apply,
+  MERGE_HEAD, CHERRY_PICK_HEAD sentinels present).
+- `CONCINNO_PROTECT_NESTED_REPOS` environment variable (default on).
+  Legacy opt-out to the 2.9.0 refuse-outright behavior.
+- 4 new integration tests in `test_cleanup.py` using real `git` repo
+  fixtures: `test_squash_protects_inner_when_outer_embeds`,
+  `test_squash_protects_inner_with_dirty_wip`,
+  `test_squash_legacy_refuse_mode`, `test_squash_refuses_when_inner_in_rebase`.
+  Shared `_build_outer_with_inner` helper extracted for reuse.
+
+### Changed
+
+- `squash_auto_commits()` no longer early-returns with
+  `"nested repo(s) ... refusing squash"` when embedded inners are
+  detected. New flow: snapshot inner → pre-rebase `checkout HEAD -- <inner>`
+  in outer (so rebase's cleanliness check passes) → run rebase →
+  `finally`-block restore inner to its snapshotted state.
+- Outer dirty-tree check uses `git status -z` (NUL-separated, unambiguous)
+  instead of `--short` (leading space of " M path" was eaten by
+  `_git()`'s `strip()`, causing `ln[3:]` to slice the wrong column).
+- `_detect_embedded_nested_repos()` docstring rewrite: previously said the
+  embedded configuration is "never safe to squash"; that was true under
+  the 2.9.0 refuse strategy and no longer holds after direction-D fix.
+  The function itself is unchanged — still returns the list of embedded
+  relative paths, still gated by `CONCINNO_SKIP_NESTED_REPOS`.
+
+### Fixed
+
+- Outer `.git` unbounded growth when the outer repo tracks paths inside
+  an inner repo's working tree. Observed: `ai-king/.git` was 7.6 GB
+  (85% reducible via `git-filter-repo --strip-blobs-bigger-than 10M`)
+  because the `CONCINNO_KEEP_COMMITS=3` auto-squash never ran on outer.
+  With 2.10.2 the squash runs; see `feedback_git_bloat_root_cause_fix.md`
+  for the full diagnosis.
+
 ## [2.10.1] - 2026-04-20
 
 Patch: `windows-full` extras bundle now explicitly lists
