@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "2.9.0"
+version = "2.10.1"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
@@ -51,19 +51,22 @@ rag = [
     "sentence-transformers>=5.0",
     "bm25s>=0.2",
 ]
-# Sibling automation library — auto-generate Python APIs from any software.
+# Sibling automation library — analyze anything, control anything via LLM.
 # Shipped as an optional extra so Concinno consumers who want the full
 # AI-King toolchain in one `pip install` can get it, while anyone who
 # just needs Concinno's guard pipeline can skip the download.
-api-anything = [
-    "api-anything[all]>=0.2.1",
+# Renamed 2026-04-20: api-anything → invoco → control-anything (see upstream
+# CHANGELOG for rationale). The old extras key `api-anything` is no longer
+# accepted; depend on `concinno[control-anything]` going forward.
+control-anything = [
+    "control-anything[all]>=0.1.0",
 ]
 # Bundles
 lite = []  # zero-dep, regex-only — explicitly named for clarity
 all = [
     "concinno[llm]",
     "concinno[rag]",
-    "concinno[api-anything]",
+    "concinno[control-anything]",
 ]
 # Windows-only: browser automation + desktop control
 windows = [
@@ -72,9 +75,10 @@ windows = [
     "mss>=9.0",
     "pyperclip>=1.8",
 ]
-# Windows full: everything (core + llm + rag + api-anything + windows)
+# Windows full: everything (core + llm + rag + control-anything + windows)
 windows-full = [
     "concinno[all]",
+    "concinno[control-anything]",
     "concinno[windows]",
 ]
 dev = [

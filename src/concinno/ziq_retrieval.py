@@ -534,6 +534,14 @@ class _MetaTuner:
     - Separation: only reads outcomes, never touches SPS
     - Fusion: doesn't interfere with Bayesian product
     - Autonomy: IS the autonomy L2 layer
+
+    N-threshold safety (Red-team FATAL-1 2026-04-19):
+    - First tune at n_decisions=50 sets baseline only (prev=None path),
+      no param adjustment.
+    - First actual adjustment at n_decisions=100 (TUNE_INTERVAL × 2).
+    - Below n=100, params stay at library defaults — prevents
+      prior>posterior noise at low sample count (Aldous-Hoover
+      exchangeability concerns, single-user trial non-iid).
     """
 
     TUNE_INTERVAL = 50

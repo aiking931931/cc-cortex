@@ -33,6 +33,7 @@ secrets*
 _recycled/
 _cognitive/
 .tempero_cache/
+scratch/
 
 # Testing & linting caches
 .pytest_cache/

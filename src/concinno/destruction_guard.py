@@ -799,7 +799,13 @@ def _notify_deny(reason: str, config: dict) -> None:
     try:
         from concinno.core.notify import show_toast
 
-        show_toast("Claude Code", f"\U0001f6e1\ufe0f Blocked | {reason[:80]}", persistent=True)
+        show_toast(
+            "Claude Code",
+            f"\U0001f6e1\ufe0f Blocked | {reason[:80]}",
+            enabled=True,
+            tag="destruction-guard",
+            group="concinno",
+        )
     except Exception:
         pass
 

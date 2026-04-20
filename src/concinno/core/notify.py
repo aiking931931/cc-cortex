@@ -350,25 +350,29 @@ def show_toast(
     Windows: XmlDocument version (duration=long, no auto-dismiss, system sound).
     Tag+Group: same tag+group replaces previous toast (anti-stack).
 
-    Default ``app_id`` is the host IDE (``Microsoft.VisualStudioCode``)
-    so Concinno toasts inherit the IDE's branding and icon in the
-    Windows Action Center — matches the user-facing expectation that
-    Concinno events look like they come from VSCode/Cursor. The
-    trade-off is a shared Windows-notification interaction reputation:
-    if the surrounding IDE toasts have low click-through, Windows 11
-    may demote the whole app_id's banners to Action-Center-only. Keep
-    emission frequency conservative (milestone-only, not per-turn) so
-    the interaction ratio stays healthy, and reset the reputation
-    counter manually via registry when it has been polluted (see
-    ``PeriodicNotificationCount`` under the app_id key).
+    Default ``app_id`` is ``Microsoft.VisualStudioCode`` — Claude Code runs
+    inside the VS Code (or Cursor) host process, so toasts are sent under the
+    host IDE's identity. This is the officially supported pattern for host
+    process toast notifications (see MS Learn: Application User Model IDs,
+    "Registering an Application as a Host Process"). Users see a single
+    notification source "Visual Studio Code" rather than a separate bucket.
+
+    If VSC's per-AUMID reputation counter gets demoted to Action-Center-only
+    (Windows 11 suppresses banners when notification:interaction ratio is bad),
+    reset it via:
+        Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\
+        Notifications\\Settings\\Microsoft.VisualStudioCode' -Name PeriodicNotificationCount
+
+    Pass a different ``app_id`` only if you have registered your own
+    AppUserModelID in HKCU/HKCR AppUserModelId and want an isolated
+    notification source.
 
     Args:
         title: Notification title.
         message: Notification body text.
         app_id: Windows AppUserModelId for the toast. Defaults to
-            ``Microsoft.VisualStudioCode`` for IDE branding. Pass a
-            dedicated id (e.g. ``"Concinno.ClaudeCode"``) if you want
-            isolated reputation and don't care about IDE branding.
+            ``Microsoft.VisualStudioCode`` (host IDE identity — user sees
+            "Visual Studio Code" as sender).
         enabled: Override enabled check. None = respect config toast_enabled.
         tag: Toast tag for replacement (same tag+group replaces previous).
         group: Toast group for replacement.

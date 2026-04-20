@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-04-20
+
+Patch: `windows-full` extras bundle now explicitly lists
+`concinno[control-anything]` alongside `concinno[all]` and `concinno[windows]`,
+and the comment above the bundle was stale (still referred to `api-anything`).
+Functionally a no-op — `concinno[windows-full]` already resolved
+`control-anything` transitively through `concinno[all]` in 2.10.0 — but the
+explicit listing makes the dependency visible in `pyproject.toml` without
+having to trace through the `[all]` bundle.
+
+### Changed
+
+- `[project.optional-dependencies] windows-full` adds explicit
+  `"concinno[control-anything]"` entry (redundant with `concinno[all]` but
+  documents intent).
+- Comment on `windows-full` updated: `api-anything` → `control-anything`
+  (stale text missed during the 2.10.0 rename).
+
+## [2.10.0] - 2026-04-20
+
+Combined release covering two parallel axes:
+
+### Changed — PyPI maintainer account migration
+
+Re-publish under new PyPI maintainer account after old account deletion. The
+original `AI_King` account is being deleted; all four AI-King-owned projects
+(`invoco`, `concinno`, `api-anything`, `cc-cortex`) are being removed and
+re-registered under a new account. PyPI disallows filename reuse even for
+deleted projects, so the `concinno-2.9.0.tar.gz` / `concinno-2.9.1.tar.gz`
+filenames cannot be re-uploaded — `2.10.0` is the first release under the new
+account. (The `2.9.1` draft prepared earlier in the same session was never
+published; it is superseded by `2.10.0`.)
+
+### Changed — `api-anything` extras renamed to `control-anything`
+
+The sibling automation library has been renamed upstream:
+`api-anything 0.1.0-0.3.2` → `invoco 0.1.0-0.3.1` → `control-anything 0.1.0+`.
+Concinno's optional extras key is updated accordingly.
+
+- **Breaking (extras only)**: `pip install 'concinno[api-anything]'` no longer
+  resolves. Use `pip install 'concinno[control-anything]'` instead.
+- The `all` bundle now references `concinno[control-anything]` (previously
+  `concinno[api-anything]`).
+- No change to Concinno's core API, guard pipeline, hooks, or any non-extras
+  surface. Users who never depended on the `api-anything` extras are
+  unaffected.
+
+### Why minor bump (2.9 → 2.10) not major
+
+Extras key rename is a surface change only for consumers who pinned
+`concinno[api-anything]` explicitly. Core imports, guard APIs, hook contracts,
+and LLM-as-Judge surfaces are unchanged. Per semver guidance for
+"backward-incompatible but narrow-scope" extras changes, a minor bump with a
+clearly documented migration path is acceptable.
+
+### Migration
+
+```bash
+# Old
+pip install 'concinno[api-anything]'
+# or transitively via: pip install 'concinno[all]' (where all included api-anything)
+
+# New
+pip install 'concinno[control-anything]'
+# or transitively via: pip install 'concinno[all]' (where all now includes control-anything)
+```
+
 ## [2.9.0] - 2026-04-19
 
 Minor release. Two parallel axes:

@@ -676,6 +676,11 @@ def _notify_stop(hook_data: dict) -> None:
     if git_line:
         body += f"\n{git_line}"
 
+    # Fall through to show_toast default app_id=Microsoft.VisualStudioCode.
+    # Claude Code runs inside the VS Code / Cursor host process, so we send
+    # toasts under the host IDE's identity — user sees a single notification
+    # source "Visual Studio Code" in Action Center. This is the officially
+    # supported host-process AUMID pattern (MS Learn: AppUserModelIDs).
     show_toast(
         "Claude Code", body,
         enabled=True, tag="claude-stop", group="claude-code",
