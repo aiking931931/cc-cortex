@@ -10,8 +10,10 @@ from concinno.git_assist import (
     _clear_stale_index_lock,
     _format_section,
     _gt,
+    _is_large_unignored,
     _is_secret,
     _is_trivial_path,
+    _large_file_threshold,
     _parse_status,
     _resolve_index_lock_path,
     auto_commit,
@@ -512,6 +514,61 @@ class TestAutoCommit:
 
 
 # ── _is_trivial_path ─────────────────────────────────────
+
+
+class TestLargeFileThreshold:
+    """``CONCINNO_LARGE_FILE_THRESHOLD`` env var + default."""
+
+    def test_default_is_10_mib(self, monkeypatch):
+        monkeypatch.delenv("CONCINNO_LARGE_FILE_THRESHOLD", raising=False)
+        assert _large_file_threshold() == 10_485_760
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("CONCINNO_LARGE_FILE_THRESHOLD", "1024")
+        assert _large_file_threshold() == 1024
+
+    def test_invalid_env_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("CONCINNO_LARGE_FILE_THRESHOLD", "not-a-number")
+        assert _large_file_threshold() == 10_485_760
+
+    def test_zero_or_negative_falls_back(self, monkeypatch):
+        monkeypatch.setenv("CONCINNO_LARGE_FILE_THRESHOLD", "0")
+        assert _large_file_threshold() == 10_485_760
+        monkeypatch.setenv("CONCINNO_LARGE_FILE_THRESHOLD", "-1")
+        assert _large_file_threshold() == 10_485_760
+
+
+class TestIsLargeUnignored:
+    """Size-based filter used by ``auto_commit`` to unstage bulked blobs
+    before they hit outer .git history (MEMORY #77 / 2.10.3 治本)."""
+
+    def test_small_file_is_not_large(self, tmp_path):
+        f = tmp_path / "small.txt"
+        f.write_bytes(b"x" * 100)
+        assert not _is_large_unignored("small.txt", str(tmp_path))
+
+    def test_file_above_threshold_is_large(self, tmp_path):
+        f = tmp_path / "big.bin"
+        f.write_bytes(b"x" * 2048)
+        assert _is_large_unignored("big.bin", str(tmp_path), threshold=1024)
+
+    def test_missing_file_is_not_large(self, tmp_path):
+        # Deleted between stage and check — should not count as large.
+        assert not _is_large_unignored("ghost.bin", str(tmp_path))
+
+    def test_custom_threshold_via_env(self, tmp_path, monkeypatch):
+        f = tmp_path / "medium.bin"
+        f.write_bytes(b"x" * 5000)
+        monkeypatch.setenv("CONCINNO_LARGE_FILE_THRESHOLD", "1000")
+        assert _is_large_unignored("medium.bin", str(tmp_path))
+        monkeypatch.setenv("CONCINNO_LARGE_FILE_THRESHOLD", "10000")
+        assert not _is_large_unignored("medium.bin", str(tmp_path))
+
+    def test_directory_is_not_large(self, tmp_path):
+        # Dir entries are not regular files; never flag them even if
+        # something inside happens to be huge.
+        (tmp_path / "subdir").mkdir()
+        assert not _is_large_unignored("subdir", str(tmp_path))
 
 
 class TestIsTrivialPath:

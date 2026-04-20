@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import subprocess
 import sys
 from typing import Optional
@@ -200,6 +201,57 @@ _TRIVIAL_PATH_FRAGMENTS = (
     "/mcp_cleanup_state.json",
     "/confidence_record.json",
 )
+
+
+def _large_file_threshold() -> int:
+    """Bytes above which a tracked-or-newly-added file is considered large.
+
+    Configurable via ``CONCINNO_LARGE_FILE_THRESHOLD`` (bytes). Defaults to
+    10 MiB — PyPI's per-file limit is 100 MiB and GitHub warns at 50 MiB,
+    but most accidental bloat (model checkpoints, datasets, backup zips)
+    sits at 10 MiB+ so that's where the pre-commit filter trips.
+    """
+    try:
+        raw = os.environ.get("CONCINNO_LARGE_FILE_THRESHOLD", "10485760")
+        val = int(raw)
+        return val if val > 0 else 10_485_760
+    except (ValueError, TypeError):
+        return 10_485_760
+
+
+def _is_large_unignored(path: str, cwd: str, threshold: Optional[int] = None) -> bool:
+    """Return True when ``path`` in ``cwd`` is ≥threshold bytes AND the
+    file is currently staged or tracked (not already gitignored).
+
+    2.10.3 治本 — ``auto_commit`` calls this after ``git add -A`` to
+    unstage accidentally-bulked files (model checkpoints, datasets,
+    backup archives) before they enter outer .git history. MEMORY #77
+    noted the 7.6 GB bloat traced to LoRA / safetensors / BEIR corpus
+    blobs the .gitignore did not catch. The squash-runaway fix (2.10.2)
+    makes keep=3 work, but squashing historical blobs is expensive — it
+    is cheaper to never stage them in the first place.
+
+    Failure modes (all treated as "not large"): path missing, broken
+    symlink, stat errors, git command failure. Large-file detection is a
+    hygiene signal, not a security gate — on doubt, let the commit
+    through and let the operator notice.
+    """
+    if threshold is None:
+        threshold = _large_file_threshold()
+
+    try:
+        full = os.path.join(cwd, path)
+        # follow_symlinks=False: symlinks themselves are tiny, and the
+        # thing they point at may live outside the repo; don't blame the
+        # link for its target's size.
+        st = os.stat(full, follow_symlinks=False)
+    except OSError:
+        return False
+
+    if not stat.S_ISREG(st.st_mode):
+        return False
+
+    return st.st_size >= threshold
 
 
 def _is_trivial_path(path: str) -> bool:
@@ -542,6 +594,31 @@ def auto_commit(
     secret_files = [f for f in all_files if _is_secret(f)]
     if secret_files:
         _git(["reset", "HEAD", "--", *secret_files], cwd, timeout=op_timeout)
+
+    # 2.10.3 治本 — unstage large unignored blobs so they never enter
+    # outer .git history. The squash fix (2.10.2) reclaims historical
+    # bloat, but preventing the stage is cheaper than squashing it
+    # later. MEMORY #77's 7.6 GB came from LoRA/safetensors/BEIR
+    # corpus files the .gitignore missed — this is the belt to that
+    # .gitignore suspenders.
+    large_files = [
+        f for f in safe_files if _is_large_unignored(f, cwd)
+    ]
+    if large_files:
+        _git(["reset", "HEAD", "--", *large_files], cwd, timeout=op_timeout)
+        _safe_stderr(
+            f"concinno: unstaged {len(large_files)} large file(s) "
+            f"(≥{_large_file_threshold() // 1_048_576} MiB each) to prevent "
+            "repo bloat. Add matching patterns to .gitignore:\n  " +
+            "\n  ".join(large_files[:5]) +
+            ("\n  …" if len(large_files) > 5 else "") +
+            "\n(escape: CONCINNO_LARGE_FILE_THRESHOLD=<bytes>)"
+        )
+        # Recompute safe_files: if ALL safe_files were large, there is
+        # nothing left to commit. Otherwise commit the remainder.
+        safe_files = [f for f in safe_files if f not in large_files]
+        if not safe_files:
+            return None
 
     # Generate commit message from file types
     exts = set()

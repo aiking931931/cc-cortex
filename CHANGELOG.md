@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.3] - 2026-04-21
+
+Patch: `auto_commit` now unstages large unignored blobs (≥10 MiB by
+default) before committing. MEMORY #77's 7.6 GB bloat was caused by
+LoRA / safetensors / BEIR corpus files that the `.gitignore` did not
+cover — the 2.10.2 squash fix reclaims historical bulk, but preventing
+the stage in the first place is cheaper. This is the belt to
+`.gitignore`'s suspenders.
+
+### Added
+
+- `_large_file_threshold()` reads `CONCINNO_LARGE_FILE_THRESHOLD`
+  (bytes, default 10 MiB / 10 485 760). Invalid / non-positive values
+  fall back to the default.
+- `_is_large_unignored(path, cwd, threshold=None)` — size-based filter
+  paired with the existing `_is_secret`. `follow_symlinks=False` so
+  symlinks themselves are never flagged (the target may live outside
+  the repo). Non-regular files and missing paths return `False` — this
+  is a hygiene signal, not a security gate.
+- 9 new tests under `TestLargeFileThreshold` + `TestIsLargeUnignored`
+  in `test_git_assist.py` (unit-level, no subprocess / real repo).
+
+### Changed
+
+- `auto_commit` step order: after `git add -A` and the secret-file
+  defensive unstage, scan `safe_files` for large unignored blobs and
+  unstage them via `git reset HEAD -- <paths>`. stderr emits the first
+  5 unstaged paths + threshold + escape-hatch hint
+  (`CONCINNO_LARGE_FILE_THRESHOLD=<bytes>`). If every safe file was
+  large, return `None` (nothing to commit) instead of an empty commit.
+
+### Fixed
+
+- Prevents the MEMORY #77 bulk pattern (tracked LoRA adapter /
+  safetensors / multi-MB dataset snapshots) from entering outer .git
+  history. Combined with the 2.10.2 squash fix, outer repos that
+  embed inner repos (e.g. ai-king / projects/concinno) now have
+  both historical (squash) and prospective (stage filter) defenses.
+
 ## [2.10.2] - 2026-04-20
 
 Patch: `squash_auto_commits` now protects embedded inner repos instead of
