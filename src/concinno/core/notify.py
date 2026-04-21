@@ -299,7 +299,7 @@ def _win_toast_xmldoc(
         f"$null = [{xml_ns}, {xml_ns},"
         " ContentType = WindowsRuntime]\n"
         '$template = @"\n'
-        '<toast duration="long" scenario="reminder"><visual>'
+        '<toast duration="long" scenario="urgent"><visual>'
         '<binding template="ToastGeneric">'
         f"<text>{safe_title}</text>"
         f"<text>{safe_msg}</text>"
