@@ -417,6 +417,18 @@ def show_toast(
                 return False
         except Exception:
             pass
+    # Per-call counter reset — addresses user observation "VSCode AUMID
+    # was stable before, bad now" (private AUMID alone doesn't solve it).
+    # Real root cause = toast frequency: Concinno's stop-hook pipeline
+    # fires per-turn (20-50/day) while 2.0.0-era fired 1-2/session.
+    # Any AUMID hits Win11 demote threshold given this rate. Fix: reset
+    # counter to 0 just before every dispatch so Windows always sees 0
+    # when it reads for banner-vs-action-center routing.
+    try:
+        from concinno.notify_health import reset_aumid_counter
+        reset_aumid_counter(app_id)
+    except Exception:
+        pass
     try:
         if sys.platform == "win32":
             if _win_toast_winrt(title, message, app_id, tag=tag, group=group):
