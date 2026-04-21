@@ -417,25 +417,18 @@ def show_toast(
                 return False
         except Exception:
             pass
-    # Per-call counter reset — addresses user observation "VSCode AUMID
-    # was stable before, bad now" (private AUMID alone doesn't solve it).
-    # Real root cause = toast frequency: Concinno's stop-hook pipeline
-    # fires per-turn (20-50/day) while 2.0.0-era fired 1-2/session.
-    # Any AUMID hits Win11 demote threshold given this rate. Fix: reset
-    # counter to 0 just before every dispatch so Windows always sees 0
-    # when it reads for banner-vs-action-center routing.
-    try:
-        from concinno.notify_health import reset_aumid_counter
-        reset_aumid_counter(app_id)
-    except Exception:
-        pass
+    # Revert to CCC 1.12.1 xmldoc-first path (2026-04-21). Regression
+    # analysis showed 2.12.x _win_toast_winrt + per-call counter reset
+    # were silent false-negatives: winrt returns True but banner never
+    # renders in some environments (windows-toasts private AUMID path
+    # or Surfshark VBS quarantine). CCC-era path (xmldoc via wscript+VBS)
+    # is Windows 10/11 native WinRT under wscript CREATE_NO_WINDOW,
+    # 10+ year backward-compatible, user-attested-stable.
     try:
         if sys.platform == "win32":
-            if _win_toast_winrt(title, message, app_id, tag=tag, group=group):
-                return True
-            if _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
-                return True
-            return _win_toast_balloon(title, message)
+            if not _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
+                return _win_toast_balloon(title, message)
+            return True
         elif sys.platform == "darwin":
             subprocess.run(
                 ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
