@@ -1,0 +1,14 @@
+{
+  "_meta": {
+    "name": "minimal",
+    "description": "Naming hygiene only — patent/handoff/feedback name patterns, no opinionated directory layout."
+  },
+  "naming": {
+    "patent":           "PAT-{seq:03d}_{name}_{variant}.md",
+    "handoff":          "handoff_{project}.md",
+    "handoff_summary":  "handoff_{project}_summary.md",
+    "handoff_archive":  "handoff_{project}_archive.md",
+    "feedback":         "feedback_{topic}.md"
+  },
+  "placement": []
+}

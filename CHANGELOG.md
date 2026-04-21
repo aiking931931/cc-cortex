@@ -7,12 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-**WIP towards 2.12.2** (2.12.1 already on PyPI from parallel session — see
-`RELEASE_COORDINATION.md` §"2.12.1 fork divergence". Current local
-modifications ship alongside Session E ZIQ-autotune / GAIA-meta-router /
-sweep_guard work; must reconcile with 2.12.1 source before next publish).
+## [2.12.2] - 2026-04-21
 
-### Added — ZIQ auto-tune gradient + GAIA SAS/MAS/hybrid meta-router + sweep_guard
+Minor: reconciles 2.12.1 (PyPI orphan — parallel session built from
+dirty working tree, uploaded without git commit/tag) with Session E
+cognitive-layer additions. 2.12.1 source files (12 total: cli/
+convention_cmd, convention_presets/, 8 new guards, handoff_writeback,
+release_authorization) merged into git tree; Session E ZIQ-autotune /
+GAIA-meta-router / sweep_guard overlaid on top. All additions ship
+**opt-in** — zero behavior change for callers that do not explicitly
+enable them, matching CLAUDE.md "small surface, deep behavior"
+philosophy.
+
+### Reconciled — 12 files from 2.12.1 (no longer orphan on PyPI)
+
+- `concinno.cli.convention_cmd` wired into `cli/main.py` sub-parser
+  (alongside existing `config_cmd`). Workspace convention CLI available
+  as `concinno convention ...`.
+- `concinno.convention_presets` submodule with `aiking.json` /
+  `minimal.json` preset profiles.
+- 8 new opt-in guards under `concinno.guards.*`:
+  ``benchmark_setup_guard`` / ``deterministic_repro_guard`` /
+  ``function_length_guard`` / ``import_cycle_guard`` /
+  ``magic_number_guard`` / ``result_file_guard`` /
+  ``seed_propagation_guard`` / ``token_efficient_guard``.
+  Importable directly; **not** registered in `create_default_pipeline`
+  (matches 2.12.1's intentional opt-in design — callers wire via
+  `pipeline.register(XGuard())` per project need).
+- `concinno.handoff_writeback` — scheduled-task report → handoff TODO
+  writeback (fail-open, stdlib-only). Surfaces `_format_todo_entry`,
+  `_resolve_handoff_file`, `writeback_scheduled_report`.
+- `concinno.release_authorization` — authorization gate separate from
+  `destruction_guard`. Two modes: `STRING_MATCH` (chat token `go
+  publish <package> <version>`) and `ASKUSER_ANSWER` (via
+  `AskUserQuestion`). Disable toggle preserves destruction protection
+  while relaxing publish friction. Top-level exports:
+  ``AuthorizationConfig`` / ``AuthorizationMode`` / ``PUBLISH_PATTERNS``
+  / ``check_authorization`` / ``describe_current_config`` /
+  ``detect_publish_operation`` / ``format_required_string`` /
+  ``load_config``.
+
+### Added — ZIQ auto-tune gradient + GAIA SAS/MAS/hybrid meta-router + sweep_guard (Session E)
 
 All three modules ship **opt-in** — zero behavior change for callers that
 do not explicitly enable them, matching CLAUDE.md "small surface, deep

@@ -1408,6 +1408,10 @@ def main() -> None:
     from .config_cmd import register as _register_config
     _register_config(sub)
 
+    # convention — workspace convention engine CLI (2.12.1)
+    from .convention_cmd import register as _register_convention
+    _register_convention(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)

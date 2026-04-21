@@ -157,6 +157,81 @@ pid: <process id, 可選>
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
 # (2.11.0 PUBLISHED — record moved to Session Registry::History below)
 
+- version: "2.12.2"
+  state: ready-to-publish
+  supersedes: "2.12.1 (PyPI orphan — no local commit/tag from parallel session)"
+  queued_by:
+    session: cc_150b_1551  # aka cc_9220_1546 dual-id
+    host: Z_HP
+    queued_at: "2026-04-21T16:28+08:00"
+  artifacts:
+    wheel: "dist/concinno-2.12.2-py3-none-any.whl"
+    sdist: "dist/concinno-2.12.2.tar.gz"
+    twine_check: PASSED
+    wheel_file_count: 473
+    built_from: "inner-repo HEAD on feat/2.3.0-red-team-round-3 (101bf79 Session E WIP + reconcile commit pending)"
+  verification:
+    tests_full: "5653 passed, 1 skipped, 3 xfailed (in 198.49s)"
+    tests_new_session_e: "93 (24 autotuner + 14 registry + 27 meta-router + 28 sweep_guard)"
+    tests_version_sync: "2/2"
+    ruff_new_files: clean  # 4 Session E + 12 reconciled files
+    ruff_pre_existing: same as 2.10.5
+    triple_source_aligned: true  # pyproject 2.12.2 / __init__ 2.12.2 / CHANGELOG [2.12.2] heading
+    reconcile_target_files: |
+      All 18 target files verified present in wheel:
+        Session E (4): ziq_autotuner.py + gaia_meta_router.py +
+          ziq_autotune_registry.py + sweep_guard.py
+        2.12.1 reconcile (14): cli/convention_cmd.py +
+          convention_presets/__init__.py + aiking.json + minimal.json +
+          8 guards (benchmark_setup/deterministic_repro/function_length/
+          import_cycle/magic_number/result_file/seed_propagation/
+          token_efficient) + handoff_writeback.py + release_authorization.py
+    wire_in: |
+      - cli/main.py registers convention_cmd sub-parser (2 lines)
+      - __init__.py exports 14 Session E symbols + 8 release_authorization
+        symbols via __all__
+      - sweep_guard wired into concinno.hooks.on_stop modules list
+        (_build_sweep_guard + _BLOCK_PREFIXES["sweep_guard"]="SWEEP_BLOCK:"
+        + _BLOCK_REASONS + _emit_stderr_outputs whitelist)
+      - 8 new guards importable but NOT registered in
+        create_default_pipeline (matches 2.12.1 opt-in design)
+    redteam_review: |
+      SKIPPED — reconcile scope is purely additive merge (2.12.1 source
+      + Session E features). No architectural change vs 2.12.1 that
+      warrants fresh S5. Session E red-blue was deferred per ship-fast
+      directive; can back-fill in 2.13.0 minor.
+  blocking_on:
+    - user_authorization    # exact string `go publish concinno 2.12.2`
+    - lock_acquisition      # below `Session Registry::Active`
+  suggested_command: |
+    # Publisher should:
+    # 1. Take lock (write Active record below)
+    # 2. Verify user chat contains exact string `go publish concinno 2.12.2`
+    # 3. From projects/concinno:
+    PYTHONIOENCODING=utf-8 python -m twine upload \
+      --disable-progress-bar \
+      dist/concinno-2.12.2-py3-none-any.whl \
+      dist/concinno-2.12.2.tar.gz
+    # 4. Tag + push (auto-commit reconcile first):
+    #    inner-repo HEAD 101bf79 currently has WIP commit; need follow-up
+    #    commit for reconcile files before v2.12.2 tag. Run from
+    #    projects/concinno:
+    git add -A && git commit -m "release: concinno 2.12.2 — reconcile 2.12.1 + Session E"
+    git tag v2.12.2 && git push origin v2.12.2
+    # 5. Clean-venv verify:
+    pip install --upgrade concinno==2.12.2
+    python -c "import concinno;assert concinno.__version__=='2.12.2';from concinno import ZIQAutoTuner, select_arm, check_authorization; print('OK')"
+    # 6. Move this record + Active lock to Session Registry::History
+  expires_at: "2026-04-28T16:30+08:00"  # +7d
+  notes: |
+    2.12.2 reconciles PyPI 2.12.1 orphan (parallel session uploaded
+    wheel without git commit/tag — 12 files in wheel but not in local
+    tree). Merged 12 files from downloaded 2.12.1 wheel into git tree,
+    overlaid Session E cognitive-layer additions (ZIQ auto-tune / GAIA
+    meta-router / sweep_guard).
+    Stale dist/concinno-2.12.1* artifacts moved to _AI_BRAIN_safe/
+    earlier this session to prevent accidental re-upload (gitignored).
+
 - version: "2.8.0"
   # placeholder to keep YAML fence non-empty after 2.11.0 moved to History
   state: stale  # see prior record for historical context

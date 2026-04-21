@@ -11,7 +11,7 @@ Legacy API (v0.5, deprecated — removed in v1.0)::
 Migration guide: https://github.com/aiking931931/concinno/blob/main/docs/migration-v05-v06.md
 """
 
-__version__ = "2.11.0"
+__version__ = "2.12.2"
 
 import warnings as _warnings
 
@@ -96,6 +96,16 @@ from concinno.prompt_hooks import (  # noqa: F401
     install_prompt_hooks,
     list_installed_judges,
     uninstall_prompt_hooks,
+)
+from concinno.release_authorization import (  # noqa: F401
+    PUBLISH_PATTERNS,
+    AuthorizationConfig,
+    AuthorizationMode,
+    check_authorization,
+    describe_current_config,
+    detect_publish_operation,
+    format_required_string,
+    load_config,
 )
 from concinno.riverbed import (  # noqa: F401
     RecallResult,
@@ -271,6 +281,15 @@ __all__ = [
     "Tool",
     "ExecutionState",
     "ToolStep",
+    # 2.12.1 release_authorization (separate from destruction_guard)
+    "AuthorizationConfig",
+    "AuthorizationMode",
+    "PUBLISH_PATTERNS",
+    "check_authorization",
+    "describe_current_config",
+    "detect_publish_operation",
+    "format_required_string",
+    "load_config",
     # 2.12.0 ZIQ auto-tune + GAIA SAS/MAS meta-router
     "ZIQAutoTuner",
     "AutoTuneObservation",
