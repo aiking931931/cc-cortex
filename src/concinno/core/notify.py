@@ -367,7 +367,7 @@ def _win_toast_balloon(title: str, message: str, timeout_ms: int = 5000) -> bool
 def show_toast(
     title: str,
     message: str,
-    app_id: str = "Microsoft.VisualStudioCode",
+    app_id: str = "AIKing.Concinno.ClaudeCode",
     enabled: bool | None = None,
     tag: str = "concinno",
     group: str = "concinno",

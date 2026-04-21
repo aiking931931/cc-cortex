@@ -40,11 +40,38 @@ _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 AUMID_VSCODE = "Microsoft.VisualStudioCode"
 AUMID_CURSOR = "Cursor.Cursor"
+AUMID_CONCINNO = "AIKing.Concinno.ClaudeCode"
+_PRIVATE_DISPLAY_NAME = "Claude Code"
 
 _REG_BASE = (
     r"HKCU:\Software\Microsoft\Windows\CurrentVersion"
     r"\Notifications\Settings"
 )
+_AUMID_CLASS_BASE = r"HKCU:\Software\Classes\AppUserModelId"
+
+
+def register_private_aumid(
+    aumid: str = AUMID_CONCINNO,
+    display_name: str = _PRIVATE_DISPLAY_NAME,
+) -> bool:
+    """Register a Concinno-private AUMID so toasts don't share host-IDE
+    reputation. Root-cause fix for user's 'notification breaks intermittently'
+    — VSCode AUMID pool accumulates high toast count from unrelated sources,
+    triggering Win11 banner-demote even when Concinno only fires a few toasts.
+
+    Creates ``HKCU:\\Software\\Classes\\AppUserModelId\\<aumid>`` with
+    DisplayName. Idempotent; no-op on non-Windows.
+    """
+    if sys.platform != "win32":
+        return True
+    safe_name = display_name.replace("'", "''")
+    cmd = (
+        rf"$p='{_AUMID_CLASS_BASE}\{aumid}'; "
+        "if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }; "
+        f"Set-ItemProperty -Path $p -Name DisplayName -Value '{safe_name}' "
+        "-Type String -ErrorAction SilentlyContinue"
+    )
+    return _run_powershell(cmd, timeout_s=5.0) is not None
 
 
 def _hidden_startupinfo():
@@ -159,8 +186,9 @@ def reset_aumid_counter(aumid: str = AUMID_VSCODE) -> bool:
 
 
 def auto_reset_on_session_start(
-    aumids: tuple[str, ...] = (AUMID_VSCODE, AUMID_CURSOR),
+    aumids: tuple[str, ...] = (AUMID_CONCINNO, AUMID_VSCODE, AUMID_CURSOR),
     verbose: bool = False,
+    register_private: bool = True,
 ) -> dict[str, bool]:
     """Reset counters for all known host-IDE AUMIDs.
 
@@ -177,6 +205,12 @@ def auto_reset_on_session_start(
     Returns:
         Mapping of AUMID → True if reset succeeded.
     """
+    if register_private:
+        try:
+            register_private_aumid()
+        except Exception:
+            pass
+
     results: dict[str, bool] = {}
     pre_reset_counters: dict[str, Optional[int]] = {}
     for aumid in aumids:
@@ -206,10 +240,12 @@ def auto_reset_on_session_start(
 
 
 __all__ = [
-    "AUMID_VSCODE",
+    "AUMID_CONCINNO",
     "AUMID_CURSOR",
+    "AUMID_VSCODE",
     "auto_reset_on_session_start",
     "get_counter",
     "is_demoted",
+    "register_private_aumid",
     "reset_aumid_counter",
 ]
