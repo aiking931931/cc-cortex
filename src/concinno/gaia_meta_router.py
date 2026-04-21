@@ -7,8 +7,17 @@
     online-learning per arm). Breaks the Tran&Kiela 2026 "SAS >= MAS at
     token-matched budget" attack by picking the right arm per task
     instead of committing to one family across the whole run.
+
+    In addition to the arm, ``select_arm`` returns ``N`` — the number of
+    parallel subagents to spawn (1 for SAS, 2-3 for MAS, 3-4 for hybrid).
+    N-aware routing addresses MAS coordination-cost O(N²) and Amdahl
+    depth-limit pressures: over-wide fans blow the budget, under-wide
+    fans leave parallelism on the table. N shrinks under budget stress
+    and grows with depth signals (long Q, level 3, multi-hop keywords).
+
 @dependencies concinno.ziq_autotuner (optional), stdlib
-@exports select_arm, record_arm_outcome, sps_arm_scores, ArmFTRL, ARMS, Arm
+@exports select_arm, select_arm_with_reason, record_arm_outcome,
+    sps_arm_scores, subagent_count, ArmFTRL, ARMS, Arm, ArmDecision
 
 Design rationale (Plan Part 5 ⭐ ZIQ meta-router key insight)::
 
@@ -16,6 +25,7 @@ Design rationale (Plan Part 5 ⭐ ZIQ meta-router key insight)::
     Level 2 + file + multi-tool   → MAS  (coordination-dense, SAS saturates)
     Level 3 + long-horizon + cross-domain → hybrid (MAS + external judge)
     Token budget < 20% remaining  → force SAS (MAS spawn overhead starves)
+    Token budget 20-40% remaining → MAS/hybrid allowed but N shrinks to floor
 
 This module lives at the ``concinno`` package root (not under
 ``skills/public/agent/``) because it is a generic meta-router consumed by
@@ -34,11 +44,26 @@ import json
 import math
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 ARMS: tuple[str, str, str] = ("SAS", "MAS", "hybrid")
 Arm = Literal["SAS", "MAS", "hybrid"]
+
+# Per-arm subagent count bounds. SAS is always 1; MAS shallow fans 2-3;
+# hybrid fans a MAS pool + judge (represented by N=3..4 where the caller
+# treats the last slot as the judge or a deeper MAS worker).
+_N_BOUNDS: dict[str, tuple[int, int]] = {
+    "SAS": (1, 1),
+    "MAS": (2, 3),
+    "hybrid": (3, 4),
+}
+
+# Budget-pressure thresholds for N shrinkage (stricter than arm-fallback).
+# Above ``_N_FULL_BUDGET_FRAC`` → pick from arm's full range.
+# Between floor and this → clamp to arm lower bound.
+_N_FULL_BUDGET_FRAC = 0.40
 
 # SPS features that push toward MAS (multi-tool coordination).
 _MAS_SIGNALS: tuple[str, ...] = (
@@ -188,14 +213,100 @@ def sps_arm_scores(
     return scores
 
 
+@dataclass(frozen=True)
+class ArmDecision:
+    """Full routing decision: arm + N + reason breadcrumb.
+
+    Returned by :func:`select_arm_with_reason`. Callers who only need
+    ``(arm, n)`` should prefer :func:`select_arm` which returns the
+    tuple directly. The ``reason`` field is a short human-readable tag
+    — useful for logs / debugging but not stable across versions.
+    """
+
+    arm: Arm
+    n: int
+    reason: str
+
+
+def subagent_count(
+    arm: Arm,
+    task: dict[str, Any],
+    *,
+    budget: int = 10_000,
+    remaining_budget: float | None = None,
+) -> int:
+    """Choose N (parallel subagent count) for a given arm + task.
+
+    Rules:
+        SAS → 1 always.
+        MAS → 2 (shallow) up to 3 (deep).
+            +1 per strong multi-tool signal (≥2 MAS keyword hits, or
+            file attachment + research qtype).
+            +1 for level 3 (harder task pays the coordination cost).
+        hybrid → 3 (MAS pool + judge) up to 4.
+            +1 for ≥2 hybrid keyword hits (cross-domain / multi-phase).
+            +1 for very long questions (≥500 chars).
+
+    Budget pressure (remaining_budget / budget < ``_N_FULL_BUDGET_FRAC``)
+    clamps N to the arm's lower bound. This preserves the "force SAS
+    at <20% budget" hard floor (handled upstream by ``select_arm``);
+    between 20-40% we keep the chosen arm but shrink the fan-out.
+
+    The MAS/hybrid bands overlap at N=3 on purpose — hybrid with N=3
+    is the MAS pool without the judge, reducing cleanly if the judge
+    slot is contentious. Callers treating the last slot as judge
+    should do so only when ``arm == "hybrid"``.
+    """
+    lo, hi = _N_BOUNDS[arm]
+    if arm == "SAS":
+        return lo
+
+    question = str(task.get("Question") or task.get("question") or "")
+    level = str(task.get("Level") or task.get("level") or "1")
+    file_name = str(task.get("file_name", "") or "")
+    qtype = task.get("qtype")
+
+    q = question.lower()
+    mas_hits = sum(1 for kw in _MAS_SIGNALS if kw in q)
+    hybrid_hits = sum(1 for kw in _HYBRID_SIGNALS if kw in q)
+
+    n = lo
+    if arm == "MAS":
+        if mas_hits >= 2:
+            n += 1
+        if level == "3":
+            n += 1
+        if file_name and qtype == "research":
+            n += 1
+    else:  # hybrid
+        if hybrid_hits >= 2:
+            n += 1
+        if len(question) >= 500:
+            n += 1
+
+    n = min(n, hi)
+
+    # Budget pressure → floor N at lo. The 20%-fraction hard-force-SAS
+    # floor is applied upstream; we only handle the 20-40% "shrink but
+    # keep arm" band here.
+    if (
+        remaining_budget is not None
+        and budget > 0
+        and remaining_budget / budget < _N_FULL_BUDGET_FRAC
+    ):
+        return lo
+
+    return n
+
+
 def select_arm(
     task: dict[str, Any],
     budget: int = 10_000,
     context: dict[str, Any] | None = None,
     router: ArmFTRL | None = None,
     budget_floor_fraction: float = 0.20,
-) -> Arm:
-    """Meta-router: choose SAS / MAS / hybrid for this task.
+) -> tuple[Arm, int]:
+    """Meta-router: choose (arm, N) for this task.
 
     Args:
         task: GAIA-shaped dict with at least ``Question`` or ``question``;
@@ -210,22 +321,49 @@ def select_arm(
             Default 0.20 per plan ("Token 預算剩 <20% → SAS fallback").
 
     Returns:
-        One of "SAS", "MAS", "hybrid".
+        ``(arm, n)`` — arm ∈ {"SAS", "MAS", "hybrid"}; n is the number of
+        parallel subagents to spawn (1 for SAS, 2-3 for MAS, 3-4 hybrid).
     """
+    return _select_arm_inner(
+        task, budget, context, router, budget_floor_fraction,
+    )[:2]  # type: ignore[return-value]
+
+
+def select_arm_with_reason(
+    task: dict[str, Any],
+    budget: int = 10_000,
+    context: dict[str, Any] | None = None,
+    router: ArmFTRL | None = None,
+    budget_floor_fraction: float = 0.20,
+) -> ArmDecision:
+    """Same as :func:`select_arm` but returns an :class:`ArmDecision` with
+    a human-readable ``reason`` breadcrumb for logging / diagnostics."""
+    arm, n, reason = _select_arm_inner(
+        task, budget, context, router, budget_floor_fraction,
+    )
+    return ArmDecision(arm=arm, n=n, reason=reason)
+
+
+def _select_arm_inner(
+    task: dict[str, Any],
+    budget: int,
+    context: dict[str, Any] | None,
+    router: ArmFTRL | None,
+    budget_floor_fraction: float,
+) -> tuple[Arm, int, str]:
     ctx = context or {}
     question = task.get("Question") or task.get("question") or ""
     level = str(task.get("Level") or task.get("level") or "1")
     file_name = task.get("file_name", "") or ""
     qtype = task.get("qtype")
 
-    # Hard fallback: low budget -> SAS -----------------------------
+    # Hard fallback: low budget -> SAS N=1 -------------------------
     remaining = ctx.get("remaining_budget")
-    if (
-        isinstance(remaining, (int, float))
-        and budget > 0
-        and remaining / budget < budget_floor_fraction
-    ):
-        return "SAS"
+    remaining_val: float | None = None
+    if isinstance(remaining, (int, float)):
+        remaining_val = float(remaining)
+        if budget > 0 and remaining_val / budget < budget_floor_fraction:
+            return ("SAS", 1, "budget-floor")
 
     # posterior = SPS x FTRL(gate) ---------------------------------
     sps = sps_arm_scores(question, level=level, file_name=file_name, qtype=qtype)
@@ -235,16 +373,28 @@ def select_arm(
     for arm in ARMS:
         posterior[arm] = sps.get(arm, 1.0) * router.gate(arm)
 
+    chosen: Arm
+    reason: str
+
     # Hysteresis: keep prev_arm if within 5% of winner -------------
     prev_arm = ctx.get("prev_arm")
     if prev_arm in ARMS:
         best_arm = max(posterior, key=posterior.__getitem__)
         best_score = posterior[best_arm]
         if best_score > 0 and posterior[prev_arm] / best_score >= 0.95:
-            return prev_arm  # type: ignore[return-value]
+            chosen = prev_arm  # type: ignore[assignment]
+            reason = "hysteresis"
+        else:
+            chosen = best_arm  # type: ignore[assignment]
+            reason = "posterior"
+    else:
+        chosen = max(posterior, key=posterior.__getitem__)  # type: ignore[assignment]
+        reason = "posterior"
 
-    winner = max(posterior, key=posterior.__getitem__)
-    return winner  # type: ignore[return-value]
+    n = subagent_count(
+        chosen, task, budget=budget, remaining_budget=remaining_val,
+    )
+    return (chosen, n, reason)
 
 
 _router_singleton: ArmFTRL | None = None
@@ -291,9 +441,12 @@ def record_arm_outcome(arm: str, reward: float, persist: bool = True) -> None:
 __all__ = [
     "ARMS",
     "Arm",
+    "ArmDecision",
     "ArmFTRL",
     "record_arm_outcome",
     "reset_default_router",
     "select_arm",
+    "select_arm_with_reason",
     "sps_arm_scores",
+    "subagent_count",
 ]

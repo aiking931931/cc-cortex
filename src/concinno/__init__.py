@@ -11,7 +11,7 @@ Legacy API (v0.5, deprecated — removed in v1.0)::
 Migration guide: https://github.com/aiking931931/concinno/blob/main/docs/migration-v05-v06.md
 """
 
-__version__ = "2.12.2"
+__version__ = "2.13.0"
 
 import warnings as _warnings
 
@@ -54,6 +54,10 @@ from concinno.fewshot import (  # noqa: F401
     load_bank,
     retrieve_fewshot,
 )
+from concinno.fidelity_delta import (  # noqa: F401
+    FidelityDeltaRecord,
+    compute_fidelity_delta,
+)
 from concinno.field_read import (  # noqa: F401
     COMPRESS_BREAKEVEN_TOKENS,
     FieldReadConfig,
@@ -64,10 +68,13 @@ from concinno.field_read import (  # noqa: F401
 from concinno.gaia_meta_router import (  # noqa: F401
     ARMS,
     Arm,
+    ArmDecision,
     ArmFTRL,
     record_arm_outcome,
     select_arm,
+    select_arm_with_reason,
     sps_arm_scores,
+    subagent_count,
 )
 
 # ── v0.6+ Guard Pipeline API (recommended) ───────────────
@@ -300,11 +307,17 @@ __all__ = [
     "get_tuner",
     "list_targets",
     "select_arm",
+    "select_arm_with_reason",
     "record_arm_outcome",
     "sps_arm_scores",
+    "subagent_count",
+    "ArmDecision",
     "ArmFTRL",
     "ARMS",
     "Arm",
+    # Subagent fork fidelity delta (DPI-loss measurement)
+    "FidelityDeltaRecord",
+    "compute_fidelity_delta",
     # v0.5 legacy (deprecated, triggers DeprecationWarning)
     "HookResult",
     "Pipeline",

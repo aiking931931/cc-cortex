@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-04-21
+
+Minor with **one documented breaking change** (`gaia_meta_router.select_arm`
+now returns `tuple[Arm, int]`). Lands the three delayed extensions from
+cc_b2c962dc red-blue CBUA 3-Opus verdict (see
+`_AI_BRAIN/05_Planning/gaia-meta-router-n-aware-2026-04-21.md` + MEMORY #88
++ `~/.claude/skills/kb_cognitive_layer_boundaries/mas_14_defects_crosswalk.md`):
+
+1. **E extension**: N-aware `select_arm` — breadth-aware routing
+2. **E extension 2**: `fidelity_delta` module — subagent fork in/out
+   information-loss measurement (Cemri #8 DPI cover, zero breaking)
+3. **D/C extension**: MAS 14 crosswalk + routing-primary rule propagated
+   into kb skill + Perpetuo ↔ Concinno A2A bridge spec appendix
+
+### ⚠ BREAKING — `gaia_meta_router.select_arm` now returns `tuple[Arm, int]`
+
+Callers of `concinno.select_arm` (or `from concinno.gaia_meta_router
+import select_arm`) must unpack the new tuple:
+
+```python
+# Before (2.12.x)
+arm = select_arm(task)
+
+# After (2.13.0)
+arm, n = select_arm(task)          # n = parallel subagent count
+# or use the diagnostic variant:
+decision = select_arm_with_reason(task)
+arm, n, reason = decision.arm, decision.n, decision.reason
+```
+
+`n` is the **parallel subagent count** (breadth / fan-out width): SAS=1,
+MAS=2-3, hybrid=3-4. Addresses Cemri et al. (2025) MAS failure mode #14
+N-aware depth budget by making breadth atomic with arm selection, so
+callers don't guess a fan-out after the fact (previously `gaia_agent.py`
+hard-coded guesses that either over-fanned Level-1 tasks or under-fanned
+Level-3 synthesis). Budget pressure applies two floors:
+
+- `remaining/budget < 0.20` → force `("SAS", 1)` (hard budget floor)
+- `0.20 ≤ remaining/budget < 0.40` → keep chosen arm, clamp `n` to the
+  arm's lower bound (shrink fan-out under pressure)
+
+Migration impact: repo grep confirms **zero external production
+callers** at 2.12.2 (only `__init__.py` re-export + `test_gaia_meta_router`
+tests import this symbol). Downstream projects that relied on a bare
+`Arm` return must update to tuple unpacking.
+
+### Added — `gaia_meta_router` N-aware companions
+
+- **`ArmDecision`** dataclass (`arm`, `n`, `reason`) — frozen, hashable,
+  stable across the 2.13.x series. `reason` is one of `"budget-floor"` /
+  `"posterior"` / `"hysteresis"`.
+- **`select_arm_with_reason(task, ...)`** — same router logic as
+  `select_arm` but returns `ArmDecision` for callers that want the
+  breadcrumb for logging / diagnostics without parsing tuples.
+- **`subagent_count(arm, task, *, budget, remaining_budget)`** — pure
+  helper exposing the N selection logic so callers can recompute `n` for
+  a given arm without going through the FTRL router again (useful when
+  the caller already has a pinned arm from elsewhere).
+
+All three exported from the top-level `concinno` namespace.
+
+### Added — `fidelity_delta` module (Cemri #8 DPI cover)
+
+New module `concinno.fidelity_delta` quantifies structured-field
+information loss between a subagent's input prompt and its returned
+`final_text`. Reuses `concinno.field_read`'s section / bullet / keyword
+parsing so "lost fields" surface as `ElidedSection` records with gist +
+confidence, not an opaque scalar.
+
+**Design rationale** (Tran & Kiela 2025 DPI attack / GAIA Sancio plan):
+subagent fork collapses a multi-round child loop into a single
+`final_text` string. That collapse is **the one fundamental MAS failure
+mode with no architectural cover** — no routing trick or N-aware fan-out
+recovers information the child chose not to say. `fidelity_delta`
+quantifies the loss per spawn so operators spot high-delta forks, the
+meta-router can penalize arms / task shapes that systematically lose
+information, and ZIQ can learn "when not to fork at all" via outcome
+feedback.
+
+**Public API**:
+
+```python
+from concinno import FidelityDeltaRecord, compute_fidelity_delta
+
+record = compute_fidelity_delta(in_message, out_message)
+# record.delta ∈ [0, 1]       — 1 - preserved / total fields
+# record.recall              — preserved / total
+# record.fields_in           — scorable field count
+# record.fields_preserved    — count with recall ≥ threshold (0.5)
+# record.lost_fields         — list[ElidedSection] per dropped field
+# record.confidence          — meta-confidence in delta itself
+# record.summary             — "3/7 fields preserved (Δ=0.57)"
+```
+
+Threshold is configurable via `preservation_threshold` kwarg. Empty
+input / empty output return `delta=0` with `confidence=0` — no evidence
+of loss is not evidence of loss (caller decides whether empty input is
+itself a failure signal). Zero new dependencies; stdlib + existing
+`field_read` only.
+
+### Added — MAS 14 defects crosswalk + routing-primary rule (D/C extensions)
+
+Following cc_b2c962dc red-blue CBUA 3-Opus verdict, two documentation
+deliverables shipped alongside the code changes (not packaged —
+referenced via `_AI_BRAIN/05_Planning/` and `~/.claude/skills/`):
+
+- **MAS 14 × Sancio 1-layer crosswalk**
+  (`~/.claude/skills/kb_cognitive_layer_boundaries/mas_14_defects_crosswalk.md`):
+  3-axis verdict matrix (academic / cover-verification / red-team attack)
+  showing 4 FIX_ARCH full cover + 7 partial + 3 NEEDS_ROUTING fundamental
+  (#5 Information Withholding / #8 DPI / #14 N-aware depth) + 1 Perpetuo
+  boundary (#13 inter-agent supervision).
+- **Routing-primary rule** (`feedback_mas_fundamental_limits_routing_primary.md`):
+  routing is upstream primary dispatch, not downstream fallback. 3
+  fundamental routing claims remain **untested** until pilot
+  (N≥20 task pair per class + paired McNemar p<0.05 + Δ≥+3pp + token
+  efficiency not regressed); until pilot passes they do not enter
+  `concinno.routing` or any Sancio main API.
+
+### Notes
+
+- `DEPTH_TIER_MAP` values originally proposed in the N-aware plan doc
+  were **not shipped** — the landed implementation uses breadth-based
+  `_N_BOUNDS` + signal-driven adjustment (`subagent_count()`) instead of
+  a fixed tier × arm table. Depth-budget (`max_iter`) routing is a
+  2.14.0+ candidate that would extend `ArmDecision` without breaking
+  the tuple contract from `select_arm`.
+- Per MEMORY #57 paper-kill guard, all three fundamental routing claims
+  from MAS 14 crosswalk remain **proposal-tier**. Do not wire to any
+  production code path until pilot passes.
+
 ## [2.12.2] - 2026-04-21
 
 Minor: reconciles 2.12.1 (PyPI orphan — parallel session built from

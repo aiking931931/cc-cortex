@@ -10,11 +10,14 @@ import pytest
 from concinno import gaia_meta_router as gmr
 from concinno.gaia_meta_router import (
     ARMS,
+    ArmDecision,
     ArmFTRL,
     record_arm_outcome,
     reset_default_router,
     select_arm,
+    select_arm_with_reason,
     sps_arm_scores,
+    subagent_count,
 )
 
 
@@ -66,47 +69,51 @@ def test_sps_research_qtype_lifts_mas_and_hybrid():
 
 
 def test_select_arm_cold_start_level1_factual_is_sas(isolated_store):
-    arm = select_arm({
+    arm, n = select_arm({
         "Question": "Who was PM in 1977?",
         "Level": "1",
         "qtype": "factual",
     })
     assert arm == "SAS"
+    assert n == 1
 
 
 def test_select_arm_cold_start_level2_file_is_mas(isolated_store):
-    arm = select_arm({
+    arm, n = select_arm({
         "Question": "Compare values in both worksheets.",
         "Level": "2",
         "file_name": "data.xlsx",
         "qtype": "file_analysis",
     })
     assert arm == "MAS"
+    assert 2 <= n <= 3
 
 
 def test_select_arm_cold_start_level3_research_is_hybrid(isolated_store):
-    arm = select_arm({
-        "Question": "x" * 400 + " synthesize step by step",
+    arm, n = select_arm({
+        "Question": "x" * 400 + " synthesize step by step decompose phase",
         "Level": "3",
         "qtype": "research",
     })
     assert arm == "hybrid"
+    assert 3 <= n <= 4
 
 
 # ── Budget fallback forces SAS ──────────────────────────────────────
 
 
 def test_low_budget_forces_sas(isolated_store):
-    arm = select_arm(
+    arm, n = select_arm(
         {"Question": "x" * 500, "Level": "3", "qtype": "research"},
         budget=1000,
         context={"remaining_budget": 100},  # 10% remaining
     )
     assert arm == "SAS"
+    assert n == 1
 
 
 def test_budget_above_floor_does_not_force_sas(isolated_store):
-    arm = select_arm(
+    arm, _n = select_arm(
         {"Question": "x" * 500, "Level": "3", "qtype": "research"},
         budget=1000,
         context={"remaining_budget": 800},  # 80% remaining
@@ -120,7 +127,7 @@ def test_budget_above_floor_does_not_force_sas(isolated_store):
 def test_hysteresis_keeps_prev_arm_when_close():
     router = ArmFTRL()  # cold gates = 0.5 for all arms
     # Cold SPS for research L2 file: MAS wins; prev_arm=hybrid within 95%.
-    arm = select_arm(
+    arm, _n = select_arm(
         {
             "Question": "Compare values across both files carefully",
             "Level": "2",
@@ -260,7 +267,7 @@ GOLDEN_SET = [
 def test_golden_set_routing_accuracy(isolated_store):
     """Routing accuracy >=80% on cold-start golden set (plan W2 criterion)."""
     hits = sum(1 for task, expected in GOLDEN_SET
-               if select_arm(task) == expected)
+               if select_arm(task)[0] == expected)
     assert hits / len(GOLDEN_SET) >= 0.8, (
         f"Routing accuracy {hits}/{len(GOLDEN_SET)} below 80% floor"
     )
@@ -270,12 +277,12 @@ def test_golden_set_routing_accuracy(isolated_store):
 
 
 def test_task_accepts_lowercase_keys(isolated_store):
-    arm = select_arm({"question": "Who?", "level": "1", "qtype": "factual"})
+    arm, _n = select_arm({"question": "Who?", "level": "1", "qtype": "factual"})
     assert arm == "SAS"
 
 
 def test_task_missing_fields_defaults_to_level_1(isolated_store):
-    arm = select_arm({"Question": "Short question."})
+    arm, _n = select_arm({"Question": "Short question."})
     assert arm in ARMS
 
 
@@ -311,7 +318,8 @@ def test_load_from_nonexistent_path_is_noop(tmp_path):
 
 def test_public_symbols_exported():
     from concinno import gaia_meta_router as m
-    for name in ["select_arm", "record_arm_outcome", "ArmFTRL",
+    for name in ["select_arm", "select_arm_with_reason", "record_arm_outcome",
+                 "ArmFTRL", "ArmDecision", "subagent_count",
                  "sps_arm_scores", "reset_default_router",
                  "ARMS", "Arm"]:
         assert hasattr(m, name), f"missing public export: {name}"
@@ -323,7 +331,7 @@ def test_public_symbols_exported():
 
 def test_select_arm_with_injected_router_no_global_state():
     router = ArmFTRL()
-    arm = select_arm(
+    arm, _n = select_arm(
         {"Question": "Who?", "Level": "1"},
         router=router,
     )
@@ -333,13 +341,18 @@ def test_select_arm_with_injected_router_no_global_state():
         assert router.gate(a) == 0.5
 
 
-# ── select_arm returns stable type ─────────────────────────────────
+# ── select_arm returns (Arm, N) tuple ──────────────────────────────
 
 
-def test_select_arm_returns_string():
-    arm = select_arm({"Question": "test", "Level": "1"})
+def test_select_arm_returns_tuple():
+    result = select_arm({"Question": "test", "Level": "1"})
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+    arm, n = result
     assert isinstance(arm, str)
     assert arm in ARMS
+    assert isinstance(n, int)
+    assert 1 <= n <= 4
 
 
 def test_posterior_with_all_gates_zero_still_returns_arm(monkeypatch):
@@ -349,8 +362,156 @@ def test_posterior_with_all_gates_zero_still_returns_arm(monkeypatch):
     for arm in ARMS:
         router.z[arm] = 1e9
         router.n[arm] = 1e-9  # tiny n → huge gate deflection → clamped
-    arm = select_arm({"Question": "Hi", "Level": "1"}, router=router)
+    arm, n = select_arm({"Question": "Hi", "Level": "1"}, router=router)
     assert arm in ARMS
+    assert 1 <= n <= 4
+
+
+# ── N-tier subagent_count ──────────────────────────────────────────
+
+
+def test_subagent_count_sas_always_one():
+    for task in (
+        {"Question": "x", "Level": "1"},
+        {"Question": "x" * 500, "Level": "3", "qtype": "research"},
+    ):
+        assert subagent_count("SAS", task) == 1
+
+
+def test_subagent_count_mas_shallow_baseline():
+    # Plain level-2 MAS with no boosts -> floor.
+    n = subagent_count("MAS", {"Question": "Simple", "Level": "2"})
+    assert n == 2
+
+
+def test_subagent_count_mas_boosts_on_signals():
+    # Multi-tool keyword signal AND file+research lifts toward deep.
+    n = subagent_count("MAS", {
+        "Question": ("Compare both datasets, cross-reference and "
+                     "merge records respectively"),
+        "Level": "2",
+        "file_name": "d.csv",
+        "qtype": "research",
+    })
+    assert n == 3
+
+
+def test_subagent_count_mas_level3_bumps():
+    n = subagent_count("MAS", {
+        "Question": "Analyze each of the several records",
+        "Level": "3",
+    })
+    assert n == 3  # level=3 boost pushes above base
+
+
+def test_subagent_count_mas_capped_at_3():
+    # Simulate all boosts present -> capped at upper bound.
+    n = subagent_count("MAS", {
+        "Question": ("Compare and cross-reference both datasets, list each of "
+                     "the several categories respectively and contrast"),
+        "Level": "3",
+        "file_name": "big.xlsx",
+        "qtype": "research",
+    })
+    assert n == 3
+
+
+def test_subagent_count_hybrid_baseline():
+    n = subagent_count("hybrid", {"Question": "Short", "Level": "3"})
+    assert n == 3
+
+
+def test_subagent_count_hybrid_boosts_on_long_question():
+    n = subagent_count("hybrid", {
+        "Question": "Short " + "x" * 600,  # > 500 chars
+        "Level": "3",
+    })
+    assert n == 4
+
+
+def test_subagent_count_hybrid_boosts_on_hybrid_keywords():
+    n = subagent_count("hybrid", {
+        "Question": ("Decompose the strategy, iterate through each phase "
+                     "and synthesize the plan step by step"),
+        "Level": "3",
+    })
+    assert n == 4
+
+
+def test_subagent_count_budget_pressure_clamps_to_floor():
+    # Would normally give N=4 but budget 30% remaining -> clamp to arm floor.
+    task = {
+        "Question": ("Decompose the strategy, iterate through each phase "
+                     "and synthesize the plan step by step " + "x" * 600),
+        "Level": "3",
+        "qtype": "research",
+    }
+    n_full = subagent_count("hybrid", task, budget=1000, remaining_budget=900)
+    n_squeezed = subagent_count("hybrid", task, budget=1000, remaining_budget=300)
+    assert n_full == 4
+    assert n_squeezed == 3  # hybrid floor
+
+
+def test_subagent_count_budget_pressure_on_mas_clamps_to_two():
+    task = {
+        "Question": ("Compare both datasets, cross-reference and merge "
+                     "records respectively"),
+        "Level": "2",
+        "file_name": "d.csv",
+        "qtype": "research",
+    }
+    n_full = subagent_count("MAS", task, budget=1000, remaining_budget=900)
+    n_squeezed = subagent_count("MAS", task, budget=1000, remaining_budget=300)
+    assert n_full == 3
+    assert n_squeezed == 2
+
+
+# ── select_arm_with_reason returns ArmDecision ─────────────────────
+
+
+def test_select_arm_with_reason_returns_decision(isolated_store):
+    d = select_arm_with_reason({
+        "Question": "Who?", "Level": "1", "qtype": "factual",
+    })
+    assert isinstance(d, ArmDecision)
+    assert d.arm == "SAS"
+    assert d.n == 1
+    assert d.reason in {"posterior", "hysteresis", "budget-floor"}
+
+
+def test_select_arm_with_reason_budget_floor_tagged(isolated_store):
+    d = select_arm_with_reason(
+        {"Question": "x" * 500, "Level": "3", "qtype": "research"},
+        budget=1000,
+        context={"remaining_budget": 100},
+    )
+    assert d.arm == "SAS"
+    assert d.n == 1
+    assert d.reason == "budget-floor"
+
+
+def test_select_arm_with_reason_hysteresis_tagged():
+    router = ArmFTRL()
+    d = select_arm_with_reason(
+        {
+            "Question": "Compare values across both files carefully",
+            "Level": "2",
+            "file_name": "d.xlsx",
+            "qtype": "research",
+        },
+        context={"prev_arm": "hybrid"},
+        router=router,
+    )
+    # With a clean router and prev_arm=hybrid close to winner, hysteresis
+    # should catch; otherwise posterior — both are OK, reason just reflects.
+    assert d.reason in {"hysteresis", "posterior"}
+
+
+def test_arm_decision_is_frozen():
+    d = ArmDecision(arm="SAS", n=1, reason="posterior")
+    import dataclasses
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        d.n = 5  # type: ignore[misc]
 
 
 # ── Helper file ops ────────────────────────────────────────────────
