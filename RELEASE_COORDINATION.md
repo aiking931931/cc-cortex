@@ -3,19 +3,41 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — **2.12.1 LIVE on PyPI but NO local commit/tag — fork divergence**）
+## 現況 snapshot（2026-04-21 — **2.12.2 LIVE + fork divergence resolved**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.12.1` — <https://pypi.org/project/concinno/2.12.1/> (upload 2026-04-21T04:06:38Z = 12:06 +08:00) |
-| `pyproject.toml` version | `2.11.0` |
-| `src/concinno/__init__.py __version__` | `2.11.0` |
-| CHANGELOG.md 最新 release heading | `## [2.11.0] - 2026-04-21` (後接 `[Unreleased]` WIP 段為 2.12.2) |
-| 三源對齊狀態 | ✅ 三源互相對齊 2.11.0 — **但 PyPI latest 2.12.1 在之前，分歧中** |
-| 下一 publish 目標 | `2.12.2` — Session E ZIQ auto-tune + GAIA meta-router + sweep_guard (+ 11 PyPI 2.12.1 缺失檔 reconcile) |
-| 本地 commit | `15fd2c0` (release: concinno 2.11.0 — PromptJudge route + 10 SkillsMP wrappers, pushed origin) |
-| 本地 tag 最新 | `v2.11.0` (pushed origin <https://github.com/aiking931931/concinno>) — **v2.12.1 未產生 tag，PyPI 孤兒** |
-| Pending Publish Queue | `2.12.2 BLOCKED` — 見 §"2.12.1 fork divergence — P0 reconcile" |
+| Registry latest (PyPI) | `2.12.2` — <https://pypi.org/project/concinno/2.12.2/> (upload 2026-04-21 ~16:33 +08:00) |
+| `pyproject.toml` version | `2.12.2` |
+| `src/concinno/__init__.py __version__` | `2.12.2` |
+| CHANGELOG.md 最新 release heading | `## [2.12.2] - 2026-04-21` |
+| 三源對齊狀態 | ✅ 三源互相對齊 2.12.2 |
+| 下一 publish 目標 | `2.13.0` — E 延伸 N-aware routing + fidelity_delta.py + D/C MAS 14 缺陷 crosswalk (block on red-blue CBUA cc_b2c962dc doc) |
+| 本地 commit | `c345ca9` (release: concinno 2.12.2 — reconcile 2.12.1 orphan + Session E additions, pushed origin) |
+| 本地 tag 最新 | `v2.12.2` (pushed origin <https://github.com/aiking931931/concinno>) |
+| Pending Publish Queue | 空（2.12.2 已 published 移到 Session Registry::History） |
+
+## ✅ 2.12.1 fork divergence — RESOLVED（2026-04-21 cc_150b_1551）
+
+**背景**：PyPI 2.12.1 於 2026-04-21 12:06 +08:00 上架，但無對應 git commit/tag
+（某 parallel session 從 dirty working tree 直接 build + twine upload 沒 commit）。
+12 檔在 PyPI wheel 但本地 tree 無 — silent regress risk。
+
+**解決**：cc_150b_1551 session 執行以下：
+
+1. ✅ `pip download concinno==2.12.1 --no-deps` 解開 wheel
+2. ✅ 12 檔（`cli/convention_cmd.py` / `convention_presets/__init__.py` + 2 JSON presets / 8 guards / `handoff_writeback.py` / `release_authorization.py`）從 wheel 複製進 `src/concinno/`
+3. ✅ `cli/main.py` wire-in convention sub-parser
+4. ✅ `__init__.py` 加 8 release_authorization symbols + __all__
+5. ✅ 三源 bump → 2.12.2（在 2.12.1 content 之上疊 Session E 4 modules + sweep_guard wiring）
+6. ✅ Reconcile commit `c345ca9` + tag `v2.12.2` + push
+7. ✅ `twine upload` → PyPI 2.12.2 LIVE
+8. ✅ Clean-venv `pip install --upgrade concinno==2.12.2` + import 驗證 14 tunable registry targets / 22 new symbols 全通
+
+**學到的 pattern**：build-upload-before-commit = PyPI 孤兒 + git tree 分歧。
+治本：L1 `release_coord.md` 升級步驟明確要求 commit + build 先於 twine upload
+（既已規範，此次是某 session 違反）。未來偵測：`pip download <pkg>==<latest>`
+vs local git diff → 有 delta 即孤兒警訊。
 
 ## ⛔ 2.12.1 fork divergence — P0 reconcile（2026-04-21 cc_150b_1551 發現）
 
@@ -157,8 +179,8 @@ pid: <process id, 可選>
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
 # (2.11.0 PUBLISHED — record moved to Session Registry::History below)
 
-- version: "2.12.2"
-  state: ready-to-publish
+- version: "2.12.2_MOVED_TO_HISTORY"
+  state: published
   supersedes: "2.12.1 (PyPI orphan — no local commit/tag from parallel session)"
   queued_by:
     session: cc_150b_1551  # aka cc_9220_1546 dual-id
@@ -200,9 +222,12 @@ pid: <process id, 可選>
       + Session E features). No architectural change vs 2.12.1 that
       warrants fresh S5. Session E red-blue was deferred per ship-fast
       directive; can back-fill in 2.13.0 minor.
-  blocking_on:
-    - user_authorization    # exact string `go publish concinno 2.12.2`
-    - lock_acquisition      # below `Session Registry::Active`
+    published_url: "https://pypi.org/project/concinno/2.12.2/"
+    published_at: "2026-04-21T~16:33+08:00"
+    clean_install_verify: "OK 2.12.2 install + 7 sample symbols (ZIQAutoTuner, select_arm, ArmFTRL, check_authorization, AuthorizationMode, TUNABLE_REGISTRY, list_targets) + 14 tunable registry targets import verified in fresh venv"
+    tag_pushed: "v2.12.2 → origin (https://github.com/aiking931931/concinno)"
+    branch_pushed: "feat/2.3.0-red-team-round-3: 2db0f55..c345ca9 → origin"
+  blocking_on: []   # all gates passed — published 2026-04-21T16:33+08:00
   suggested_command: |
     # Publisher should:
     # 1. Take lock (write Active record below)
