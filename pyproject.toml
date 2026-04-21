@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "2.13.1"
+version = "2.14.0"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
@@ -50,6 +50,12 @@ rag = [
     "chromadb>=1.0",
     "sentence-transformers>=5.0",
     "bm25s>=0.2",
+]
+# Windows toast — in-process WinRT via ``windows-toasts``. When installed,
+# ``concinno.core.notify.show_toast`` uses Tier 1 (no ``.vbs`` on disk, no
+# wscript subprocess, no Avast-family AV scan surface).
+toast = [
+    "windows-toasts>=1.3; platform_system == 'Windows'",
 ]
 # Sibling automation library — analyze anything, control anything via LLM.
 # Shipped as an optional extra so Concinno consumers who want the full

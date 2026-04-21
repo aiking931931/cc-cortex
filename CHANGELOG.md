@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-04-21
+
+Minor: root-cause fix for the "toast silently stops working" regression
+pattern + rule-gate alignment for release authorization. Diagnosis from a
+3-Opus triangulation (archaeology + WinRT technical + architecture design)
+plus a second-round circuit-breaker fix triggered by user feedback.
+
+### Fixed — `_win_toast_winrt` applicationText slot + Tier 1 promotion
+
+- Before: `InteractableWindowsToaster(title, app_id)` put the message
+  `title` into the WinRT **applicationText** slot — the UI sender label —
+  so every toast rewrote the sender with whatever the title happened to
+  be. After: new `display_name: str = "Visual Studio Code"` parameter
+  passed as applicationText; sender label is now stable.
+- `show_toast` fallback chain reordered to `winrt → xmldoc → balloon`.
+  Tier 1 is in-process (`windows-toasts` pip, optional extra
+  `concinno[toast]`) and drops no `.vbs` to `%TEMP%`, so Avast-family
+  `VBS:Downloader` heuristics (Surfshark etc.) have zero samples to scan.
+
+### Fixed — `_notify_stop` async-pipeline circuit starvation
+
+User-reported symptom: "test banner pops, real session-stop does not".
+Root cause: notify module ran `auto_commit` + `generate_report`
+*synchronously* before `show_toast`, and a rebase-stuck git tree routinely
+pushed the whole module past its 5 s `_StopModule.timeout_s`. Three
+consecutive timeouts tripped the circuit breaker
+(`~/.claude/hook_circuit_state.json`) which then skipped notify for 60 s.
+
+- `_notify_stop` is now a 3-stage fire-and-forget:
+  1. Daemon thread fires the 2-line core toast (~100 ms visible).
+  2. Daemon thread computes git info, then fires the full 5-line toast
+     with the same `tag + group` so Windows *replaces* the core banner.
+  3. `_notify_stop` itself returns in <200 ms.
+- Measured before/after: notify module elapsed dropped from
+  **15 000 ms → 32 ms** (468×). Circuit breaker no longer trips.
+- `_StopModule("notify", …)` timeout raised `5.0 → 15.0` in both the
+  force-stop and the main branch as defence in depth.
+
+### Added — Toast reputation helpers
+
+- `concinno.core.notify.register_aumid(app_id, display_name, icon_path,
+  icon_background_color)` — writes
+  `HKCU\Software\Classes\AppUserModelId\<app_id>`. Idempotent. Only needed
+  when overriding `show_toast(app_id=...)` with a custom AUMID. Safe on
+  non-Windows (returns `False`).
+- `concinno.core.notify.disable_smart_optout()` — writes the HKCU switch
+  (`Windows.ActionCenter.SmartOptOut\Enabled = 0`) that turns off Win11
+  22H2 Notification Suggestions auto-demotion. Opt-in; `show_toast` never
+  invokes it implicitly. One-call answer to "why does my toast silently
+  stop appearing after a few days".
+
+### Changed — `show_toast` signature (backward-compatible)
+
+- Added `display_name: str = "Visual Studio Code"` kwarg. Default AUMID
+  `Microsoft.VisualStudioCode` is **unchanged**, so the banner continues
+  to be attributed to the VS Code host.
+
+### Added — optional extra
+
+- `pip install concinno[toast]` pulls `windows-toasts>=1.3` (ships
+  `winsdk` internally).
+
+### Docs — release_authorization gate honoured in L1 rule text
+
+- `.claude/rules/L1/release_coord.md` + `rules/public/L1/release_coord.md`
+  now branch on `describe_current_config().disabled` *before* the
+  "must AskUser" clause. Previous rule text led agents to repeatedly
+  prompt for string authorization even when the user had set
+  `~/.concinno/release_auth.json` to `{"disabled": true}` once. User
+  feedback sedimented in `feedback_release_auth_disabled_respected.md`.
+
+### Tests
+
+- `tests/test_notify_reputation.py` — 28 new tests pinning default AUMID,
+  `display_name` passes into applicationText, fallback cascade order,
+  non-Windows no-op of the two helpers, HKCU write verification.
+- Existing `test_notify_locale_regression.py` untouched. Full suite:
+  5714 passed, 1 skipped, 3 xfailed.
+
+### Migration
+
+No API change for callers using defaults. If toasts disappear after
+heavy use, add::
+
+    from concinno.core.notify import disable_smart_optout
+    disable_smart_optout()
+
 ## [2.13.1] - 2026-04-21
 
 Patch: root-cause fix for the outer-inner repo race that recurred in the
