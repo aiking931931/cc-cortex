@@ -3,18 +3,19 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — 2.10.4 shipping）
+## 現況 snapshot（2026-04-21 — 2.10.5 live / 2.11.0 QUEUED）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.10.3` — <https://pypi.org/project/concinno/2.10.3/>（2.10.4 in-flight） |
-| `pyproject.toml` version | `2.10.4` |
-| `src/concinno/__init__.py __version__` | `2.10.4` |
-| CHANGELOG.md 最新 release heading | `## [2.10.4] - 2026-04-21` |
-| 三源對齊狀態 | ✅（post-bump） |
-| 下一 publish 目標 | 2.11.0 — rename pass (Cerno→Iudico / Redigo→Compono, MEMORY #68) |
-| 本地 commit | `cfc05ad` (`feat/2.3.0-red-team-round-3`, pushed — 2.10.4 commit pending) |
-| 本地 tag | `v2.10.1`, `v2.10.2`, `v2.10.3` (all pushed) |
+| Registry latest (PyPI) | `2.10.5` |
+| `pyproject.toml` version | `2.11.0` (queued, not yet published) |
+| `src/concinno/__init__.py __version__` | `2.11.0` (queued, not yet published) |
+| CHANGELOG.md 最新 release heading | `## [2.11.0] - 2026-04-21` |
+| 三源對齊狀態 | ✅（all three at 2.11.0） |
+| 下一 publish 目標 | `2.11.0` — PromptJudge route schema (S5 red-blue CBUA advisory-only ship) |
+| 本地 commit | `f3451ed` (working tree) |
+| 本地 tag | `v2.10.1-v2.10.5` (all pushed); `v2.11.0` pending publish authorization |
+| Pending Publish Queue | `2.11.0` ready-to-publish (下方 §Pending Publish Queue) |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -109,6 +110,59 @@ pid: <process id, 可選>
 
 ```yaml
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
+- version: "2.11.0"
+  state: ready-to-publish
+  superseded_by: null
+  supersedes: "2.10.5 (live)"
+  queued_by:
+    session: cc_1a93_0832
+    host: Z_HP
+    queued_at: "2026-04-21T16:30+08:00"
+  artifacts:
+    wheel: "dist/concinno-2.11.0-py3-none-any.whl"
+    sdist: "dist/concinno-2.11.0.tar.gz"
+    twine_check: PASSED
+    built_from: f3451ed
+  verification:
+    tests_full: "5550 passed, 1 skipped, 3 xfailed (in 174.90s)"
+    tests_new_routes: "54/54 (test_prompt_hooks_routes.py)"
+    tests_prompt_hooks_existing: "36/36 (updated for route enum)"
+    tests_wiredo_loader: "budget 2000→2200 after core.md +212t"
+    tests_version_sync: "2/2"
+    ruff_new_files: clean
+    ruff_pre_existing: same as 2.10.5 (no new)
+    triple_source_aligned: true
+    redteam_review: |
+      Session cc_1a93_0832 (2026-04-21) — S5 red-blue CBUA with two
+      Opus subagents + WebFetch CC hooks docs. Red team (Opus code-
+      reviewer): 2 FATAL + 3 HIGH + 2 MEDIUM + 1 LOW → NEEDS_REVISION.
+      Blue team (Opus architect): grep evidence 0 Concinno code reads
+      judge decision string → GO with 5 hardening. Commander 5-态 verdict:
+      FATAL-1 (dispatcher no receive path, confirmed by CC docs
+      stateless+parallel) accepted→降級 (schema only, no auto-dispatcher);
+      FATAL-2 (register_route arbitrary exec) accepted (dropped from
+      2.11.0); HIGH-1/3 accepted降級; HIGH-2 (YAGNI) 駁回 (blue's 3
+      concrete use cases stand); MEDIUM-1 (I11 order) 駁回 (route =
+      judge-logical vs I11 = adapter-dispatch 解耦). Ship scope大幅降級:
+      schema + VALID_DECISIONS + echo_advisory + 4 judge body + no
+      register_route + no auto-dispatcher. See
+      _AI_BRAIN/05_Planning/promptjudge-route-schema-design-2026-04-21.md §9.
+  blocking_on:
+    - user_authorization  # MEMORY #50 / RELEASE_COORDINATION §不可逆點
+    - lock_acquisition    # below `Session Registry::Active`
+  suggested_command: |
+    # DO NOT auto-run. Next session (with user authorization) should:
+    cd /e/ai-king/projects/concinno
+    PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-2.11.0*
+    git tag v2.11.0 && git push origin v2.11.0
+  expires_at: "2026-04-28T16:30+08:00"  # +7d; rebuild artifacts past this
+  notes: |
+    2.11.0 is the first minor bump since 2.10.0. Red-blue CBUA S5 ran
+    in prepare session (this session) rather than verification session
+    — catches design issues before impl instead of after. 5550 tests
+    green. Artifacts built from f3451ed (local HEAD; outer ai-king
+    repo still holds working tree).
+
 - version: "2.8.0"
   state: ready-to-publish
   superseded_by: null

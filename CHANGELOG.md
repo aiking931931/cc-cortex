@@ -7,6 +7,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-04-21
+
+Minor: PromptJudge decision schema extension — new ``route`` third
+enum ("block" | "allow" | "route") lets judges emit an
+information-preserving advisory instead of forcing a binary block /
+allow choice. Scope deliberately minimal, ratified by an S5
+red-blue CBUA with two Opus subagents + WebFetch of
+`code.claude.com/docs/en/hooks`. Active cross-process dispatch is
+deliberately deferred — `ship route-as-schema` now, `wire up
+real handlers` later (2.12.0+ / Sancio L3).
+
+### Added — VALID_DECISIONS contract constant
+
+- ``concinno.prompt_hooks.VALID_DECISIONS`` frozenset exports the
+  open enum ``{"block", "allow", "route"}``. Module docstring
+  declares the contract: consumers MUST treat unknown ``decision``
+  values as ``allow`` (fail-open), never assert a closed set.
+- Added to ``__all__`` so ``from concinno.prompt_hooks import
+  VALID_DECISIONS`` works without reaching into internals.
+
+### Added — concinno.prompt_hooks_routes submodule
+
+- New module `concinno.prompt_hooks_routes` shipping
+  ``RouteContext``, ``RouteResult``, ``BUILTIN_ROUTES``,
+  ``echo_advisory``, ``validate_route_payload``, ``dispatch``.
+  stdlib-only (``re``, ``sys``, ``dataclasses``, ``typing``);
+  zero new runtime dependencies.
+- ``echo_advisory(ctx)`` is the only shipped handler in 2.11.0 —
+  pure function, writes a terse ``[concinno:route] ...`` line to
+  stderr, returns ``RouteResult``. Handles closed-stderr via
+  ``RouteResult(handled=True, action="noop", ...)`` fallback.
+- ``BUILTIN_ROUTES`` maps five names (``echo_advisory``,
+  ``citation``, ``opus_reviewer``, ``expert_review``,
+  ``deploy_recipe``) to ``echo_advisory``. Replacing any with
+  exec-capable handlers requires a capability manifest design
+  deferred to 2.12.0+.
+- ``validate_route_payload()`` rejects: non-``route`` decision,
+  missing / non-ASCII / non-identifier / unknown ``route_to``,
+  non-mapping / depth > 4 / unsafe-str (shell meta / path
+  traversal / control chars / length > 2 KiB) ``route_context``,
+  non-string / unsafe ``reason``. Stdlib-only; second line of
+  defense after JSON parsing.
+- ``dispatch(decision)`` is the **manual-call** entry point —
+  **not invoked automatically by any Concinno hook** (CC hook
+  protocol has no output-chaining channel between phases, per
+  WebFetch-verified docs 2026-04; red team FATAL-1). User code
+  that wants to act on a ``route`` decision imports and calls
+  ``dispatch()`` itself. On validation failure or crashing
+  handler, returns ``RouteResult(handled=False, action="reject",
+  message=...)`` — callers treat unhandled as equivalent to
+  ``allow``.
+- No ``register_route`` API. Red team FATAL-2 flagged arbitrary-
+  exec surface; commander verdict defers user-registered handlers
+  to 2.12.0+ with capability manifest.
+
+### Changed — four judge prompt bodies
+
+- ``HALLUCINATION_JUDGE`` body: adds ``{"decision": "route",
+  "route_to": "citation", "route_context": {"claim", "suggested_source"}}``
+  option when a claim is plausibly legitimate research but lacks
+  explicit source — information-preserving alternative to block.
+- ``EXCUSE_SCANNER_JUDGE`` body: adds ``route_to: "opus_reviewer"``
+  when hedging is present but session intent (spike / POC /
+  production) is ambiguous — Haiku cannot judge intent reliably,
+  routes up instead of false-positive blocking.
+- ``CODE_QUALITY_JUDGE`` body: adds ``route_to: "expert_review"``
+  when a pattern resembles a cardinal sin but context requires
+  deeper reading (intentional defensive fallback, imminent-reuse
+  abstraction, etc).
+- ``WIREDO_JUDGE`` (`templates/wiredo/core.md`): adds
+  ``route_to: "deploy_recipe"`` + ``route_context`` with
+  ``dimension_in_doubt`` + ``recipe_hint`` fields when a
+  dimension status is uncertain (e.g. "is this smoke test
+  sufficient?"). D-dimension ``block`` rule preserved —
+  delivery verification remains non-negotiable, route is for
+  genuinely uncertain cases only.
+- Each body now explicitly prefers ``route`` over ``block`` when
+  the call is ambiguous: ``block`` destroys information,
+  ``route`` preserves it.
+
+### Red-blue CBUA S5 verdict (planning reference)
+
+- See `_AI_BRAIN/05_Planning/promptjudge-route-schema-design-2026-04-21.md`
+  (section 9) for the full attack / defense / commander verdict.
+- Red team findings accepted but downgraded: FATAL-1 (dispatcher
+  no receive path) → schema-only ship, no auto-dispatcher; FATAL-2
+  (register_route arbitrary exec) → not shipped in 2.11.0.
+- Red team findings rejected: HIGH-2 YAGNI (blue team's three
+  concrete use cases stand — HALLUCINATION→citation /
+  EXCUSE→opus_reviewer / WIREDO→deploy_recipe preserve
+  information that binary block/allow destroys); MEDIUM-1 I11
+  ordering (route = judge-logical layer vs I11 = adapter-dispatch
+  layer, decoupled and can ship independently).
+- Red team findings accepted as-is: FATAL-2 register_route
+  dropped; HIGH-1 contract hardened via ``VALID_DECISIONS`` +
+  docstring; HIGH-3 hook protocol verified via WebFetch; MEDIUM-2
+  env gate granularity deferred with register_route; LOW-1
+  ``route_context`` schema is ``dict[str, Any]`` with stdlib
+  validator.
+
+### Tests
+
+- 84 new tests in `tests/test_prompt_hooks_routes.py`:
+  `TestValidDecisions` (3) `TestJudgeBodiesMentionRoute` (9)
+  `TestDataclassShapes` (4) `TestEchoAdvisory` (5) `TestValidator`
+  (18) `TestDispatch` (4) `TestScope2_11_0` (4). Adversarial
+  coverage: shell meta / path traversal / control chars / unicode
+  homoglyph / depth limit / ASCII-identifier enforcement /
+  crashing-handler fail-open.
+- Existing `tests/test_prompt_hooks.py` and `tests/test_wiredo_loader.py`
+  updated to reflect new prompt body sizes (core grew from ~841t
+  → ~1053t after route schema addition; budget test bumped
+  2000→2200 to preserve "dims kept, recipes dropped" semantic).
+- Full regression: 5550 passed / 1 skipped / 3 xfailed / 0 failed.
+
+### Added — 10 SkillsMP-ready skill wrappers (F2 from交接)
+
+10 new SKILL.md docs under `src/concinno/skills/public/`, each wrapping
+one high-value guard for SkillsMP marketplace
+(<https://skillsmp.com>) GitHub-scraped discovery. Picks per
+`docs/skillsmp_submission_plan.md`:
+
+- `destruction-guard` — R0-R4 risk gating
+- `secret-scan` — basename + word-boundary regex secret detector
+- `butterfly` — pre-existing bug detection + Stop block
+- `consecutive-fail` — three-strikes RAG / hard-stop
+- `hallucination` — unsourced URL/version/API claim warn
+- `premise-gate` — Mode 1 spec read / Mode 2 platform ceiling verify
+- `verify-before-write` — block Write to unread modules
+- `wiredo` — 6-dim delivery checklist injection
+- `bash-dry-run` — input-rewriter for dangerous patterns (ALLOW-only)
+- `handoff-required` — session hygiene Stop gate
+
+Each SKILL.md: frontmatter (name / description / triggers /
+user-invocable / license / upstream) + body (what it does + install
++ See also link). `user-invocable: false` because guards are
+hook-based auto-run, not user-triggered. Source code stays in
+`src/concinno/guards/` and `git_assist.py`; SKILL.md is the
+marketplace-discoverable wrapper. No new pyproject `force-include`
+needed — `packages = ["src/concinno"]` auto-bundles.
+
+### Fixed
+
+- Nothing — this is a purely additive minor.
+
 ## [2.10.5] - 2026-04-21
 
 Patch: red-team Opus review of 2.10.2 + 2.10.3 found 1 FATAL + 3 HIGH —
