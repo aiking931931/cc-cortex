@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.1] - 2026-04-21
+
+Patch: rule-system sediment for the Switch-First Registry pattern that
+surfaced as the root cause of two consecutive mis-prompts earlier in the
+same session (toast circuit-breaker + release_auth disabled=True).
+
+### Added — L0 鐵律 #6 "新功能必 switchable"
+
+- Every new feature MUST ship with an `enabled` switch and tunable
+  params. Sources precedence: rule default → `FEATURE_META` → project
+  config → `~/.concinno/*.json` → env var → user's explicit chat
+  directive in-session.
+- New switches must be indexed in `~/.claude/rules/switches.md` + the
+  relevant L1 rule must gain a top-of-file `**switch**:` header line.
+- `FEATURE_META` entries now expected to declare `ziq_autotunable: bool`
+  + `cosmetic: bool` so the `ZIQAutoTuner` can skip cosmetic / opt-out
+  parameters without a code change.
+
+### Added — ZIQ-vs-manual conflict precedence (user directive 2026-04-21)
+
+When a feature has both ZIQ FTRL auto-tune and a manual user setting,
+the conflict resolution order is:
+
+1. Explicit user chat directive → manual locked (ZIQ cannot override
+   until next explicit unlock).
+2. `disabled=True` (feature turned off entirely) → neither ZIQ nor the
+   manual path fires.
+3. Cosmetic / UX / i18n parameters (display names, tags, icons, locale
+   presentation) → manual wins (not worth the ZIQ budget).
+4. Everything else → **ZIQ wins** (the product goal is a
+   general-purpose SOTA agent; ZIQ is the mechanism).
+
+Override events emit stderr `concinno: ZIQ auto-tune <X>: <old> -> <new>
+(reason: <signal>)` so users can see what changed and manually reassert
+if they disagree.
+
+### Added — `~/.claude/rules/switches.md` Index (三層: 索引 / 摘要 / 全文)
+
+- **Index layer** (`switches.md`): 20+ feature rows with opt-out method
+  + current-value probe — read in one glance.
+- **Summary layer**: each L1 rule now starts with `**switch**: <key>`
+  (9 rules, project + public mirrors synced).
+- **Full layer**: the rule body and `kb_*` skills remain the source of
+  truth for behaviour, loaded only when the switch actually fires.
+
+One-liner probe bundled in the index file covers release_authorization /
+toast_enabled / locale / handoff_mode / FEATURE_META count in a single
+Python call.
+
+### Docs — feedback memory
+
+- `feedback_switch_first_registry.md` (MEMORY #71) — primacy-bias root
+  cause + remediation pattern. Paired with the existing
+  `feedback_release_auth_disabled_respected.md` (same session origin).
+
+### No API / code changes
+
+`concinno.*` Python surface is byte-identical to 2.14.0. This patch
+ships rule-level improvements that the agent respects at runtime; users
+who only consume the Python library get no behaviour change.
+
 ## [2.14.0] - 2026-04-21
 
 Minor: root-cause fix for the "toast silently stops working" regression
