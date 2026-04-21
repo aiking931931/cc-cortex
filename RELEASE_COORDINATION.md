@@ -3,19 +3,64 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — 2.11.0 LIVE）
+## 現況 snapshot（2026-04-21 — **2.12.1 LIVE on PyPI but NO local commit/tag — fork divergence**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.11.0` — <https://pypi.org/project/concinno/2.11.0/> |
+| Registry latest (PyPI) | `2.12.1` — <https://pypi.org/project/concinno/2.12.1/> (upload 2026-04-21T04:06:38Z = 12:06 +08:00) |
 | `pyproject.toml` version | `2.11.0` |
 | `src/concinno/__init__.py __version__` | `2.11.0` |
-| CHANGELOG.md 最新 release heading | `## [2.11.0] - 2026-04-21` |
-| 三源對齊狀態 | ✅ |
-| 下一 publish 目標 | `2.12.0` — scheduler CLI + locale propagate + handoff writeback + glossary (design doc 已備) |
+| CHANGELOG.md 最新 release heading | `## [2.11.0] - 2026-04-21` (後接 `[Unreleased]` WIP 段為 2.12.2) |
+| 三源對齊狀態 | ✅ 三源互相對齊 2.11.0 — **但 PyPI latest 2.12.1 在之前，分歧中** |
+| 下一 publish 目標 | `2.12.2` — Session E ZIQ auto-tune + GAIA meta-router + sweep_guard (+ 11 PyPI 2.12.1 缺失檔 reconcile) |
 | 本地 commit | `15fd2c0` (release: concinno 2.11.0 — PromptJudge route + 10 SkillsMP wrappers, pushed origin) |
-| 本地 tag | `v2.11.0` (pushed origin <https://github.com/aiking931931/concinno>) |
-| Pending Publish Queue | 空（2.11.0 已 published 移到 Session Registry::History） |
+| 本地 tag 最新 | `v2.11.0` (pushed origin <https://github.com/aiking931931/concinno>) — **v2.12.1 未產生 tag，PyPI 孤兒** |
+| Pending Publish Queue | `2.12.2 BLOCKED` — 見 §"2.12.1 fork divergence — P0 reconcile" |
+
+## ⛔ 2.12.1 fork divergence — P0 reconcile（2026-04-21 cc_150b_1551 發現）
+
+**問題**：PyPI `2.12.1` LIVE（upload 2026-04-21 12:06 +08:00）但本地：
+- **無 commit** with `version = 2.12.1` (git log 顯示 HEAD @ v2.11.0)
+- **無 tag** `v2.12.1`
+- **11 檔在 PyPI wheel 但本地不存在**（content regress risk）：
+  - `concinno/cli/convention_cmd.py`
+  - `concinno/convention_presets/__init__.py` (本地 `cli/convention_presets/` 有內容但 `convention_presets/__init__.py` top-level 位置缺)
+  - `concinno/guards/benchmark_setup_guard.py`
+  - `concinno/guards/deterministic_repro_guard.py`
+  - `concinno/guards/function_length_guard.py`
+  - `concinno/guards/import_cycle_guard.py`
+  - `concinno/guards/magic_number_guard.py`
+  - `concinno/guards/result_file_guard.py`
+  - `concinno/guards/seed_propagation_guard.py`
+  - `concinno/guards/token_efficient_guard.py`
+  - `concinno/handoff_writeback.py`
+  - `concinno/release_authorization.py`
+- **Stash@{0-9}** 10 份「concinno-outer-squash-protect」各自 1517 lines = Session E 工作的歷史複本
+
+**推論**：某個並行 session 從 stash/dirty state 直接 `python -m build` + `twine upload`，PyPI 收到 wheel + 建立 2.12.1 entry，但**沒 git commit / tag / push**。現 PyPI 是**孤兒版本**，無法從 git 重建。
+
+**後果 If bump 2.12.2 + upload from current local**：
+- 11 檔 downgrade（PyPI 使用者 `pip install --upgrade concinno` 後 import 失敗）
+- 災難級 silent regression
+
+**P0 reconcile 任務**（下 session 必做）：
+1. `pip download concinno==2.12.1 -d reconcile/` 解開 11 檔內容
+2. 逐檔 diff / 合併進 `src/concinno/`
+3. 檢查 `cli/main.py` 是否有 `convention_cmd` 的 wire-in 需要
+4. 確認 11 檔的 tests 存在（PyPI wheel 不含 tests）— 若 test 也在 stash 裡要一起 reconcile
+5. 三源 bump 2.11.0 → 2.12.2
+6. 把 Session E (ZIQ auto-tune + GAIA meta-router + sweep_guard) + 2.12.1 內容 **合併 commit**
+7. 建 tag v2.12.2 + push
+8. Build + twine check + Queue record + AskUser `go publish concinno 2.12.2`
+
+**本 session 已完成的 2.12.2 pre-work（無 ship，commit-safe）**：
+- ✅ Session E 4 modules 健在（ruff + 93 tests 全綠）
+- ✅ `__init__.py` 14 symbols wire-in + `__all__` 同步
+- ✅ `sweep_guard` 接線 `concinno.hooks.on_stop` pipeline（`_build_sweep_guard` + `_BLOCK_PREFIXES["sweep_guard"]` + stderr whitelist）
+- ✅ `CHANGELOG.md [Unreleased]` 段為 2.12.2 WIP
+- ✅ Full regression 5653 passed / 1 skipped / 3 xfailed in 210s
+- ✅ 三源 version rollback 2.12.0 → 2.11.0 (防撞號)
+- ✅ Stale `dist/concinno-2.12.1*` 移到 `_AI_BRAIN_safe/` 防誤 upload
 
 ### 2026-04-18 單日 release 軌跡
 

@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**WIP towards 2.12.2** (2.12.1 already on PyPI from parallel session — see
+`RELEASE_COORDINATION.md` §"2.12.1 fork divergence". Current local
+modifications ship alongside Session E ZIQ-autotune / GAIA-meta-router /
+sweep_guard work; must reconcile with 2.12.1 source before next publish).
+
+### Added — ZIQ auto-tune gradient + GAIA SAS/MAS/hybrid meta-router + sweep_guard
+
+All three modules ship **opt-in** — zero behavior change for callers that
+do not explicitly enable them, matching CLAUDE.md "small surface, deep
+behavior" philosophy.
+
+### Added — ZIQ auto-tune (generic 3-regime hyperparameter gradient)
+
+- ``concinno.ZIQAutoTuner`` — routes tunable hyperparameters through a
+  cold-to-warm gradient driven by ``(value, outcome)`` history. Three
+  regimes: ``n < 300`` preset (hardcoded best) / ``300 ≤ n < 500``
+  conservative (small LR, large prior) / ``n ≥ 500`` full FTRL-Proximal.
+  Matches AI King 2026-04-21 directive "所有能調動的參數能選擇的，只要
+  數量大於 300 或 500 都能 ZIQ 自己 CBUA 最佳解".
+- Supports three value kinds: ``continuous`` / ``discrete`` /
+  ``boolean``. Each target persists append-only JSONL at
+  ``$HOME/.concinno/ziq_tuners/<target>.jsonl``; partial-write
+  corruption is skipped on load.
+- Opt-in via ``CONCINNO_ZIQ_AUTOTUNE=1`` env var. Default off
+  preserves backward compatibility — callers that never set the env
+  keep receiving the preset even after accumulated observations.
+- Also exports ``AutoTuneObservation``, ``AutoTuneRegime``,
+  ``is_autotune_enabled`` for introspection.
+
+### Added — ZIQ auto-tune registry (14 declared tunable targets)
+
+- ``concinno.TUNABLE_REGISTRY`` — 14 declared tunable hyperparameters
+  spanning the cognitive layer (escalation retries, spawn depth cap,
+  consecutive-fail threshold, wiredo timeout, etc). Each target
+  declares ``kind`` / ``vmin`` / ``vmax`` / ``preset`` / ``choices``
+  schema contract.
+- ``get_tuner(target_id)`` factory returns a per-target
+  ``ZIQAutoTuner`` matching the registered schema. Target IDs use
+  dotted paths mirroring the source module path so ``grep`` traces
+  from a target id to its baseline call site.
+- Also exports ``TunableSpec``, ``list_targets`` for discovery.
+
+### Added — GAIA SAS/MAS/hybrid meta-router
+
+- ``concinno.select_arm`` — per-task SAS (single-agent ReAct) vs MAS
+  (1-layer parallel subagent) vs hybrid (MAS + external judge)
+  selector. Breaks the Tran & Kiela 2026 "SAS ≥ MAS at token-matched
+  budget" attack by picking the right arm per task instead of
+  committing to one family across the whole run.
+- Routing signal = SPS (structural prior from question features:
+  level / tools / file / long-horizon) × FTRL (outcome online-learning
+  per arm). Token-budget floor 20% — force SAS when MAS spawn overhead
+  would starve the remaining budget.
+- ``record_arm_outcome(arm, outcome)`` updates per-arm FTRL weights;
+  state persists to ``$HOME/.concinno/gaia_arm_ftrl.json``
+  (override with ``$CONCINNO_GAIA_ARM_STORE`` for tests).
+- Also exports ``ArmFTRL``, ``ARMS``, ``Arm``, ``sps_arm_scores``.
+- Module lives at package root (not under
+  ``skills/public/agent/gaia_ziq.py``) because arms are mutually
+  exclusive while buff-stack FTRL is additive — separate state file
+  keeps them decoupled. Generic meta-router consumable from any
+  agent loop (Sancio's ``fork_context`` driver included).
+
+### Added — sweep_guard (.git residual state detector)
+
+- New ``concinno.sweep_guard`` module detects interrupted git
+  operations (rebase / merge / cherry-pick / revert / bisect) left
+  unfinished when a session ends. Wired into ``concinno.hooks.on_stop``
+  pipeline alongside ``handoff_required`` / ``sedimentation_gate``
+  / ``excuse_scanner`` — completes the "任務結束順手修" ironclad
+  coverage: dialog (excuse + sedimentation) + handoff file
+  (handoff_required) + git filesystem state (sweep_guard).
+- WARN mode by default (``stderr`` one-line actionable recovery hint
+  per residual). Upgradable to BLOCK via
+  ``feature_config.sweep_guard.block = true`` for users who want hard
+  coupling.
+- Per-session circuit breaker: once warned for a residual, suppress
+  re-warning for 5 min (avoids spam when the session intentionally
+  pauses mid-rebase).
+- Escape valves: ``CONCINNO_FORCE_STOP=1`` (dispatch-level bypass) /
+  ``stop_hook_active=true`` (CC retry signal) / ``CONCINNO_SWEEP_SKIP=1``
+  (single-guard skip) / ``feature_config sweep_guard.enabled=false``
+  (permanent).
+- Handles plain checkouts AND linked worktrees (``.git`` file with
+  ``gitdir:`` pointer).
+
 ## [2.11.0] - 2026-04-21
 
 Minor: PromptJudge decision schema extension — new ``route`` third

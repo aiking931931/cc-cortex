@@ -61,6 +61,14 @@ from concinno.field_read import (  # noqa: F401
     read_handoff_fields,
     read_memory_fields,
 )
+from concinno.gaia_meta_router import (  # noqa: F401
+    ARMS,
+    Arm,
+    ArmFTRL,
+    record_arm_outcome,
+    select_arm,
+    sps_arm_scores,
+)
 
 # ── v0.6+ Guard Pipeline API (recommended) ───────────────
 from concinno.guards.base import (  # noqa: F401
@@ -141,6 +149,18 @@ from concinno.tool_executor import (  # noqa: F401
     Tool,
     ToolExecutor,
     ToolStep,
+)
+from concinno.ziq_autotune_registry import (  # noqa: F401
+    TUNABLE_REGISTRY,
+    TunableSpec,
+    get_tuner,
+    list_targets,
+)
+from concinno.ziq_autotuner import (  # noqa: F401
+    AutoTuneObservation,
+    AutoTuneRegime,
+    ZIQAutoTuner,
+    is_autotune_enabled,
 )
 
 # ── v0.5 legacy API (deprecated since v0.6, removed in v1.0) ─
@@ -251,6 +271,21 @@ __all__ = [
     "Tool",
     "ExecutionState",
     "ToolStep",
+    # 2.12.0 ZIQ auto-tune + GAIA SAS/MAS meta-router
+    "ZIQAutoTuner",
+    "AutoTuneObservation",
+    "AutoTuneRegime",
+    "is_autotune_enabled",
+    "TUNABLE_REGISTRY",
+    "TunableSpec",
+    "get_tuner",
+    "list_targets",
+    "select_arm",
+    "record_arm_outcome",
+    "sps_arm_scores",
+    "ArmFTRL",
+    "ARMS",
+    "Arm",
     # v0.5 legacy (deprecated, triggers DeprecationWarning)
     "HookResult",
     "Pipeline",

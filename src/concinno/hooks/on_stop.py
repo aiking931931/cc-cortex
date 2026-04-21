@@ -301,6 +301,20 @@ def _build_git_size_monitor() -> Callable[[], str | None]:
     return _run
 
 
+def _build_sweep_guard(hook_data: dict) -> Callable[[], str | None]:
+    """Warn (or block) when .git residual state is present at stop.
+
+    Residuals = interrupted git operations (rebase/merge/cherry-pick/
+    revert/bisect) left unfinished. Silent inheritance by the next
+    session is the typical bleed path. WARN by default; upgradable to
+    BLOCK via ``feature_config.sweep_guard.block = true``.
+    """
+    def _run() -> str | None:
+        from concinno.sweep_guard import on_stop as sweep_stop
+        return sweep_stop(hook_data)
+    return _run
+
+
 # ── Main Entry Point ────────────────────────────────────────
 
 
@@ -311,6 +325,7 @@ _BLOCK_PREFIXES = {
     "sedimentation_gate": "SEDIMENTATION_BLOCK:",
     "handoff_claim": "HANDOFF_CLAIM_BLOCK:",
     "handoff_required": "HANDOFF_REQUIRED_BLOCK:",
+    "sweep_guard": "SWEEP_BLOCK:",
 }
 
 _BLOCK_REASONS = {
@@ -323,6 +338,7 @@ _BLOCK_REASONS = {
     ),
     "HANDOFF_CLAIM_BLOCK": lambda reason: reason,
     "HANDOFF_REQUIRED_BLOCK": lambda reason: reason,
+    "SWEEP_BLOCK": lambda reason: reason,
 }
 
 
@@ -368,6 +384,7 @@ def _emit_stderr_outputs(modules: list[_StopModule]) -> None:
             "auto_commit",
             "inline_squash",
             "git_size_monitor",
+            "sweep_guard",
         ):
             print(result_str, file=sys.stderr)
 
@@ -423,6 +440,7 @@ def main(hook_data: dict | None = None) -> None:
         _StopModule("wiredo_block", _build_wiredo_block(hook_data), timeout_s=15.0),
         _StopModule("handoff_claim", _build_handoff_claim(hook_data), timeout_s=5.0),
         _StopModule("handoff_required", _build_handoff_required(hook_data), timeout_s=5.0),
+        _StopModule("sweep_guard", _build_sweep_guard(hook_data), timeout_s=5.0),
         _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
         _StopModule("orphan_scan", _build_orphan_scan(hook_data), timeout_s=15.0),
         _StopModule("git_size_monitor", _build_git_size_monitor(), timeout_s=5.0),
