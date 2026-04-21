@@ -188,7 +188,10 @@ def reset_aumid_counter(aumid: str = AUMID_VSCODE) -> bool:
 def auto_reset_on_session_start(
     aumids: tuple[str, ...] = (AUMID_VSCODE, AUMID_CURSOR),
     verbose: bool = False,
-    register_private: bool = False,  # Concinno private AUMID archived 2026-04-21 — user wants VSCode AUMID (historically stable) + per-call reset; private AUMID module retained for future re-enable
+    # Private AUMID archived 2026-04-21: user reverted to VSCode AUMID
+    # (historically stable); per-call reset in show_toast is the real fix
+    # and works for any AUMID. register_private_aumid() kept for re-enable.
+    register_private: bool = False,
 ) -> dict[str, bool]:
     """Reset counters for all known host-IDE AUMIDs.
 
