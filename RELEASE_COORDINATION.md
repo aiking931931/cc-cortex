@@ -3,19 +3,19 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — 2.10.5 live / 2.11.0 QUEUED）
+## 現況 snapshot（2026-04-21 — 2.11.0 LIVE）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.10.5` |
-| `pyproject.toml` version | `2.11.0` (queued, not yet published) |
-| `src/concinno/__init__.py __version__` | `2.11.0` (queued, not yet published) |
+| Registry latest (PyPI) | `2.11.0` — <https://pypi.org/project/concinno/2.11.0/> |
+| `pyproject.toml` version | `2.11.0` |
+| `src/concinno/__init__.py __version__` | `2.11.0` |
 | CHANGELOG.md 最新 release heading | `## [2.11.0] - 2026-04-21` |
-| 三源對齊狀態 | ✅（all three at 2.11.0） |
-| 下一 publish 目標 | `2.11.0` — PromptJudge route schema (S5 red-blue CBUA advisory-only ship) |
-| 本地 commit | `f3451ed` (working tree) |
-| 本地 tag | `v2.10.1-v2.10.5` (all pushed); `v2.11.0` pending publish authorization |
-| Pending Publish Queue | `2.11.0` ready-to-publish (下方 §Pending Publish Queue) |
+| 三源對齊狀態 | ✅ |
+| 下一 publish 目標 | `2.12.0` — scheduler CLI + locale propagate + handoff writeback + glossary (design doc 已備) |
+| 本地 commit | `15fd2c0` (release: concinno 2.11.0 — PromptJudge route + 10 SkillsMP wrappers, pushed origin) |
+| 本地 tag | `v2.11.0` (pushed origin <https://github.com/aiking931931/concinno>) |
+| Pending Publish Queue | 空（2.11.0 已 published 移到 Session Registry::History） |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -110,10 +110,14 @@ pid: <process id, 可選>
 
 ```yaml
 # v1 schema — 每條 record 一個 YAML block fenced 在此段內
-- version: "2.11.0"
-  state: ready-to-publish
-  superseded_by: null
-  supersedes: "2.10.5 (live)"
+# (2.11.0 PUBLISHED — record moved to Session Registry::History below)
+
+- version: "2.8.0"
+  # placeholder to keep YAML fence non-empty after 2.11.0 moved to History
+  state: stale  # see prior record for historical context
+
+- version: "2.11.0_MOVED_TO_HISTORY"
+  state: published
   queued_by:
     session: cc_1a93_0832
     host: Z_HP
@@ -132,6 +136,9 @@ pid: <process id, 可選>
     ruff_new_files: clean
     ruff_pre_existing: same as 2.10.5 (no new)
     triple_source_aligned: true
+    published_url: "https://pypi.org/project/concinno/2.11.0/"
+    published_at: "2026-04-21T~17:00+08:00"
+    clean_install_verify: "OK 2.11.0 install+import+contract verified"
     redteam_review: |
       Session cc_1a93_0832 (2026-04-21) — S5 red-blue CBUA with two
       Opus subagents + WebFetch CC hooks docs. Red team (Opus code-
@@ -304,6 +311,30 @@ pid: <process id, 可選>
 無
 
 ### History
+
+- `2026-04-21` session=`cc_1a93_0832` target=`2.11.0` result=**ok** —
+  PyPI LIVE <https://pypi.org/project/concinno/2.11.0/> . Commit
+  `f3451ed` (ai-king outer repo, no remote origin), local tag `v2.11.0`.
+  Scope: PromptJudge `route` decision schema (third enum alongside
+  block/allow) + new `concinno.prompt_hooks_routes` submodule (stdlib-only;
+  `RouteContext`/`RouteResult`/`BUILTIN_ROUTES`/`echo_advisory`/
+  `validate_route_payload`/`dispatch`) + VALID_DECISIONS frozenset
+  contract constant + 4 judge prompt bodies (HALLUCINATION / EXCUSE /
+  CODE_QUALITY / WIREDO) extended with route option. Ship scope降級
+  via S5 red-blue CBUA (Opus red `code-reviewer` + Opus blue `architect`
+  + WebFetch CC hook docs 三源驗證): dispatcher scope reduced to
+  advisory-only (FATAL-1 dispatcher-no-receive-path confirmed by CC
+  stateless-parallel hook protocol → deferred to Sancio 0.4+ L3);
+  register_route dropped (FATAL-2 arbitrary-exec surface); 5 declared
+  route_to handlers all map to echo_advisory (stderr log, no exec).
+  Regression 5550 passed / 1 skipped / 3 xfailed / 0 failed. Clean-venv
+  install verify: `OK 2.11.0 install+import+contract verified`
+  (`VALID_DECISIONS` present + `BUILTIN_ROUTES['citation'] is
+  echo_advisory`). Wheel 1263618 B + sdist 1044226 B. Paper v0 draft
+  (`_AI_BRAIN/05_Planning/budget-capability-paper-draft-v0-2026-04-21.md`)
+  + 2.12.0 design doc (scheduler CLI + locale propagate + handoff
+  writeback + glossary) produced in same session but independent of
+  this release.
 
 - `2026-04-21` session=`cc_9046_0346` target=`2.10.5` result=**ok** —
   PyPI LIVE <https://pypi.org/project/concinno/2.10.5/> . Commit
