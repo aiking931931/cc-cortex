@@ -421,7 +421,7 @@ def main(hook_data: dict | None = None) -> None:
             _StopModule("multi_instance", _build_multi_instance(), timeout_s=5.0),
             _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
             _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
-            _StopModule("notify", _build_notify(hook_data), timeout_s=5.0),
+            _StopModule("notify", _build_notify(hook_data), timeout_s=15.0),
         ]
         try:
             asyncio.run(_run_pipeline(cleanup_only))
@@ -445,7 +445,7 @@ def main(hook_data: dict | None = None) -> None:
         _StopModule("orphan_scan", _build_orphan_scan(hook_data), timeout_s=15.0),
         _StopModule("git_size_monitor", _build_git_size_monitor(), timeout_s=5.0),
         _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
-        _StopModule("notify", _build_notify(hook_data), timeout_s=5.0),
+        _StopModule("notify", _build_notify(hook_data), timeout_s=15.0),
     ]
 
     try:
@@ -667,7 +667,23 @@ def _resolve_session_info(
 
 
 def _notify_stop(hook_data: dict) -> None:
-    """Show toast: session name + task + git status, locale-aware."""
+    """Show toast: session name + task + git status, locale-aware.
+
+    Toast-first pipeline (2.14.0 fix): the 2-line core (session + task +
+    response_ready) fires immediately in a daemon thread so the banner
+    always appears within ~100ms regardless of how long git_assist takes.
+    Once auto_commit + generate_report finish, a second toast with the
+    same tag+group *replaces* the first with the full 5-line spec.
+
+    Before this split, git operations (auto_commit on a large working
+    tree, generate_report on a stale index) routinely pushed the entire
+    notify module past its 5s async timeout, tripping the circuit breaker
+    after 3 consecutive failures — the user-visible symptom was "hook
+    fires but no banner appears" even though the toast code itself was
+    fine. See MEMORY #70 (feedback_toast_3opus_triangulation) +
+    feedback_toast_module_timeout.md.
+    """
+    import threading
     from concinno.core.notify import _get_locale, _t, show_toast
 
     locale = _get_locale()
@@ -677,32 +693,52 @@ def _notify_stop(hook_data: dict) -> None:
     line1, task = _resolve_session_info(session_id, project_dir)
     line2 = f"{task[:40]} — {_t('response_ready')}" if task else _t("response_ready")
 
-    git_lines: list[str] = []
-    try:
-        from concinno.git_assist import auto_commit, generate_report
-        committed = auto_commit(cwd=project_dir or None)
-        if committed:
-            git_lines.append(f"✅ {committed}")
-        report = generate_report(cwd=project_dir or None, locale=locale)
-        if report:
-            git_lines.extend(report.splitlines()[:2])
-    except Exception:
-        pass
-    git_line = "\n".join(git_lines)
+    def _fire(body: str) -> None:
+        try:
+            show_toast(
+                "Claude Code", body,
+                enabled=True, tag="claude-stop", group="claude-code",
+            )
+        except Exception:
+            pass
 
-    body = f"{line1}\n{line2}"
-    if git_line:
-        body += f"\n{git_line}"
+    def _git_then_full_toast() -> None:
+        """Compute git info then fire the 5-line replacement toast.
 
-    # Fall through to show_toast default app_id=Microsoft.VisualStudioCode.
-    # Claude Code runs inside the VS Code / Cursor host process, so we send
-    # toasts under the host IDE's identity — user sees a single notification
-    # source "Visual Studio Code" in Action Center. This is the officially
-    # supported host-process AUMID pattern (MS Learn: AppUserModelIDs).
-    show_toast(
-        "Claude Code", body,
-        enabled=True, tag="claude-stop", group="claude-code",
-    )
+        Runs off the pipeline's critical path so ``auto_commit`` /
+        ``generate_report`` delays never trip the notify module's async
+        timeout. Same tag+group as the core toast → Windows replaces the
+        earlier 2-line banner with this full version.
+        """
+        git_lines: list[str] = []
+        try:
+            from concinno.git_assist import auto_commit, generate_report
+            committed = auto_commit(cwd=project_dir or None)
+            if committed:
+                git_lines.append(f"✅ {committed}")
+            report = generate_report(cwd=project_dir or None, locale=locale)
+            if report:
+                git_lines.extend(report.splitlines()[:2])
+        except Exception:
+            return
+        if git_lines:
+            full_body = f"{line1}\n{line2}\n" + "\n".join(git_lines)
+            _fire(full_body)
+
+    # Fire the core 2-line toast immediately — user sees it within ~100ms.
+    core_body = f"{line1}\n{line2}"
+    threading.Thread(
+        target=_fire, args=(core_body,),
+        name="concinno-stop-toast-core", daemon=True,
+    ).start()
+
+    # Off-load git_assist (slow, can exceed any module timeout in a
+    # rebase-stuck state) onto a second daemon thread. _notify_stop
+    # itself returns in <200 ms so the notify module never times out.
+    threading.Thread(
+        target=_git_then_full_toast,
+        name="concinno-stop-toast-git", daemon=True,
+    ).start()
 
 
 def _find_claude_cli_pid(proc_map: dict[int, dict]) -> int:
