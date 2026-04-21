@@ -939,3 +939,152 @@ class TestClearStaleIndexLock:
         # We must NOT have invoked add / commit while a peer was active
         assert not any(c[:1] == ["add"] for c in calls)
         assert not any(c[:2] == ["commit", "-m"] for c in calls)
+
+
+# ── 2.13.1 nested repo skip (MEMORY #67 outer-inner race fix) ─────────
+
+
+class TestAutoCommitNestedRepoSkip:
+    """`git add -A` must exclude nested repo subdirs to avoid outer-inner race.
+
+    When outer intentionally tracks paths inside an inner repo's working tree
+    (e.g. ``ai-king/.gitignore`` carve-out for ``projects/concinno/``), a plain
+    ``git add -A`` would stage the inner's WIP into the outer index, and any
+    later outer rebase/checkout replaying stale trees would then delete those
+    now-outer-tracked files from the inner working tree.
+    """
+
+    def test_add_excludes_detected_nested_repos(self, tmp_path, monkeypatch):
+        status = " M outer.py\n?? projects/concinno/src/new.py"
+        nested = ["projects/concinno"]
+        calls: list[list[str]] = []
+
+        def recording_git(args, cwd, timeout=10):
+            calls.append(list(args))
+            if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:2] == ["status", "--short"]:
+                return status
+            if args[:2] == ["add", "-A"]:
+                return ""
+            if args[:2] == ["commit", "-m"]:
+                return "ok"
+            if args[:2] == ["rev-list", "--count"]:
+                return "1"
+            return ""
+
+        monkeypatch.delenv("CONCINNO_SKIP_NESTED_ADD", raising=False)
+        with patch("concinno.git_assist._git", side_effect=recording_git), \
+             patch(
+                 "concinno.cleanup._detect_embedded_nested_repos",
+                 return_value=nested,
+             ):
+            result = auto_commit(str(tmp_path))
+
+        assert result is not None, "auto_commit should still succeed"
+        add_calls = [c for c in calls if c[:2] == ["add", "-A"]]
+        assert len(add_calls) == 1
+        add_args = add_calls[0]
+        # Must use pathspec exclude form when nested detected
+        assert "--" in add_args, f"expected pathspec separator, got {add_args}"
+        assert ":(exclude)projects/concinno" in add_args, (
+            f"expected exclude pathspec, got {add_args}"
+        )
+
+    def test_add_uses_bare_form_when_no_nested(self, tmp_path, monkeypatch):
+        """No nested repos → plain ``git add -A`` (preserves L0 fast path)."""
+        status = " M main.py"
+        calls: list[list[str]] = []
+
+        def recording_git(args, cwd, timeout=10):
+            calls.append(list(args))
+            if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:2] == ["status", "--short"]:
+                return status
+            if args[:2] == ["add", "-A"]:
+                return ""
+            if args[:2] == ["commit", "-m"]:
+                return "ok"
+            if args[:2] == ["rev-list", "--count"]:
+                return "1"
+            return ""
+
+        monkeypatch.delenv("CONCINNO_SKIP_NESTED_ADD", raising=False)
+        with patch("concinno.git_assist._git", side_effect=recording_git), \
+             patch(
+                 "concinno.cleanup._detect_embedded_nested_repos",
+                 return_value=[],
+             ):
+            result = auto_commit(str(tmp_path))
+
+        assert result is not None
+        add_calls = [c for c in calls if c[:1] == ["add"]]
+        assert len(add_calls) == 1
+        # Bare form — no pathspec separator, no exclude
+        assert add_calls[0] == ["add", "-A"]
+
+    def test_env_escape_disables_nested_skip(self, tmp_path, monkeypatch):
+        """CONCINNO_SKIP_NESTED_ADD=0 restores pre-2.13.1 behavior."""
+        status = " M a.py"
+        calls: list[list[str]] = []
+
+        def recording_git(args, cwd, timeout=10):
+            calls.append(list(args))
+            if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:2] == ["status", "--short"]:
+                return status
+            if args[:2] == ["add", "-A"]:
+                return ""
+            if args[:2] == ["commit", "-m"]:
+                return "ok"
+            if args[:2] == ["rev-list", "--count"]:
+                return "1"
+            return ""
+
+        monkeypatch.setenv("CONCINNO_SKIP_NESTED_ADD", "0")
+        with patch("concinno.git_assist._git", side_effect=recording_git):
+            result = auto_commit(str(tmp_path))
+
+        assert result is not None
+        add_calls = [c for c in calls if c[:1] == ["add"]]
+        assert len(add_calls) == 1
+        # Escape on → bare form, detector never consulted
+        assert add_calls[0] == ["add", "-A"]
+
+    def test_detector_exception_degrades_to_bare_add(self, tmp_path, monkeypatch):
+        """Any exception from the detector must not block auto_commit."""
+        status = " M x.py"
+        calls: list[list[str]] = []
+
+        def recording_git(args, cwd, timeout=10):
+            calls.append(list(args))
+            if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:2] == ["status", "--short"]:
+                return status
+            if args[:2] == ["add", "-A"]:
+                return ""
+            if args[:2] == ["commit", "-m"]:
+                return "ok"
+            if args[:2] == ["rev-list", "--count"]:
+                return "1"
+            return ""
+
+        def raising_detector(cwd, max_depth=4):
+            raise RuntimeError("simulated failure")
+
+        monkeypatch.delenv("CONCINNO_SKIP_NESTED_ADD", raising=False)
+        with patch("concinno.git_assist._git", side_effect=recording_git), \
+             patch(
+                 "concinno.cleanup._detect_embedded_nested_repos",
+                 side_effect=raising_detector,
+             ):
+            result = auto_commit(str(tmp_path))
+
+        assert result is not None, (
+            "auto_commit must remain resilient when detector crashes"
+        )
+        add_calls = [c for c in calls if c[:1] == ["add"]]
+        assert add_calls[0] == ["add", "-A"]

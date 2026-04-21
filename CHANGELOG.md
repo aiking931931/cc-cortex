@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-04-21
+
+Patch: root-cause fix for the outer-inner repo race that recurred in the
+2.13.0 ship session (MEMORY #67, again). The 2.10.2 snapshot/restore
+pairs already protect the **squash** phase; 2.13.1 closes the remaining
+window in the **`git add -A`** phase of `auto_commit`.
+
+### Fixed — `git_assist.auto_commit` skips nested repo subdirs during stage
+
+- Root cause: when an outer repo intentionally tracks paths inside a
+  nested repo's working tree (e.g. `ai-king/.gitignore` carve-out for
+  `projects/concinno/`), a plain `git add -A` stages the inner's
+  untracked WIP (e.g. a freshly-written `fidelity_delta.py`) into the
+  outer index. Any subsequent outer rebase/checkout replaying stale
+  trees then **deletes those now-outer-tracked files from the inner
+  working tree** because the old outer commits do not contain them.
+  2.13.0 ship session lost 378 + 334 LOC this way before reflog rescue.
+- Fix: `auto_commit` now calls
+  `concinno.cleanup._detect_embedded_nested_repos(cwd)` before
+  `git add -A`. When any nested repo is detected, the stage command
+  becomes `git add -A -- . :(exclude)<nested-path>/` for each detected
+  subdir. Outer stays blind to inner WIP — the inner repo owns its
+  own commits. L0 rule "never per-file" is preserved (still one
+  `git add` call per auto-commit, just with pathspec).
+- Emits a one-line stderr breadcrumb listing up to 3 skipped subdirs
+  so the operator can see the exclusion in effect.
+- Escape: `CONCINNO_SKIP_NESTED_ADD=0` restores pre-2.13.1 behavior
+  (bare `git add -A`).
+- Resilience: detector exceptions degrade silently to bare
+  `git add -A` — auto-commit never blocks on nested-repo analysis.
+
+### Tests
+
+- 4 new tests in `tests/test_git_assist.py::TestAutoCommitNestedRepoSkip`:
+  detected-nested → exclude pathspec asserted; no-nested → bare form
+  preserved; `CONCINNO_SKIP_NESTED_ADD=0` escape → bare form; detector
+  exception → graceful fallback. All 137/137 `test_git_assist.py` green
+  + full regression pytest unchanged.
+
 ## [2.13.0] - 2026-04-21
 
 Minor with **one documented breaking change** (`gaia_meta_router.select_arm`

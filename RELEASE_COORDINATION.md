@@ -3,69 +3,24 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — **2.13.0 ship-ready，等 user 授權字串**）
+## 現況 snapshot（2026-04-21 — **2.13.0 LIVE**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.12.2` — <https://pypi.org/project/concinno/2.12.2/> (upload 2026-04-21 ~16:33 +08:00) |
+| Registry latest (PyPI) | `2.13.0` — <https://pypi.org/project/concinno/2.13.0/> (upload 2026-04-21 ~17:09 +08:00) |
 | `pyproject.toml` version | `2.13.0` |
 | `src/concinno/__init__.py __version__` | `2.13.0` |
 | CHANGELOG.md 最新 release heading | `## [2.13.0] - 2026-04-21` |
 | 三源對齊狀態 | ✅ 三源互相對齊 2.13.0 |
-| 下一 publish 目標 | `2.13.0` — E 延伸 N-aware `select_arm -> tuple[Arm, int]` + E 延伸 2 `fidelity_delta` module + D/C MAS 14 crosswalk (plan doc `_AI_BRAIN/05_Planning/gaia-meta-router-n-aware-2026-04-21.md` + verdict `project_cc_b2c962dc_redblue_cbua_verdict.md`) |
-| 本地 commit | `c345ca9` (release: concinno 2.12.2 — 2.13.0 WIP uncommitted; commit pending stop event auto-commit) |
-| 本地 tag 最新 | `v2.12.2` (pushed origin) — v2.13.0 pending user auth |
-| Pending Publish Queue | **2.13.0 ready-to-publish** — 等 user 授權字串 `go publish concinno 2.13.0` |
+| 下一 publish 目標 | TBD — 2.14.0 candidate: DEPTH_TIER_MAP / depth-budget 擴展 `ArmDecision.depth` |
+| 本地 commit | `ab7cd14` (release: concinno 2.13.0 — N-aware select_arm + fidelity_delta + MAS 14 crosswalk) |
+| 本地 tag 最新 | `v2.13.0` (pushed origin) |
+| Pending Publish Queue | 空（2.13.0 已 published 移到 Session Registry::History） |
 
-## Pending Publish Queue (2.13.0 ready)
+## Pending Publish Queue (current)
 
-```yaml
-- version: "2.13.0"
-  state: ready-to-publish
-  queued_by:
-    session: PERP_38ba_1634
-    host: AI-King-Windows
-    queued_at: "2026-04-21T16:55:00+08:00"
-  artifacts:
-    wheel: dist/concinno-2.13.0-py3-none-any.whl  # 1327726 bytes
-    sdist: dist/concinno-2.13.0.tar.gz            # 1096980 bytes
-    twine_check: PASSED  # both whl + sdist
-    built_from: HEAD (WIP, commit pending stop event auto-commit)
-  verification:
-    tests_full: "5696 passed, 1 skipped, 3 xfailed in 208.69s (2026-04-21 17:01-17:05)"
-    ruff: "clean (All checks passed!)"
-    triple_source_aligned: true
-    redteam_review: SKIPPED — plan doc §4 commander Medium-radius waiver (2 call sites internal, no external caller; breaking contained; depth-budget route is 2.14.0 candidate not this bump)
-  blocking_on:
-    - user_authorization  # full-mode L1 rule #48 not exempt for twine upload
-  suggested_command: |
-    # DO NOT auto-run. Next session should, after user types the exact string:
-    cd projects/concinno
-    git add -A
-    git commit -m "release: concinno 2.13.0 — N-aware select_arm + fidelity_delta + MAS 14 crosswalk"
-    python -m build
-    python -m twine check dist/concinno-2.13.0*
-    # await user exact string: go publish concinno 2.13.0
-    PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-2.13.0-*
-    git tag v2.13.0 && git push origin v2.13.0
-  expires_at: "2026-04-28T16:55:00+08:00"
-  notes: |
-    E extension (N-aware select_arm tuple return) + E extension 2
-    (fidelity_delta module) + D/C extension (MAS 14 crosswalk + routing
-    primary rule) were all landed by parallel sessions between 2.12.2
-    ship and this queue record. This session (PERP_38ba_1634) only
-    wrote the plan doc, CHANGELOG 2.13.0 entry, version bump 2.12.2 →
-    2.13.0, and Pending Publish Queue record. No code changes shipped
-    this session beyond docs + version.
-
-    BREAKING: select_arm returns tuple[Arm, int]; see CHANGELOG migration.
-    Zero external production callers at 2.12.2 per repo-wide grep.
-
-    MEMORY #57 paper-kill guard reminder: MAS 14 routing claims (#5 / #8 /
-    #14) remain UNTESTED proposal-tier. DEPTH_TIER_MAP values in plan
-    doc were NOT shipped; breadth-based _N_BOUNDS + subagent_count
-    shipped instead. Depth-budget routing is a 2.14.0+ candidate.
-```
+無 active record — 2.13.0 shipped 2026-04-21 17:09 +08:00, record moved to
+Session Registry::History below.
 
 ## ✅ 2.12.1 fork divergence — RESOLVED（2026-04-21 cc_150b_1551）
 

@@ -685,8 +685,42 @@ def auto_commit(
     if not safe_files:
         return None
 
+    # 2.13.1 治本 — skip nested repo subdirs from `git add -A` to break
+    # the outer-inner race of MEMORY #67. When an outer repo intentionally
+    # tracks paths inside a nested working tree (e.g. ai-king's
+    # `!projects/concinno/` carve-out), a plain `git add -A` stages the
+    # inner-repo's untracked WIP into the outer index. Any subsequent
+    # outer rebase/checkout that replays an older outer tree state can
+    # then **delete those files from the inner working tree** (they are
+    # now outer-tracked paths, and the old tree does not contain them).
+    # The 2.10.2 snapshot/restore handles the rebase phase but does not
+    # prevent the stage — the file gets drawn into the outer index long
+    # before squash ever runs. Excluding the nested subdir from `add -A`
+    # keeps outer blind to inner WIP; the inner repo owns its own commits.
+    # Set ``CONCINNO_SKIP_NESTED_ADD=0`` to restore pre-2.13.1 behavior.
+    nested_excludes: list[str] = []
+    if os.environ.get("CONCINNO_SKIP_NESTED_ADD", "1") != "0":
+        try:
+            from concinno.cleanup import _detect_embedded_nested_repos
+            nested_excludes = _detect_embedded_nested_repos(cwd)
+        except Exception:
+            nested_excludes = []
+
     # Batch stage everything (L0: never per-file).
-    if _git(["add", "-A"], cwd, timeout=op_timeout) is None:
+    if nested_excludes:
+        add_cmd = ["add", "-A", "--", "."] + [
+            f":(exclude){rel}" for rel in nested_excludes
+        ]
+        _safe_stderr(
+            f"concinno: skipping `git add -A` for {len(nested_excludes)} "
+            f"nested repo subdir(s) to avoid outer-inner race: "
+            f"{', '.join(nested_excludes[:3])}"
+            + (" …" if len(nested_excludes) > 3 else "")
+            + " (escape: CONCINNO_SKIP_NESTED_ADD=0)"
+        )
+    else:
+        add_cmd = ["add", "-A"]
+    if _git(add_cmd, cwd, timeout=op_timeout) is None:
         return None
 
     # Defensive unstage: remove any newly-detected secret-like files
