@@ -247,15 +247,22 @@ pid: <process id, 可選>
 
 ### Active
 
-- `2026-04-21` session=`cc_9046_0346` host=`cc_9046_0346`
-  started=`2026-04-21T00:00Z` target=`2.10.4`
-  scope=`agent_dispatch_guard poll-pattern detection` —
-  pyproject / __init__ / CHANGELOG bumped to 2.10.4, 18/18 new unit tests
-  green, ruff clean. Proceeding to commit + tag + build + twine upload +
-  push. User authorized all irreversible operations this turn.
+無
 
 ### History
 
+- `2026-04-21` session=`cc_9046_0346` target=`2.10.5` result=**ok** —
+  PyPI LIVE <https://pypi.org/project/concinno/2.10.5/> . Commit
+  `c7adeb9` on branch `feat/2.3.0-red-team-round-3` (pushed), tag
+  `v2.10.5` (annotated `f056979`) pushed to origin. Scope bundled two
+  parallel workstreams: (a) red-team Opus review fixes for 2.10.2+2.10.3
+  (F1 FATAL CJK path bypass + F2/F3/H1 HIGH) by concurrent session,
+  (b) `AgentDispatchGuard` poll-pattern scanner by this session
+  (was originally queued as 2.10.4 in CHANGELOG, merged into 2.10.5
+  commit rather than shipping a separate 2.10.4). My 18/18 unit tests
+  in `tests/test_agent_dispatch_guard.py` green + ruff clean; red-team
+  fixes owned by concurrent session scope. Build + twine check PASSED
+  from HEAD c7adeb9. Wheel 1234350 B + sdist 1023360 B.
 - `2026-04-20 cc_2_10_2_inline_squash_fix` target=`2.10.2` result=**ok** —
   PyPI LIVE <https://pypi.org/project/concinno/2.10.2/> . Commit `7f2fb9b`
   on branch `feat/2.3.0-red-team-round-3` (pushed), tags `v2.10.1` +
