@@ -116,7 +116,20 @@ def is_demoted(aumid: str = AUMID_VSCODE, threshold: int = 3) -> bool:
 
 
 def reset_aumid_counter(aumid: str = AUMID_VSCODE) -> bool:
-    """Reset ``PeriodicNotificationCount`` to 0 and ensure ``Enabled=1``.
+    """Reset AUMID reputation to banner-friendly defaults.
+
+    Windows 11 tracks multiple reputation signals per AUMID — resetting
+    just ``PeriodicNotificationCount`` is insufficient if ``Rank`` was
+    demoted or ``PeriodicInteractionCount`` is low. This restores all of:
+
+    - ``Enabled = 1`` (toast master switch for this AUMID)
+    - ``ShowBanner = 1`` (banner pop-up allowed)
+    - ``ShowInActionCenter = 1`` (show in quiet history)
+    - ``PeriodicNotificationCount = 0`` (spam counter)
+    - ``Rank = 0`` (priority — 0 = highest, 99 = demoted / last resort)
+    - ``PeriodicInteractionCount = 999`` (signal high user engagement so
+      Windows trusts future toasts; actual value is a heuristic that
+      biases the reputation model toward banner display)
 
     Idempotent — safe to call every session start. No-op on non-Windows.
 
@@ -125,16 +138,21 @@ def reset_aumid_counter(aumid: str = AUMID_VSCODE) -> bool:
     """
     if sys.platform != "win32":
         return True
-    # Create the key if missing (`New-Item -Force` is idempotent), then
-    # set both properties. Use `-ErrorAction SilentlyContinue` so a
-    # transient permissions issue doesn't crash the session start.
     cmd = (
         f"$p='{_REG_BASE}\\{aumid}'; "
         "if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }; "
         "Set-ItemProperty -Path $p -Name PeriodicNotificationCount "
         "-Value 0 -Type DWord -ErrorAction SilentlyContinue; "
         "Set-ItemProperty -Path $p -Name Enabled "
-        "-Value 1 -Type DWord -ErrorAction SilentlyContinue"
+        "-Value 1 -Type DWord -ErrorAction SilentlyContinue; "
+        "Set-ItemProperty -Path $p -Name ShowBanner "
+        "-Value 1 -Type DWord -ErrorAction SilentlyContinue; "
+        "Set-ItemProperty -Path $p -Name ShowInActionCenter "
+        "-Value 1 -Type DWord -ErrorAction SilentlyContinue; "
+        "Set-ItemProperty -Path $p -Name Rank "
+        "-Value 0 -Type DWord -ErrorAction SilentlyContinue; "
+        "Set-ItemProperty -Path $p -Name PeriodicInteractionCount "
+        "-Value 999 -Type DWord -ErrorAction SilentlyContinue"
     )
     out = _run_powershell(cmd, timeout_s=5.0)
     return out is not None
