@@ -57,8 +57,97 @@ def _git(args: list[str], cwd: str, timeout: int = 10) -> Optional[str]:
         return None
 
 
+def _git_raw(args: list[str], cwd: str, timeout: int = 10) -> Optional[str]:
+    """Like ``_git`` but does NOT strip stdout — use for ``git status -z``
+    (NUL-terminated, no leading/trailing whitespace meaningful).
+
+    2.10.4 治本 — `_git`'s `.strip()` ate the leading space of `" M path"`
+    so column-3 path slicing went off-by-one. Cleanup.py already worked
+    around this with an inline subprocess; this helper is the shared fix.
+    """
+    try:
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=cwd,
+            capture_output=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=_CREATE_NO_WINDOW,
+            startupinfo=_hidden_startupinfo(),
+        )
+        if result.returncode == 0:
+            return result.stdout
+        return None
+    except Exception:
+        return None
+
+
+def _status_records_z(cwd: str, timeout: int = 10) -> Optional[list[str]]:
+    """Return git status records as raw strings, NUL-separated.
+
+    2.10.4 治本 (FATAL F1) — ``git status --short`` quotes paths with
+    non-ASCII characters or spaces (``"交接_X.md"`` / ``"path with
+    space.txt"``), and ``_parse_status``'s ``line[3:].strip()`` then
+    handed the still-quoted path to ``_is_large_unignored`` /
+    ``_is_secret``, where ``os.stat()`` raised ``FileNotFoundError``
+    on the literal ``"<quote>foo<quote>"`` filename and the file was
+    silently passed through. Real ai-king CJK paths reproduced this.
+
+    ``status -z`` outputs the unquoted byte stream of paths separated
+    by NUL — no shell escaping, no leading-space ambiguity.
+    """
+    raw = _git_raw(
+        ["-c", "core.quotepath=false", "status", "-z"], cwd, timeout=timeout
+    )
+    if raw is None:
+        return None
+    # Split by NUL; rename records emit `R XX\0old\0new` so a naive split
+    # leaves a stray "old" record; we filter it out below in the parser.
+    return [r for r in raw.split("\x00") if r]
+
+
+def _parse_status_z(records: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Parse ``git status -z`` records into (staged, unstaged, untracked).
+
+    Each record is ``XY path`` with X/Y guaranteed (-z preserves the
+    leading space; no quoting). For rename records ``R  new`` the next
+    record is the old path — skipped here because the cleanup callers
+    only need the destination path.
+    """
+    staged, unstaged, untracked = [], [], []
+    skip_next = False
+    for rec in records:
+        if skip_next:
+            skip_next = False
+            continue
+        if len(rec) < 3:
+            continue
+        x, y = rec[0], rec[1]
+        # Path is everything from col 3 onwards. -z preserves leading
+        # space (no shell-escaping); column offsets are stable.
+        fname = rec[3:]
+        if x == "?":
+            untracked.append(fname)
+        elif x != " ":
+            staged.append(fname)
+            # Rename / copy emits the old path as the next NUL record.
+            if x in ("R", "C"):
+                skip_next = True
+        if y != " " and y != "?":
+            unstaged.append(fname)
+    return staged, unstaged, untracked
+
+
 def _parse_status(raw: str) -> tuple[list[str], list[str], list[str]]:
-    """Parse git status --short output into (staged, unstaged, untracked)."""
+    """Parse git status --short output into (staged, unstaged, untracked).
+
+    ⚠ Legacy parser — uses ``line[3:].strip()`` which fails on quoted
+    paths (CJK / spaces). Kept for ``generate_report`` (display-only,
+    quotes are tolerable). New code (auto_commit, anything that touches
+    the filesystem with the path) MUST use ``_status_records_z`` +
+    ``_parse_status_z`` instead.
+    """
     staged, unstaged, untracked = [], [], []
     for line in raw.splitlines():
         if len(line) < 3:
@@ -564,11 +653,24 @@ def auto_commit(
     if not _clear_stale_index_lock(cwd):
         return None
 
-    status = _git(["status", "--short"], cwd, timeout=timeout)
-    if not status:
-        return None
-
-    staged, unstaged, untracked = _parse_status(status)
+    # 2.10.4 治本 (FATAL F1): use -z + core.quotepath=false so CJK / spaced
+    # paths arrive unquoted. _parse_status's "line[3:].strip()" handed
+    # quoted paths like "交接_X.md" to os.stat() which then 404'd, so the
+    # large-file/secret filters silently passed CJK files through. Real
+    # ai-king CJK paths reproduced this on 2.10.3.
+    #
+    # Fallback to legacy `--short` parsing only if `-z` returns None — that
+    # path is a hygiene safety net for environments where `_git_raw` cannot
+    # spawn (constrained sandboxes, mocked subprocess in tests). Real git
+    # repos always succeed via the -z path.
+    records = _status_records_z(cwd, timeout=timeout)
+    if records is not None:
+        staged, unstaged, untracked = _parse_status_z(records)
+    else:
+        status = _git(["status", "--short"], cwd, timeout=timeout)
+        if not status:
+            return None
+        staged, unstaged, untracked = _parse_status(status)
     all_files = staged + unstaged + untracked
     if not all_files:
         return None

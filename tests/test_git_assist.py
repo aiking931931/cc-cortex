@@ -15,6 +15,7 @@ from concinno.git_assist import (
     _is_trivial_path,
     _large_file_threshold,
     _parse_status,
+    _parse_status_z,
     _resolve_index_lock_path,
     auto_commit,
     generate_report,
@@ -514,6 +515,47 @@ class TestAutoCommit:
 
 
 # ── _is_trivial_path ─────────────────────────────────────
+
+
+class TestParseStatusZ:
+    """2.10.4 治本 (FATAL F1) — `git status -z` parser preserves CJK and
+    spaced paths. The legacy ``_parse_status`` slices ``line[3:].strip()``
+    and breaks on the quoted form ``"foo with space.txt"`` that
+    ``--short`` emits for non-ASCII / spaced filenames."""
+
+    def test_simple_modified(self):
+        records = [" M src/foo.py"]
+        s, u, ut = _parse_status_z(records)
+        assert s == [] and u == ["src/foo.py"] and ut == []
+
+    def test_cjk_path_preserved(self):
+        # -z does NOT quote; the CJK path arrives as raw bytes.
+        records = [" M _AI_BRAIN/06_Handoffs/cbua/交接_cbua.md"]
+        s, u, ut = _parse_status_z(records)
+        assert u == ["_AI_BRAIN/06_Handoffs/cbua/交接_cbua.md"]
+
+    def test_path_with_space_preserved(self):
+        records = ["A  path with space.txt"]
+        s, u, ut = _parse_status_z(records)
+        assert s == ["path with space.txt"]
+
+    def test_untracked(self):
+        records = ["?? new.bin"]
+        s, u, ut = _parse_status_z(records)
+        assert ut == ["new.bin"]
+
+    def test_rename_skips_old_path(self):
+        # Rename emits "R  new\0old" — only the new path is the destination
+        # we want to operate on; old is stale and is skipped.
+        records = ["R  new.py", "old.py"]
+        s, u, ut = _parse_status_z(records)
+        assert s == ["new.py"]
+        assert "old.py" not in s + u + ut
+
+    def test_short_record_skipped(self):
+        records = ["AB"]
+        s, u, ut = _parse_status_z(records)
+        assert s == [] and u == [] and ut == []
 
 
 class TestLargeFileThreshold:

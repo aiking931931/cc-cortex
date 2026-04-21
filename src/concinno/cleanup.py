@@ -236,46 +236,54 @@ def _detect_embedded_nested_repos(cwd: str, max_depth: int = 4) -> list[str]:
     if os.environ.get("CONCINNO_SKIP_NESTED_REPOS", "1") == "0":
         return []
 
-    root = Path(cwd)
-    if not root.is_dir():
+    if not os.path.isdir(cwd):
         return []
 
-    # Walk depth-limited; `.git` matches are either real repos or gitlink
-    # files (submodules). We only care about real repos with a working tree
-    # that the outer repo also tracks.
+    # 2.10.4 治本 (HIGH H1): the previous implementation used
+    # ``Path(cwd).rglob('.git')`` which on CPython <3.12 walks the
+    # ENTIRE tree and only filters by `max_depth` after the fact.
+    # On ai-king this means stat'ing every file under `.venv`,
+    # `node_modules`, `__pycache__`, sibling submodule dirs — tens of
+    # thousands of stats per Stop event. Switch to ``os.walk`` with
+    # explicit depth tracking + subtree pruning.
     embedded: list[str] = []
+    # Subtrees we never descend into (junk + outer's own .git).
+    _PRUNE_DIRS = frozenset({
+        ".git", ".venv", "venv", "env", "node_modules",
+        "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+        ".hypothesis", ".tox", "dist", "build",
+    })
     try:
-        for dot_git in root.rglob(".git"):
-            # Depth limit to keep cost bounded on large trees.
-            try:
-                rel = dot_git.relative_to(root)
-            except ValueError:
+        cwd_abs = os.path.abspath(cwd)
+        for dirpath, dirnames, _filenames in os.walk(cwd_abs, followlinks=False):
+            # Compute current depth (relative to cwd_abs) and prune in-place.
+            rel_dir = os.path.relpath(dirpath, cwd_abs)
+            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+            # Stop descending past max_depth-1 (a `.git` at depth N lives
+            # at parent-depth N-1; max_depth=4 → parent depth ≤3).
+            if depth >= max_depth:
+                dirnames[:] = []
                 continue
-            if len(rel.parts) == 0 or len(rel.parts) > max_depth:
+            # Prune in place — this is the only way to actually skip the
+            # subtree in os.walk (deleting from dirnames after yield would
+            # be too late).
+            dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+            # Look for `.git` directly in current dir's children. We need
+            # both real-repo (.git is dir) and worktree (.git is file)
+            # detection, but only real-repos qualify as "embedded with
+            # tracked working tree" — worktree's .git file points at
+            # shared storage, no tracked tree race possible.
+            git_child = os.path.join(dirpath, ".git")
+            if not os.path.isdir(git_child):
                 continue
-            # Skip the outer repo's own .git
-            if rel == Path(".git"):
+            # Skip outer's own .git (depth==0 case already caught by prune,
+            # but guard explicitly).
+            if dirpath == cwd_abs:
                 continue
-            # Skip submodule gitlinks (those are files, not directories) —
-            # submodules are safe because outer stores only the commit SHA.
-            if not dot_git.is_dir():
-                continue
-
-            nested_root_rel = rel.parent  # path relative to outer cwd
-            nested_root_abs = dot_git.parent
-            # Does the outer index track paths *inside* this nested repo?
-            # Use a trailing-slash pathspec to require hits beneath the
-            # nested root — plain `ls-files path` would also match a
-            # gitlink entry (submodule) at that exact path, which is
-            # safe (outer stores only commit SHA, not tree contents).
-            nested_rel_str = str(nested_root_rel).replace(os.sep, "/")
-            ls = _git(
-                ["ls-files", "--", f"{nested_rel_str}/"],
-                cwd,
-            )
-            # Filter: path must be strictly below nested_root_rel (not
-            # the gitlink itself). `ls-files path/` already excludes the
-            # gitlink, but double-check against accidental matches.
+            nested_root_rel = os.path.relpath(dirpath, cwd_abs)
+            nested_rel_str = nested_root_rel.replace(os.sep, "/")
+            # Does outer index track paths INSIDE this nested repo?
+            ls = _git(["ls-files", "--", f"{nested_rel_str}/"], cwd)
             tracked_inside = [
                 ln for ln in (ls or "").splitlines()
                 if ln and ln != nested_rel_str
@@ -283,11 +291,11 @@ def _detect_embedded_nested_repos(cwd: str, max_depth: int = 4) -> list[str]:
             ]
             if tracked_inside:
                 embedded.append(nested_rel_str)
-            # Bounded: if we already found too many, stop — no point in
-            # enumerating further, the squash is already unsafe.
             if len(embedded) >= 8:
                 break
-            _ = nested_root_abs  # keep for future extensions (ignore-list)
+            # Don't descend into a found nested repo's subtree — its own
+            # nested-of-nested is its own problem, not outer's.
+            dirnames[:] = []
     except OSError:
         return embedded
     return embedded
@@ -309,13 +317,30 @@ def _snapshot_inner_repo(inner_abs: str) -> Optional[dict]:
         progress, unreadable HEAD, or stash failure) — caller must refuse
         the outer squash to avoid losing inner work.
     """
-    if not os.path.isdir(os.path.join(inner_abs, ".git")):
+    git_marker = os.path.join(inner_abs, ".git")
+    if not os.path.exists(git_marker):
+        return None
+
+    # 2.10.4 治本 (FATAL F2): worktree's `.git` is a FILE (`gitdir: …`)
+    # pointing at the shared `.git/worktrees/<name>/` administrative dir.
+    # 2.10.3 only checked `isdir`, so worktrees silently returned None and
+    # outer squash refused without telling the operator why. We bail
+    # explicitly with stderr breadcrumb because reset --hard inside a
+    # worktree would touch the SHARED HEAD/refs of the sibling worktree.
+    if not os.path.isdir(git_marker):
+        sys.stderr.write(
+            f"concinno: skipping outer squash — inner at {inner_abs!r} is a "
+            "git worktree (.git is a file, not a directory). reset --hard "
+            "would mutate shared refs of sibling worktrees. Move the embedded "
+            "repo to a non-worktree clone, or set "
+            "CONCINNO_PROTECT_NESTED_REPOS=0 to fall back to refuse mode.\n"
+        )
         return None
 
     # Refuse when inner is mid-rebase / mid-merge: a snapshot + reset would
     # clobber the in-progress operation.
     for sentinel in ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD"):
-        if os.path.exists(os.path.join(inner_abs, ".git", sentinel)):
+        if os.path.exists(os.path.join(git_marker, sentinel)):
             return None
 
     head = _git(["rev-parse", "HEAD"], inner_abs)
@@ -551,9 +576,34 @@ def squash_auto_commits(
         )
         return result
     finally:
-        # Protect inner repos no matter how the outer squash exited: even
-        # if rebase aborted mid-way, inner HEAD+stash must be restored so
-        # the next session does not find the inner overwritten or dirty.
+        # 2.10.4 治本 (HIGH F3): if outer aborted mid-rebase the
+        # `.git/rebase-merge` / `rebase-apply` sentinel directories
+        # remain. Calling `git reset --hard <inner_HEAD>` inside the
+        # inner repo at this moment is safe for inner ITSELF (inner has
+        # no rebase in progress), but it overwrites the outer's working
+        # tree under the inner's path — and outer's index still thinks
+        # it is mid-rebase. Result: outer status shows phantom diffs
+        # against the rebase-stale index and the next session may
+        # trigger MEMORY #67's GitLens Interactive Rebase popup.
+        # Strategy: if outer is mid-rebase, skip restore and surface
+        # via stderr so the operator can finish (`git rebase --continue`)
+        # or abort (`git rebase --abort`) before any inner mutation.
+        # Stash + HEAD SHA remain intact in inner refs/stash for
+        # manual recovery.
+        outer_in_rebase = any(
+            os.path.exists(os.path.join(cwd, ".git", marker))
+            for marker in ("rebase-merge", "rebase-apply")
+        )
+        if outer_in_rebase and embedded_snapshots:
+            sys.stderr.write(
+                "concinno: outer repo left in mid-rebase state — skipping "
+                f"inner-repo restore for {len(embedded_snapshots)} embedded "
+                "inner(s). Inner HEAD + stash preserved (refs/stash). "
+                "Run `git rebase --abort` (or --continue) in outer first, "
+                "then manually `git reset --hard <inner_HEAD>` + "
+                "`git stash pop` inside each inner.\n"
+            )
+            return
         for nested_rel, snap in embedded_snapshots.items():
             _restore_inner_repo(os.path.join(cwd, nested_rel), snap)
 

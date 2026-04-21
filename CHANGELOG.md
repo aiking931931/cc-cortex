@@ -7,6 +7,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.5] - 2026-04-21
+
+Patch: red-team Opus review of 2.10.2 + 2.10.3 found 1 FATAL + 3 HIGH —
+all addressed in this release. Stacks on top of 2.10.4's
+`AgentDispatchGuard` work; no overlap.
+
+### Added — `_status_records_z` + `_parse_status_z` (FATAL F1 fix)
+
+`auto_commit` now parses `git status -z` (NUL-separated, unquoted)
+instead of `--short` (quote-wrapped CJK / spaced paths). Pre-fix: a
+CJK-named 50 MiB LoRA at `模型/big.safetensors` would slip past
+`_is_large_unignored` and `_is_secret` because both received the literal
+`"模型/..."` (with quotes) as `path`, `os.stat()` raised
+`FileNotFoundError`, the filter silently passed it through. Real
+ai-king CJK handoff paths reproduced this on 2.10.3.
+
+- `_git_raw()`: variant of `_git()` that does NOT `.strip()` stdout.
+  Required because `-z` output's leading byte may be a meaningful space
+  and `.strip()` ate it.
+- `_status_records_z(cwd, timeout)`: returns NUL-separated record list,
+  filtering empty.
+- `_parse_status_z(records)`: parses XY + path with stable column-3
+  offset (no leading-space ambiguity), handles rename-record-pair
+  (`R  new\0old`) by skipping the old half.
+- `auto_commit` falls back to legacy `--short` parsing only if
+  `_status_records_z` returns None (sandbox / mocked-subprocess test
+  env). Real git always succeeds via the `-z` path.
+
+### Fixed — `_snapshot_inner_repo` worktree detection (HIGH F2)
+
+Worktree's `.git` is a FILE (`gitdir: <abs path>`) pointing at the
+shared `.git/worktrees/<name>/` admin dir. Pre-fix `os.path.isdir()`
+returned False, function silently returned None, outer squash refused
+with no diagnostic. New behavior: explicit stderr breadcrumb + bail.
+`reset --hard` inside a worktree would mutate sibling worktrees'
+shared HEAD/refs — much worse than refusing.
+
+### Fixed — `squash_auto_commits` finally guards outer mid-rebase (HIGH F3)
+
+If outer aborted mid-rebase, the `finally` block previously called
+`_restore_inner_repo` (`reset --hard <inner_HEAD>`) — safe for inner
+ITSELF but corrupts outer's view because outer's index is still stuck
+in rebase-stale state. Result: outer status shows phantom diffs, next
+session triggers the GitLens Interactive Rebase popup (MEMORY #67
+redux). Fix: detect outer's `.git/rebase-merge` / `rebase-apply`
+sentinel before restore; if present, skip restore and surface stderr
+breadcrumb. Inner HEAD + stash remain in inner `refs/stash` for manual
+recovery.
+
+### Fixed — `_detect_embedded_nested_repos` walk pruning (HIGH H1)
+
+Pre-fix used `Path.rglob('.git')` which on CPython <3.12 walks the
+ENTIRE tree and only filters by `max_depth` after the fact — every Stop
+event stat'd `.venv/Lib/site-packages/...`, `node_modules/...`,
+`__pycache__/...`, adding 5–30 s on a typical ai-king tree. Switched to
+`os.walk()` with explicit depth cap + in-place `dirnames[:] = ...`
+pruning of `{.git, .venv, venv, env, node_modules, __pycache__,
+.mypy_cache, .pytest_cache, .ruff_cache, .hypothesis, .tox, dist,
+build}`. Also prunes the discovered nested repo's own subtree.
+
+### Tests (167 passed, +9 new)
+
+- 6 new `TestParseStatusZ` (CJK / space / rename / untracked / modified /
+  short-record).
+- `test_snapshot_inner_repo_refuses_worktree` (F2).
+- `test_squash_skips_restore_when_outer_in_rebase` (F3 — pre-plant
+  rebase-merge sentinel, verify inner HEAD intact + breadcrumb).
+- `test_detect_embedded_skips_pruned_subtrees` (H1 — `.venv/.git`,
+  `node_modules/.git`, `__pycache__/.git`, `.pytest_cache/.git`
+  ignored; real `projects/real_inner/.git` detected).
+
+### Deferred to backlog (red-team MEDIUM)
+
+- H2 rename `_is_large_unignored` → `_is_large_regular_file`. Cosmetic.
+- H3 NTFS sparse / compressed `st_size` — `os.stat` reports logical
+  which matches what git serializes; current behavior correct, may
+  overflag legitimate compressed workfiles. Documented limitation.
+- H4 `_large_file_threshold()` read twice — tiny race, harmless.
+- H5 (driven back) — outer `auto_commit`'s `git add -A` capturing
+  inner snapshot is the user-intended carve-out (MEMORY #67); not a
+  defect. Driven back per commander framing-check #1.
+- M1-M5 / G1-G3 — backlog (ergonomic / Goodhart-resistance / docs).
+
+## [2.10.4] - 2026-04-21
+
+Patch: `AgentDispatchGuard` now scans subagent `prompt` strings for
+unbounded poll loops (`until grep`, `until [` keyword-only, `while !
+grep`) that have no timeout guard (`date +%s` elapsed cap, `timeout`
+wrapper, `$SECONDS`, `[ -f ... ]` file-exist exit, `kill -0` PID check).
+When detected, the guard appends a warning to the existing token-zone
+strategy context pointing the caller at the three safe-poll patterns
+from `feedback_subagent_poll_marker_fragile.md`. Driven by a live
+incident — 2026-04-21 subagent F burned $1.01 stuck in `until grep
+-q DONE log; do sleep 15; done` when the background smoke test
+crashed silently and never wrote the marker.
+
+### Added
+
+- `_has_unbounded_poll()` / `_extract_prompt()` helpers in
+  `agent_dispatch_guard.py`. Regex-based detection of three poll
+  signatures (`until\s+grep`, `until\s+\[`, `while\s+!\s*grep`)
+  combined with negation against five safety-guard signatures
+  (`date +%s`, `timeout=`, `$SECONDS`, `[ -f|d|e|s` file-exist tests,
+  `kill -0` liveness).
+- `CONCINNO_ALLOW_UNBOUNDED_POLL=1` environment escape for callers
+  who intentionally want an unbounded poll (rare — the recommended
+  alternative is to add a `date +%s` timeout ceiling).
+- 18 unit tests in `tests/test_agent_dispatch_guard.py` covering
+  each poll pattern, each safety guard, the env escape, and three
+  check-level integration scenarios (clean prompt, poll prompt,
+  poll+RED zone stacking, PostToolUse ignore, non-Agent tool noop).
+
+### Fixed
+
+- The warning never fires on PostToolUse or on non-Agent tools — it
+  only engages the PreToolUse path on `tool_name == "Agent"`, so it
+  cannot pollute Bash/Edit contexts where `until grep` is legitimate
+  (e.g. a long-running tail wait inside the main agent's own shell).
+
+### Not Ready
+
+- Full suite has one pre-existing flaky test
+  (`test_git_assist.py::TestAutoCommit::test_batch_stage_then_commit`)
+  that fails in full-suite order but passes isolated + fails to
+  reproduce in a direct Python script. Root cause is test-order
+  pollution in the existing suite, not related to this 2.10.4 guard
+  change (whose scope is `guards/agent_dispatch_guard.py` only, with
+  zero edge into `git_assist.py`). Flagged for a future patch.
+
 ## [2.10.3] - 2026-04-21
 
 Patch: `auto_commit` now unstages large unignored blobs (≥10 MiB by

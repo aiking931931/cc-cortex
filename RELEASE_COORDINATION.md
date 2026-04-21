@@ -3,18 +3,18 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-20 — 2.10.2 LIVE）
+## 現況 snapshot（2026-04-21 — 2.10.4 shipping）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.10.2` — <https://pypi.org/project/concinno/2.10.2/> |
-| `pyproject.toml` version | `2.10.2` |
-| `src/concinno/__init__.py __version__` | `2.10.2` |
-| CHANGELOG.md 最新 release heading | `## [2.10.2] - 2026-04-20` |
-| 三源對齊狀態 | ✅ |
-| 下一 publish 目標 | TBD — rename pass (Cerno→Iudico / Redigo→Compono) or size-guard hard cap (2.10.3 Option C) |
-| 本地 commit | `7f2fb9b` (`feat/2.3.0-red-team-round-3`, pushed) |
-| 本地 tag | `v2.10.1`, `v2.10.2` (both pushed) |
+| Registry latest (PyPI) | `2.10.3` — <https://pypi.org/project/concinno/2.10.3/>（2.10.4 in-flight） |
+| `pyproject.toml` version | `2.10.4` |
+| `src/concinno/__init__.py __version__` | `2.10.4` |
+| CHANGELOG.md 最新 release heading | `## [2.10.4] - 2026-04-21` |
+| 三源對齊狀態 | ✅（post-bump） |
+| 下一 publish 目標 | 2.11.0 — rename pass (Cerno→Iudico / Redigo→Compono, MEMORY #68) |
+| 本地 commit | `cfc05ad` (`feat/2.3.0-red-team-round-3`, pushed — 2.10.4 commit pending) |
+| 本地 tag | `v2.10.1`, `v2.10.2`, `v2.10.3` (all pushed) |
 
 ### 2026-04-18 單日 release 軌跡
 
@@ -247,7 +247,12 @@ pid: <process id, 可選>
 
 ### Active
 
-無
+- `2026-04-21` session=`cc_9046_0346` host=`cc_9046_0346`
+  started=`2026-04-21T00:00Z` target=`2.10.4`
+  scope=`agent_dispatch_guard poll-pattern detection` —
+  pyproject / __init__ / CHANGELOG bumped to 2.10.4, 18/18 new unit tests
+  green, ruff clean. Proceeding to commit + tag + build + twine upload +
+  push. User authorized all irreversible operations this turn.
 
 ### History
 
