@@ -3,19 +3,20 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — **2.13.0 LIVE**）
+## 現況 snapshot（2026-04-21 — **2.13.1 LIVE**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.13.0` — <https://pypi.org/project/concinno/2.13.0/> (upload 2026-04-21 ~17:09 +08:00) |
-| `pyproject.toml` version | `2.13.0` |
-| `src/concinno/__init__.py __version__` | `2.13.0` |
-| CHANGELOG.md 最新 release heading | `## [2.13.0] - 2026-04-21` |
-| 三源對齊狀態 | ✅ 三源互相對齊 2.13.0 |
+| Registry latest (PyPI) | `2.13.1` — <https://pypi.org/project/concinno/2.13.1/> (upload 2026-04-21, patch fix) |
+| `pyproject.toml` version | `2.13.1` |
+| `src/concinno/__init__.py __version__` | `2.13.1` |
+| CHANGELOG.md 最新 release heading | `## [2.13.1] - 2026-04-21` |
+| 三源對齊狀態 | ✅ 三源互相對齊 2.13.1 |
 | 下一 publish 目標 | TBD — 2.14.0 candidate: DEPTH_TIER_MAP / depth-budget 擴展 `ArmDecision.depth` |
-| 本地 commit | `ab7cd14` (release: concinno 2.13.0 — N-aware select_arm + fidelity_delta + MAS 14 crosswalk) |
-| 本地 tag 最新 | `v2.13.0` (pushed origin) |
-| Pending Publish Queue | 空（2.13.0 已 published 移到 Session Registry::History） |
+| 本地 commit | `b1bbfef` (release: concinno 2.13.1 — nested-repo add skip / MEMORY #67 final fix) |
+| 本地 tag 最新 | `v2.13.1` (pushed origin) |
+| Pending Publish Queue | 空（2.13.1 已 published；release_auth.json `disabled=true` 所以全鏈 auto） |
+| 上個版本 | `2.13.0` — N-aware select_arm + fidelity_delta + MAS 14 crosswalk |
 
 ## Pending Publish Queue (current)
 
