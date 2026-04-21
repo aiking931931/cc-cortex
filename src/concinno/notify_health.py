@@ -186,9 +186,9 @@ def reset_aumid_counter(aumid: str = AUMID_VSCODE) -> bool:
 
 
 def auto_reset_on_session_start(
-    aumids: tuple[str, ...] = (AUMID_CONCINNO, AUMID_VSCODE, AUMID_CURSOR),
+    aumids: tuple[str, ...] = (AUMID_VSCODE, AUMID_CURSOR),
     verbose: bool = False,
-    register_private: bool = True,
+    register_private: bool = False,  # Concinno private AUMID archived 2026-04-21 — user wants VSCode AUMID (historically stable) + per-call reset; private AUMID module retained for future re-enable
 ) -> dict[str, bool]:
     """Reset counters for all known host-IDE AUMIDs.
 
