@@ -53,6 +53,18 @@ def main(hook_data: dict | None = None) -> None:
     except (ImportError, Exception):
         pass
 
+    # --- Module: notify_health (reset Win11 AUMID counter) ---
+    # Win11 suppresses toast banners after ~3 notifications per 24h per
+    # AUMID (PeriodicNotificationCount threshold). Reset on every session
+    # start so banners always work when the user actually starts working.
+    # Root-causes "通知又沒了" regression (kb_notify_health Mode 1).
+    try:
+        from concinno.notify_health import auto_reset_on_session_start
+
+        auto_reset_on_session_start(verbose=True)
+    except (ImportError, Exception):
+        pass
+
 
 if __name__ == "__main__":
     main()

@@ -659,18 +659,18 @@ def _notify_stop(hook_data: dict) -> None:
     line1, task = _resolve_session_info(session_id, project_dir)
     line2 = f"{task[:40]} — {_t('response_ready')}" if task else _t("response_ready")
 
-    git_line = ""
+    git_lines: list[str] = []
     try:
         from concinno.git_assist import auto_commit, generate_report
         committed = auto_commit(cwd=project_dir or None)
         if committed:
-            git_line = f"✅ {committed}"
-        else:
-            report = generate_report(cwd=project_dir or None, locale=locale)
-            if report:
-                git_line = "\n".join(report.splitlines()[:2])
+            git_lines.append(f"✅ {committed}")
+        report = generate_report(cwd=project_dir or None, locale=locale)
+        if report:
+            git_lines.extend(report.splitlines()[:2])
     except Exception:
         pass
+    git_line = "\n".join(git_lines)
 
     body = f"{line1}\n{line2}"
     if git_line:

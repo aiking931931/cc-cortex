@@ -50,13 +50,40 @@ _STRINGS = {
 
 
 def _get_locale() -> str:
-    """Get locale from Config singleton, default 'en'."""
-    try:
-        from concinno.core.config import get_config
+    """Resolve display locale from layered sources with normalization.
 
-        return get_config().raw("locale", "en") or "en"
-    except Exception:
-        return "en"
+    Order (first non-empty wins): ``CC_UX_LANG`` env → ``concinno.i18n.get_locale``
+    (reads ``~/.concinno/locale.json`` + env) → ``get_config().raw("locale")`` →
+    ``"en"``. Returns a key that keys into ``_STRINGS`` (``en`` / ``zh-TW`` /
+    ``zh-CN`` / ``ja`` / ``ko``) — handles loose forms ``zh_TW``, ``zh-tw``,
+    ``zh``, ``zh-hant`` etc transparently.
+    """
+    raw = ""
+    env = os.environ.get("CC_UX_LANG", "").strip()
+    if env:
+        raw = env
+    if not raw:
+        try:
+            from concinno.i18n import get_locale as _i18n_locale
+            raw = (_i18n_locale() or "").strip()
+        except Exception:
+            pass
+    if not raw:
+        try:
+            from concinno.core.config import get_config
+            raw = (get_config().raw("locale", "") or "").strip()
+        except Exception:
+            pass
+    norm = raw.replace("_", "-").lower()
+    if norm in ("zh-tw", "zh", "zh-hant", "zh-hant-tw"):
+        return "zh-TW"
+    if norm in ("zh-cn", "zh-hans", "zh-hans-cn"):
+        return "zh-CN"
+    if norm.startswith("ja"):
+        return "ja"
+    if norm.startswith("ko"):
+        return "ko"
+    return "en"
 
 
 def _t(key: str, locale: str | None = None) -> str:
