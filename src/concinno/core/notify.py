@@ -253,19 +253,25 @@ def _win_toast_winrt(
     app_id: str,
     tag: str = "concinno",
     group: str = "concinno",
+    display_name: str = "Visual Studio Code",
 ) -> bool:
-    """Windows toast via windows-toasts pip (in-process WinRT, zero PowerShell flash).
+    """Windows toast via windows-toasts pip (in-process WinRT, zero disk artefact).
 
-    Optional dep: ``pip install windows-toasts``. Falls through to xmldoc
-    path when the package is not available, keeping the core library free
-    of mandatory runtime deps.
+    2.14.0 fix: splits ``display_name`` (UI sender label — goes into the
+    WinRT ``applicationText`` slot) from ``app_id`` (reputation key — the
+    ``notifierAUMID``). Before 2.14.0 this helper passed ``title`` into
+    ``applicationText``, which is why the banner sender label randomly
+    followed the message title.
+
+    Optional dep: ``pip install windows-toasts``. Returns ``False`` when the
+    package is missing so the caller cascades to the legacy xmldoc path.
     """
     try:
         from windows_toasts import InteractableWindowsToaster, Toast, ToastDuration
     except ImportError:
         return False
     try:
-        toaster = InteractableWindowsToaster(title, app_id)
+        toaster = InteractableWindowsToaster(display_name, app_id)
         toast = Toast(text_fields=[title, message], duration=ToastDuration.Long)
         toast.tag = tag
         toast.group = group
@@ -337,6 +343,77 @@ def _win_toast_xmldoc(
         return False
 
 
+def register_aumid(
+    app_id: str = "Concinno.ClaudeCode",
+    display_name: str = "Claude Code",
+    icon_path: str | None = None,
+    icon_background_color: str = "0060A0",
+) -> bool:
+    """Register a custom AUMID in HKCU for stable toast reputation.
+
+    Idempotent. Safe on non-Windows (returns ``False``). Writes
+    ``HKCU\\Software\\Classes\\AppUserModelId\\<app_id>`` with
+    ``DisplayName`` / ``IconUri`` (optional) / ``IconBackgroundColor``.
+
+    Only needed when the caller overrides ``show_toast(app_id=...)`` with a
+    custom AUMID — the VS Code default AUMID already has this registry
+    entry registered by the VS Code installer.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key_path = rf"Software\Classes\AppUserModelId\{app_id}"
+        key = winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+        )
+        try:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
+            if icon_path:
+                winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon_path)
+            winreg.SetValueEx(
+                key, "IconBackgroundColor", 0, winreg.REG_SZ, icon_background_color
+            )
+            return True
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return False
+
+
+def disable_smart_optout() -> bool:
+    """Disable Win11 Notification Suggestions (SmartOptOut) for the current user.
+
+    Writes ``HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\
+    Settings\\Windows.ActionCenter.SmartOptOut\\Enabled = 0`` (DWORD) so
+    Windows 11 22H2+ stops auto-demoting banners to Action-Center-only
+    based on per-AUMID interaction ratios. This is the single-call answer
+    to "why does my toast silently stop appearing".
+
+    Opt-in because it changes user-visible OS behaviour beyond this
+    library; ``show_toast`` never invokes it implicitly. Safe on
+    non-Windows (returns ``False``).
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key_path = (
+            r"Software\Microsoft\Windows\CurrentVersion\Notifications"
+            r"\Settings\Windows.ActionCenter.SmartOptOut"
+        )
+        key = winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+        )
+        try:
+            winreg.SetValueEx(key, "Enabled", 0, winreg.REG_DWORD, 0)
+            return True
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return False
+
+
 def _win_toast_balloon(title: str, message: str, timeout_ms: int = 5000) -> bool:
     """Fallback: .NET BalloonTip via NotifyIcon. Fire-and-forget (non-blocking)."""
     ps = (
@@ -371,41 +448,40 @@ def show_toast(
     enabled: bool | None = None,
     tag: str = "concinno",
     group: str = "concinno",
+    display_name: str = "Visual Studio Code",
 ) -> bool:
     """Show a system notification / toast.
 
-    Windows: XmlDocument version (duration=long, no auto-dismiss, system sound).
-    Tag+Group: same tag+group replaces previous toast (anti-stack).
+    2.14.0 fallback chain (Windows, in order):
 
-    Default ``app_id`` is ``Microsoft.VisualStudioCode`` — Claude Code runs
-    inside the VS Code (or Cursor) host process, so toasts are sent under the
-    host IDE's identity. This is the officially supported pattern for host
-    process toast notifications (see MS Learn: Application User Model IDs,
-    "Registering an Application as a Host Process"). Users see a single
-    notification source "Visual Studio Code" rather than a separate bucket.
+    1. **WinRT in-process** (``windows-toasts`` pip, optional extra
+       ``concinno[toast]``) — zero disk, zero subprocess, zero AV surface.
+    2. **XmlDocument via wscript+VBS** (legacy, no pip deps) — CCC 1.12.1
+       baseline. Drops a ``.vbs`` to ``%TEMP%`` which Avast-family AV
+       scans on sight (Surfshark etc).
+    3. **NotifyIcon balloon tip** (last resort) — Win10 legacy style.
 
-    If VSC's per-AUMID reputation counter gets demoted to Action-Center-only
-    (Windows 11 suppresses banners when notification:interaction ratio is bad),
-    reset it via:
-        Remove-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\
-        Notifications\\Settings\\Microsoft.VisualStudioCode' -Name PeriodicNotificationCount
+    Default ``app_id`` is ``Microsoft.VisualStudioCode`` so Action Center
+    attributes banners to the VS Code host (sender label "Visual Studio
+    Code" + VSC icon). To prevent Win11 SmartOptOut demotion of the shared
+    bucket, call :func:`disable_smart_optout` once at bootstrap.
 
-    Pass a different ``app_id`` only if you have registered your own
-    AppUserModelID in HKCU/HKCR AppUserModelId and want an isolated
-    notification source.
+    Tag + group let the same (tag, group) pair replace an earlier toast
+    instead of stacking.
 
     Args:
-        title: Notification title.
-        message: Notification body text.
-        app_id: Windows AppUserModelId for the toast. Defaults to
-            ``Microsoft.VisualStudioCode`` (host IDE identity — user sees
-            "Visual Studio Code" as sender).
-        enabled: Override enabled check. None = respect config toast_enabled.
-        tag: Toast tag for replacement (same tag+group replaces previous).
+        title: Notification title (first text line).
+        message: Notification body text (second text line).
+        app_id: AUMID used as reputation key. Pass a custom value +
+            :func:`register_aumid` to isolate from VS Code's bucket.
+        enabled: Override enabled check. None = respect config
+            ``toast_enabled``.
+        tag: Toast tag for replacement.
         group: Toast group for replacement.
+        display_name: UI sender label shown in the banner header.
 
     Returns:
-        True if notification sent successfully.
+        True if any tier succeeded, False otherwise.
     """
     if enabled is False:
         return False
@@ -417,18 +493,20 @@ def show_toast(
                 return False
         except Exception:
             pass
-    # Revert to CCC 1.12.1 xmldoc-first path (2026-04-21). Regression
-    # analysis showed 2.12.x _win_toast_winrt + per-call counter reset
-    # were silent false-negatives: winrt returns True but banner never
-    # renders in some environments (windows-toasts private AUMID path
-    # or Surfshark VBS quarantine). CCC-era path (xmldoc via wscript+VBS)
-    # is Windows 10/11 native WinRT under wscript CREATE_NO_WINDOW,
-    # 10+ year backward-compatible, user-attested-stable.
+    # 2.14.0: Tier 1 winrt (zero .vbs, no AV surface) → Tier 2 xmldoc
+    # (legacy fallback when windows-toasts not installed) → Tier 3 balloon
+    # (last resort). Diagnosis: Opus 1 archaeology + Opus 2 WinRT research
+    # + Opus 3 architecture design (session 5a619784, MEMORY #70).
     try:
         if sys.platform == "win32":
-            if not _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
-                return _win_toast_balloon(title, message)
-            return True
+            if _win_toast_winrt(
+                title, message, app_id, tag=tag, group=group,
+                display_name=display_name,
+            ):
+                return True
+            if _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
+                return True
+            return _win_toast_balloon(title, message)
         elif sys.platform == "darwin":
             subprocess.run(
                 ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
