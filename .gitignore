@@ -28,6 +28,11 @@ tests/openclaw_security_test.py
 .env.*
 credentials*
 secrets*
+# Exception: the CredentialStore source module is library code, not a
+# secret file. 2.15.0 shipped without this file because `credentials*`
+# above caught it — 2.15.1 patch adds these exceptions to restore it.
+!src/concinno/core/credentials.py
+!tests/core/test_credentials.py
 
 # Internal / not for release
 _recycled/

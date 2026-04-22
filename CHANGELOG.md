@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-04-22
+
+Patch: restore `concinno.core.credentials` module in the PyPI wheel.
+
+### Fixed
+
+- **`concinno.core.credentials` 漏 wheel**（2.15.0 silent ship bug，`concinno-skills-google` 首發時 `pip install concinno==2.15.0` → `from concinno.core.credentials import CredentialStore` → `ImportError`）
+  - 根因：`.gitignore:29 credentials*` secret-protection pattern 誤傷
+    library source `src/concinno/core/credentials.py`，導致 git untracked →
+    hatch VCS-aware wheel 不 include → PyPI 2.15.0 wheel 無此 module
+  - 修復：`.gitignore` 加 exception `!src/concinno/core/credentials.py` +
+    `!tests/core/test_credentials.py`，force-add source 進 git，rebuild 2.15.1
+  - 影響：沒用 `CredentialStore` 的消費者不受影響（2.15.0 其他 feature 正常）；
+    用 `CredentialStore` 的 sub-package（e.g. `concinno-skills-google`）已有
+    soft-import + local fallback 作保護層，2.15.1 修正後可直接 hard import
+
 ## [2.15.0] - 2026-04-22
 
 Minor: **Agent skill ecosystem Phase 0** — tool registry 獲得 entry_points
