@@ -27,6 +27,19 @@ from concinno.agent.iterative_retrieve import (
     L1Retriever,
     RetrievalResult,
 )
+from concinno.agent.mas_loop import (
+    MASConfig,
+    MASResult,
+    blind_label_order,
+    derive_role_seeds,
+    run_mas,
+    truncate_trace_top_k,
+)
+from concinno.agent.mas_prompts import (
+    DEFAULT_CRITIC_FALLBACK_PROMPT,
+    DEFAULT_CRITIC_PROMPT,
+    DEFAULT_JUDGE_PROMPT,
+)
 from concinno.agent.parallel_dispatch import (
     COORDINATOR_PROMPT_SNIPPET,
     DEFAULT_MAX_FORK_DEPTH,
@@ -80,6 +93,9 @@ __all__ = [
     "AGENT_GUIDANCE_UNCERTAINTY",
     "ANTHROPIC_MAX_CACHE_BREAKPOINTS",
     "COORDINATOR_PROMPT_SNIPPET",
+    "DEFAULT_CRITIC_FALLBACK_PROMPT",
+    "DEFAULT_CRITIC_PROMPT",
+    "DEFAULT_JUDGE_PROMPT",
     "DEFAULT_MAX_FORK_DEPTH",
     "DEFAULT_MAX_PARALLEL",
     "FORK_PLACEHOLDER_RESULT",
@@ -99,6 +115,8 @@ __all__ = [
     "ForkInForkRejected",
     "IterativeRetriever",
     "L1Retriever",
+    "MASConfig",
+    "MASResult",
     "ParallelDispatcher",
     "ParallelLimitExceeded",
     "RenderedPromptCache",
@@ -112,10 +130,12 @@ __all__ = [
     "TeammateCannotSpawnTeammate",
     "VerificationResult",
     "ZIQCascadePipeline",
+    "blind_label_order",
     "check",
     "create_cache_safe_params",
     "create_subagent_context",
     "default_guidance",
+    "derive_role_seeds",
     "estimate_cache_savings",
     "extract_sentinel_answer",
     "gate_agent_cap",
@@ -124,5 +144,7 @@ __all__ = [
     "is_research_agent",
     "normalize_tool_result_for_cache",
     "render_for_fork_byte_exact",
+    "run_mas",
+    "truncate_trace_top_k",
     "verify_task",
 ]
