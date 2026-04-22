@@ -7,6 +7,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-04-22
+
+Minor: **Agent skill ecosystem Phase 0** — tool registry 獲得 entry_points
+plugin discovery、daemon runtime、credential store、MCP bridge fallback +
+5 個 pure-function reference tool（PDF/HTML/SQL/RSS）+ 4 個獨家 meta-skill
+（self-audited / ZIQ-routed / cross-channel / workflow）。紅藍CBUA 裁決三
+層擴張架構：Concinno Core（本次）/ `concinno-skills-*` sub-package（後續）
+/ Sancio runtime（後續）。
+
+### Added — Core infrastructure（Layer 0）
+
+- **Daemon Runtime** (`concinno/daemon.py`, 415 LOC) — long-running Python
+  process，tool import 一次 state 持續，agent loop 零 IPC。Unix domain
+  socket（Linux/Mac）/ TCP loopback（Windows fallback）+ JSON-lines 協定。
+  CLI: `concinno-daemon start|stop|status`，lockfile `~/.concinno/daemon.pid`。
+- **ToolRegistry entry_points plugin discovery**
+  (`concinno/tools/registry.py` +117 LOC) —
+  `ToolRegistry.load_plugins(group="concinno.tools")` 掃 installed package
+  的 entry_points 動態掛載 tool。Opt-in via `CONCINNO_LOAD_PLUGINS=1` env，
+  預設 off 保護既有 test baseline。
+- **CredentialStore** (`concinno/core/credentials.py`, 201 LOC) — 統一 OAuth/
+  API key/secret 管理，4 source precedence（default < file < env < runtime），
+  `{"$ref": "env:VAR"}` 解引用避免明文存 token。
+- **MCP Bridge Adapter** (`concinno/tools/mcp_bridge.py`, 296 LOC) —
+  **fallback only**（非主力）。`bridge_mcp_server(cmd, prefix="")` 啟 MCP
+  server subprocess，stdio JSON-RPC 2.0，wrap MCP tool 成 Tool Protocol。
+  Raw 實作不依賴 `mcp` SDK，optional `[mcp]` extras 給偏好官方 client 的 consumer。
+
+### Added — 5 Reference tool（Layer 1，pure-function, zero-state）
+
+通用 agent 情報處理（GAIA / AgentBench 跑分會用到）：
+
+- `PdfRead` + `PdfExtract` (`concinno/tools/builtin/pdf.py`) — `pypdf` 讀文
+  字 / `pdfplumber` 抽表格。`[pdf]` extras。
+- `HtmlToText` (`concinno/tools/builtin/html.py`) — `trafilatura` LLM 餵料
+  SOTA。`[html]` extras。
+- `DuckDbQuery` (`concinno/tools/builtin/sql.py`) — in-process SQL 讀
+  CSV/Parquet/JSON；`_strip_sql_comments` 擴成 strip comments + string
+  literals + quoted identifiers 後 regex match `ATTACH/INSTALL/LOAD/COPY/
+  EXPORT/IMPORT/PRAGMA/DETACH` 防止 DuckDB 擴充外逸。`[data]` extras。
+- `RssFetch` (`concinno/tools/builtin/rss.py`) — `feedparser` + `httpx`。
+  `[rss]` extras。
+- 5 tool 全走 `register_deferred()` lazy-import，optional deps 未裝時顯示
+  友善錯誤 `pip install 'concinno[pdf]'` 等。
+
+### Added — 4 獨家 meta-skill（Layer 0.5 — 對手不可複製的護城河）
+
+對手（LangChain/OpenAI Agents SDK/Claude Skills/OpenClaw）framework 沒有
+CBUA 認知層 + guards + handoff 三層 + ZIQ 基礎建設，複製不了：
+
+- **SelfAuditedSkill** (`meta_skills/self_audited.py`, 367 LOC) — decorator
+  / wrapper 任何 Tool 包進來自動過 guard pipeline（butterfly / premise /
+  sentinel / destruction soft-import）+ decision_journal 沉澱。
+  **對手 LangSmith/OpenAI tracing 只事後 log 不事前 deny。**
+- **ZIQRoutedSkillPack** (`meta_skills/ziq_pack.py`, 339 LOC) — 10+ skill
+  打包用 `softmax(α·SPS + β·FTRL_success − γ·FTRL_latency)` 選 top-k，
+  stdlib char-n-gram TF-IDF + FTRL EMA half-life 100 次，persist
+  `~/.concinno/ziq_tool_stats.json`。**對手靠 static tool description
+  字串匹配，複製需 outcome feedback loop 基礎建設。**
+- **CrossChannelMemoryBridge** (`meta_skills/cross_channel.py`, 291 LOC)
+  — Discord/Gmail/Telegram 共享 CBUA ctx + ★ 永久里程碑，底層 handoff
+  三層 Index/Summary/Archive。**對手 checkpointer 是 session-scoped。**
+- **CBUAWorkflowEngine** (`meta_skills/workflow.py`, 295 LOC) — DAG
+  (`graphlib.TopologicalSorter`) + α_t 信心檢查 + fail 連 2 次升級 RAG /
+  連 3 次 abort + intent re-inject 每 5 節點。**類 LangGraph 但多認知層。**
+
+### Added — pyproject optional extras
+
+```toml
+[project.optional-dependencies]
+pdf = ["pypdf>=5", "pdfplumber>=0.11"]
+html = ["trafilatura>=1.12"]
+data = ["duckdb>=1.0"]
+rss = ["feedparser>=6.0"]
+all-tools = ["concinno[pdf]", "concinno[html]", "concinno[data]", "concinno[rss]"]
+mcp = ["mcp>=1.0"]  # optional — raw JSON-RPC fallback built-in
+```
+
+### Fixed — Wave 1 test harness issues
+
+- `PdfExtract.call` 輸入驗證順序反轉 — page 參數檢查移到 path 驗證前，符合
+  API contract「required parameter validation before I/O」。
+- `tests/test_tools_builtin_sql.py` `SELECT 1 /* ATTACH 'x.db' */` 從
+  positive 移 negative — SQL spec comment 不執行，keyword 在 comment 內
+  不應 raise。`SELECT "install" FROM t`（quoted identifier）不應 raise。
+- `tests/test_tools_registry.py` baseline 從 `1 deferred (Shell)` 更新到
+  `6 deferred (Shell + 5 optional builtin tools)`。
+
+### 紅藍CBUA 裁決摘要
+
+- Red: library-not-application 違反 / skill 屬 Sancio 層 / Goodhart
+  數量戰 → **accept with major revise** → 本次只收 infra + 5 pure-function
+  ref tool + 4 meta-skill，integration skill（chat/Google/Office/YouTube）
+  踢 `concinno-skills-*` sub-package 與 Sancio runtime 後續 Phase 處理。
+- Blue: D1 self-audited（PreToolUse deny vs 事後 trace）+ D2 ZIQ routing +
+  D5 switchable+auto-tune 真護城河，代碼證據支持。
+- Commander: MCP 降為 fallback 非主力（原生 Python 零 IPC overhead 最強
+  最有效率，MEMORY #36 偏好序 in-process Python ★★★★★ > MCP ★）。
+
+### Verified
+
+- Wave 1 targeted: 36/36 pass。
+- Wave 2 meta-skill: 45/45 pass in 1.71s（self_audited 11 + ziq_pack 10 +
+  cross_channel 14 + workflow 10）。
+- ruff clean / mypy strict clean 對所有新檔。
+- Full regression 留 CI / RunPod（本機鐵律：禁大規模 test）。
+
+### Also shipped — accumulated agent WIP since 2.14.1
+
+這 4 commits + 新 tool 從 2.14.1 累積在 working tree 未 ship，隨 2.15.0 一併：
+
+- `feat(agent)`: **v2_anchor ZIQ SPS per-question anchor router**（SPS 路由
+  以 per-question peakedness 選 dominant arm；MEMORY #17 IMPLIRET SOTA
+  +1.31pp 翻案架構延續到 agent loop 選 tool）
+- `feat(agent)`: **MAS Tier 1**（commander / asymmetry / confidence_fusion
+  — Multi-Agent Solver Tier 1，GAIA agent 跑分 scaffold）
+- `feat(agent)`: **MAS loop orchestrator**（solver / critic / judge 三節點）
+- `feat(agent)`: **AGENT_GUIDANCE_SEARCH_DISCIPLINE + EXACT_QUOTE**（citation
+  鐵律，防 citation-drift hallucination）
+- `tools/builtin/read_attachment.py` + test — **ReadAttachmentTool**：
+  format-aware file reader（xlsx/csv/json/txt dispatch）給 weak model 消費
+  GAIA attachment，前一 session MEMORY 記錄 `#6 PASS`。
+
+### Planned（Phase 1+，non-blocking 2.15.0 ship）
+
+- Phase 1（Concinno 2.16）：ZIQ Tool Router production engine（posterior ∝
+  SPS × FTRL 完整接入）+ CBUA Guard 55→80 條。
+- Phase 2：`concinno-skills-{google,chat,office,video,content}` sub-package
+  各自 PyPI ship（native Python API 為主，MCP 為 fallback）。
+- Phase 3：Sancio runtime 收 cross-channel sync / mobile phone / 跨平台短
+  影片 / customer support / SQL+CRM 藍海。
+
 ## [2.14.1] - 2026-04-21
 
 Patch: rule-system sediment for the Switch-First Registry pattern that

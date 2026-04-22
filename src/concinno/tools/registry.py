@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -167,6 +168,31 @@ def _score_tool(
     return score
 
 
+def _probe_plugin_description(import_path: str) -> str | None:
+    """Attempt to read a ``description`` attr from the plugin target.
+
+    Used by :meth:`ToolRegistry.load_plugins` to populate a description
+    without instantiating the class. Returns ``None`` on any failure
+    (missing module/attr, no description, etc.) — caller supplies a
+    fallback. This is best-effort; production callers should not rely
+    on the exact text returned.
+    """
+    if ":" not in import_path:
+        return None
+    module_name, attr = import_path.split(":", 1)
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return None
+    target = getattr(module, attr, None)
+    if target is None:
+        return None
+    desc = getattr(target, "description", None)
+    if isinstance(desc, str) and desc.strip():
+        return desc
+    return None
+
+
 def _load_tool(import_path: str) -> Tool | None:
     """Resolve ``module:attr`` to an instantiated tool.
 
@@ -268,6 +294,94 @@ class ToolRegistry:
     def _bump_version(self) -> None:
         """Invalidate the search lru_cache by bumping the version counter."""
         self._version += 1
+
+    # ── Plugin discovery ───────────────────────────────────────────
+
+    def load_plugins(
+        self,
+        group: str = "concinno.tools",
+        *,
+        entry_points_override: object | None = None,
+    ) -> list[str]:
+        """Discover and register tools from ``importlib.metadata`` entry points.
+
+        Every installed package that declares a ``[project.entry-points."concinno.tools"]``
+        section contributes tools. Each entry point value follows the
+        ``module:attr`` convention (same as :class:`ToolEntry.import_path`)
+        so the same lazy-import path is reused — the class is never
+        loaded until :meth:`get` is first called for that tool name.
+
+        Name collisions are *silent skips* (logged at INFO), not errors:
+        a plugin cannot shadow a core tool or a previously-registered
+        deferred tool. This matches Python packaging's "first wins"
+        convention and avoids making an ``import`` trigger a hard
+        failure in a library consumer's agent loop.
+
+        Args:
+            group: entry-point group name. Defaults to ``concinno.tools``.
+            entry_points_override: test hook. When supplied, must expose
+                ``select(group=...)`` returning an iterable of objects
+                with ``name`` / ``value`` attributes. Production callers
+                pass nothing; we call :func:`importlib.metadata.entry_points`.
+
+        Returns:
+            List of plugin names actually registered (in discovery order).
+            Plugins that collided or failed to resolve are omitted.
+        """
+        # Acquire entry point source — prod via importlib.metadata, tests
+        # via override. The two branches merge on the same loop below.
+        if entry_points_override is not None:
+            eps = entry_points_override
+        else:
+            from importlib import metadata as _metadata
+
+            eps = _metadata.entry_points()
+
+        # Python 3.10+ uses ``EntryPoints.select(group=...)``; older
+        # API on 3.9 dict-returns also supports ``.get(group, [])``.
+        # We target py>=3.10 per pyproject so ``.select`` is safe, but
+        # fall back defensively.
+        selected: list[object] = []
+        if hasattr(eps, "select"):
+            selected = list(eps.select(group=group))  # type: ignore[attr-defined]
+        elif isinstance(eps, dict):
+            selected = list(eps.get(group, []))
+        else:
+            try:
+                selected = list(eps)  # type: ignore[arg-type]
+            except TypeError:
+                logger.warning(
+                    "registry: cannot iterate entry_points of type %s",
+                    type(eps).__name__,
+                )
+                return []
+
+        loaded: list[str] = []
+        for ep in selected:
+            name = getattr(ep, "name", None)
+            value = getattr(ep, "value", None)
+            if not name or not value:
+                logger.warning("registry: skipping malformed entry point %r", ep)
+                continue
+            if name in self._core or name in self._deferred:
+                logger.info(
+                    "registry: plugin %r from %r skipped (name already registered)",
+                    name,
+                    value,
+                )
+                continue
+            description = _probe_plugin_description(value) or f"Plugin tool: {name}"
+            try:
+                self.register_deferred(
+                    name=name,
+                    import_path=value,
+                    description=description,
+                )
+            except ValueError as exc:
+                logger.info("registry: plugin %r not registered: %s", name, exc)
+                continue
+            loaded.append(name)
+        return loaded
 
     # ── Accessors ──────────────────────────────────────────────────
 
@@ -464,6 +578,12 @@ def get_default_registry() -> ToolRegistry:
     enough that deferring them costs more in round-trips than it saves in
     prompt tokens. Shell is comparatively rare and has a heavy import
     footprint (subprocess, guards) — deferring it is a clean win.
+
+    Entry-point plugin discovery is opt-in via the env var
+    ``CONCINNO_LOAD_PLUGINS=1`` — existing agents that don't want
+    third-party tools silently mounted keep the old behavior, while
+    ecosystem packages (e.g. ``concinno-skills-google``) activate by
+    exporting a truthy env value in their install instructions.
     """
     # Late import to avoid cycles and to mirror user patterns.
     from .builtin import FileEdit, FileGlob, FileGrep, FileRead, FileWrite
@@ -483,6 +603,68 @@ def get_default_registry() -> ToolRegistry:
             "builds, tests, git, and shell pipelines."
         ),
     )
+    # 2.15.0 reference tools — general-purpose information processing.
+    # Each optional dep stays in ``[project.optional-dependencies]``; the
+    # tool itself reports a helpful "pip install" hint when called without
+    # its extras installed.
+    reg.register_deferred(
+        name="PdfRead",
+        import_path="concinno.tools.builtin.pdf:PdfRead",
+        description=(
+            "Extract plain text from a local PDF via pypdf. "
+            "Params: path(str), pages(str='all'|'1-5'|'3,7'). "
+            "Local files only; URLs rejected. Install: pip install "
+            "'concinno[pdf]'."
+        ),
+    )
+    reg.register_deferred(
+        name="PdfExtract",
+        import_path="concinno.tools.builtin.pdf:PdfExtract",
+        description=(
+            "Extract tables + text from ONE page of a local PDF via "
+            "pdfplumber. Params: path(str), page(int, 1-indexed). Returns "
+            "{'tables': list[list[list[str]]], 'text': str}. Install: pip "
+            "install 'concinno[pdf]'."
+        ),
+    )
+    reg.register_deferred(
+        name="HtmlToText",
+        import_path="concinno.tools.builtin.html:HtmlToText",
+        description=(
+            "Convert an HTML string to clean markdown / text via "
+            "trafilatura (SOTA main-content extraction). Params: html(str), "
+            "include_links(bool=False), include_tables(bool=True). Input "
+            "is a string, not a URL. Install: pip install 'concinno[html]'."
+        ),
+    )
+    reg.register_deferred(
+        name="DuckDbQuery",
+        import_path="concinno.tools.builtin.sql:DuckDbQuery",
+        description=(
+            "Run analytical SQL via in-process DuckDB over local CSV / "
+            "Parquet / JSON. Params: query(str), files(dict[alias,path]|None), "
+            "row_limit(int=10000). Returns list[dict]. "
+            "Rejects ATTACH/INSTALL/LOAD/COPY. Install: pip install "
+            "'concinno[data]'."
+        ),
+    )
+    reg.register_deferred(
+        name="RssFetch",
+        import_path="concinno.tools.builtin.rss:RssFetch",
+        description=(
+            "Fetch + parse an RSS/Atom feed via feedparser. Params: url(str, "
+            "http(s) only), limit(int=20, max=100), since_iso(str|None). "
+            "Returns list[{title, link, published, summary, author}]. "
+            "Install: pip install 'concinno[rss]'."
+        ),
+    )
+    # Opt-in plugin discovery (off by default to protect existing test
+    # environments and CI that isn't expecting third-party mounts).
+    if os.environ.get("CONCINNO_LOAD_PLUGINS", "").strip().lower() in ("1", "true", "yes"):
+        try:
+            reg.load_plugins()
+        except Exception as exc:  # noqa: BLE001 — discovery must never crash the agent
+            logger.warning("registry: load_plugins failed at startup: %s", exc)
     return reg
 
 

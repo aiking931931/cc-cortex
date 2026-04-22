@@ -25,7 +25,11 @@ from .file_io import (
     MultipleMatchesError,
     ReadBeforeWriteError,
 )
+from .html import HtmlToolError, HtmlToText
+from .pdf import PdfExtract, PdfRead, PdfToolError
 from .python_exec import PythonExecError, PythonExecTool
+from .read_attachment import ReadAttachmentError, ReadAttachmentTool
+from .rss import RssFetch, RssToolError
 from .search import EXCLUDED_DIRS, FileGlob, FileGrep
 from .shell import (
     Shell,
@@ -33,6 +37,7 @@ from .shell import (
     ShellSecurityError,
     ShellTimeoutError,
 )
+from .sql import DuckDbQuery, SqlToolError
 
 __all__ = [
     # file_io
@@ -56,4 +61,20 @@ __all__ = [
     # python_exec
     "PythonExecError",
     "PythonExecTool",
+    # read_attachment
+    "ReadAttachmentError",
+    "ReadAttachmentTool",
+    # pdf
+    "PdfExtract",
+    "PdfRead",
+    "PdfToolError",
+    # html
+    "HtmlToText",
+    "HtmlToolError",
+    # sql
+    "DuckDbQuery",
+    "SqlToolError",
+    # rss
+    "RssFetch",
+    "RssToolError",
 ]

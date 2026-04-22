@@ -3,25 +3,69 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-21 — **2.13.1 LIVE**）
+## 現況 snapshot（2026-04-22 — **2.15.0 prepared, pending publish**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.13.1` — <https://pypi.org/project/concinno/2.13.1/> (upload 2026-04-21, patch fix) |
-| `pyproject.toml` version | `2.13.1` |
-| `src/concinno/__init__.py __version__` | `2.13.1` |
-| CHANGELOG.md 最新 release heading | `## [2.13.1] - 2026-04-21` |
-| 三源對齊狀態 | ✅ 三源互相對齊 2.13.1 |
-| 下一 publish 目標 | TBD — 2.14.0 candidate: DEPTH_TIER_MAP / depth-budget 擴展 `ArmDecision.depth` |
-| 本地 commit | `b1bbfef` (release: concinno 2.13.1 — nested-repo add skip / MEMORY #67 final fix) |
-| 本地 tag 最新 | `v2.13.1` (pushed origin) |
-| Pending Publish Queue | 空（2.13.1 已 published；release_auth.json `disabled=true` 所以全鏈 auto） |
-| 上個版本 | `2.13.0` — N-aware select_arm + fidelity_delta + MAS 14 crosswalk |
+| Registry latest (PyPI) | `2.14.1` — <https://pypi.org/project/concinno/2.14.1/> (2026-04-21 ship，Switch-First Registry) |
+| `pyproject.toml` version | `2.15.0` (本地 prepared) |
+| `src/concinno/__init__.py __version__` | `2.15.0` (本地 prepared) |
+| CHANGELOG.md 最新 release heading | `## [2.15.0] - 2026-04-22` |
+| 三源對齊狀態 | ✅ 三源互相對齊 2.15.0（本地）|
+| 下一 publish 目標 | **2.15.0** — Agent skill ecosystem Phase 0（daemon + plugin discovery + credentials + MCP bridge fallback + 5 ref tool + 4 獨家 meta-skill）|
+| 本地 commit | TBD — 本次 session 交付待 commit |
+| 本地 tag | TBD — 預計 `v2.15.0` |
+| Pending Publish Queue | **2.15.0 pending**（release_auth.json `disabled=true` 所以 publish 全鏈 auto；Phase 0 收尾 + CI/RunPod 驗 full regression 後 publish）|
+| 上個版本 | `2.14.1` — Switch-First Registry L0 鐵律 #6 硬化 |
 
 ## Pending Publish Queue (current)
 
-無 active record — 2.13.0 shipped 2026-04-21 17:09 +08:00, record moved to
-Session Registry::History below.
+```yaml
+- version: "2.15.0"
+  state: ready-to-publish
+  queued_by:
+    session: cc_e9dc_1532 (de69a165-1994-47cc-9065-4692bff6f52c)
+    host: ai-king local
+    queued_at: 2026-04-22T17:30+08:00
+  artifacts:
+    wheel: TBD (run `python -m build` on CI/RunPod first)
+    sdist: TBD
+    twine_check: PENDING
+    built_from: TBD (commit Phase 0 交付後填)
+  verification:
+    tests_targeted: "Wave 1: 36/36 pass (4 fail 修好) + Wave 2 meta-skill: 45/45 pass in 1.71s"
+    tests_full: PENDING (本機鐵律禁大規模 pytest — 留 CI / RunPod 跑)
+    ruff: clean (所有新檔)
+    mypy: clean strict (所有新檔)
+    triple_source_aligned: true (pyproject / __init__.py / CHANGELOG 全 2.15.0)
+    redteam_review: PASSED (Phase 0 前紅藍CBUA S3+S4 並行 Opus — accept with major revise → 三層架構 Concinno Core / sub-package / Sancio)
+  blocking_on:
+    - full_regression_on_ci_or_runpod  # 本機鐵律禁大規模 test
+    - commit_phase_0_delivery          # working tree 未 commit
+  suggested_command: |
+    # DO NOT auto-run 本機（硬化鐵律禁大規模 test）。
+    # 在 CI (GitHub Actions) 或 RunPod Pod 跑:
+    #   pytest tests/ -q  # 驗全綠（預期 6130+ pass 含 Wave 1+2 新增 155 test）
+    #   ruff check src/ tests/
+    #   mypy src/concinno
+    # 全綠後再本 session 授權 publish（release_auth.disabled=True 自動通過）:
+    #   python -m build
+    #   twine check dist/concinno-2.15.0*
+    #   twine upload dist/concinno-2.15.0*
+    #   git tag v2.15.0 && git push origin v2.15.0
+  expires_at: 2026-04-29T17:30+08:00  # +7d，過期 artifacts 重建
+  notes: |
+    Phase 0 agent skill ecosystem — 紅藍CBUA 裁決三層架構後的首個 minor：
+      - Layer 0 Core: daemon + entry_points plugin discovery + CredentialStore +
+        MCP Bridge (fallback only)
+      - Layer 0.5 獨家 meta-skill: self_audited / ziq_pack / cross_channel /
+        workflow (對手不可複製的護城河)
+      - Layer 1 5 reference tool: pdf / html / sql / rss (pure-function,
+        zero-state, GAIA/AgentBench 通用情報處理)
+    Integration skill (chat/Google/Office/YouTube) 踢後續 sub-package + Sancio。
+    用戶硬化鐵律「不要本機跑」2026-04-22 session 切斷後強化 — publish 前必在
+    CI / RunPod 驗 full regression。
+```
 
 ## ✅ 2.12.1 fork divergence — RESOLVED（2026-04-21 cc_150b_1551）
 

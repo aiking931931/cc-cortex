@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "2.14.1"
+version = "2.15.0"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
@@ -52,6 +52,21 @@ rag = [
     "sentence-transformers>=5.0",
     "bm25s>=0.2",
 ]
+# 2.15.0 reference tools — general-purpose information processing for
+# agent benchmarks (GAIA / AgentBench / OSWorld). Each extras key maps to
+# exactly one of the five deferred tools in
+# ``concinno.tools.builtin.{pdf,html,sql,rss}``. ``all-tools`` pulls them
+# all in one shot.
+pdf = ["pypdf>=5", "pdfplumber>=0.11"]
+html = ["trafilatura>=1.12"]
+data = ["duckdb>=1.0"]
+rss = ["feedparser>=6.0"]
+all-tools = [
+    "concinno[pdf]",
+    "concinno[html]",
+    "concinno[data]",
+    "concinno[rss]",
+]
 # Windows toast — in-process WinRT via ``windows-toasts``. When installed,
 # ``concinno.core.notify.show_toast`` uses Tier 1 (no ``.vbs`` on disk, no
 # wscript subprocess, no Avast-family AV scan surface).
@@ -67,6 +82,12 @@ toast = [
 # accepted; depend on `concinno[control-anything]` going forward.
 control-anything = [
     "control-anything[all]>=0.1.0",
+]
+# Optional upstream MCP SDK — ``concinno.tools.mcp_bridge`` works
+# without it (raw JSON-RPC 2.0 over stdio), but consumers who prefer
+# Anthropic's official client can install via this extra.
+mcp = [
+    "mcp>=1.0",
 ]
 # Bundles
 lite = []  # zero-dep, regex-only — explicitly named for clarity
@@ -109,6 +130,7 @@ Changelog = "https://github.com/aiking931931/concinno/blob/main/CHANGELOG.md"
 
 [project.scripts]
 concinno = "concinno.cli:main"
+concinno-daemon = "concinno.daemon:main"
 concinno-guard = "concinno.process_guard:main"
 concinno-scheduler = "concinno.scheduler:main"
 concinno-skills = "concinno.skills.installer:main"
