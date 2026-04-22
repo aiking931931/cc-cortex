@@ -46,9 +46,12 @@ import hashlib
 import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, field_validator
+
+if TYPE_CHECKING:
+    from concinno.agent.asymmetry import AsymmetryPlan
 
 # ─────────────────────────── Config schema ───────────────────────────
 
@@ -303,6 +306,7 @@ async def run_mas(
     critic_fallback_prompt: str,
     judge_prompt: str,
     trace_top_k: int = 3,
+    asymmetry_plan: "AsymmetryPlan | None" = None,
 ) -> MASResult:
     """Drive the 3-role MAS sequence.
 
@@ -334,9 +338,38 @@ async def run_mas(
     in the end payload). ``vote`` once the judge commits.
     Consumers hook these into their SSE stream; the orchestrator
     emits via the injected callback so it stays transport-agnostic.
+
+    Asymmetry (optional, Tier 1 scope)
+    -----------------------------------
+    When ``asymmetry_plan`` is provided the orchestrator decorates the
+    critic + judge prompts with the plan's ``prompt_frame`` tags so the
+    two roles read from different rhetorical stances (see
+    :mod:`concinno.agent.asymmetry`). ``seed_offset`` and ``temp_delta``
+    on the plan are consumer concerns — the orchestrator is
+    transport-agnostic and does not itself call the provider, so those
+    knobs must be applied by the caller at provider-request build time
+    (see ``persona.agent_api._run_mas`` for the canonical consumer).
+    Passing ``asymmetry_plan=None`` reproduces the 0.4.x behaviour
+    byte-for-byte: no prompt rewrite, no frame tag injection.
     """
     per_role: list[dict[str, Any]] = []
     audit_mapping: dict[str, str] = {}
+
+    # Asymmetry prompt-frame application. When the plan provides a
+    # frame tag we prepend a single-line ``[frame: ...]`` marker to the
+    # relevant prompt so templates stay intact (no slot gymnastics).
+    # Empty frames pass through unchanged — this keeps the 0.4.x
+    # consumer test harness byte-identical when no plan is provided.
+    if asymmetry_plan is not None:
+        critic_frame = asymmetry_plan.critic.prompt_frame
+        judge_frame = asymmetry_plan.judge.prompt_frame
+        if critic_frame:
+            critic_prompt = f"[frame: {critic_frame}]\n" + critic_prompt
+            critic_fallback_prompt = (
+                f"[frame: {critic_frame}]\n" + critic_fallback_prompt
+            )
+        if judge_frame:
+            judge_prompt = f"[frame: {judge_frame}]\n" + judge_prompt
 
     # ─── Solver ───
     emit("role_start", {"role": "solver"})

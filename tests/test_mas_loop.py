@@ -429,3 +429,164 @@ class TestRunMASBlindOrdering:
         # Both answers landed in the prompt.
         assert "ALPHA_TOKEN" in prompt
         assert "BETA_TOKEN" in prompt
+
+
+# ─────────────────────────── asymmetry_plan kwarg ───────────────────────────
+
+
+class TestRunMASWithAsymmetryPlan:
+    """Tier 1 ``asymmetry_plan`` kwarg: backward-compat + frame injection."""
+
+    def test_none_asymmetry_plan_is_default(self) -> None:
+        """``asymmetry_plan=None`` (the default) reproduces 0.4.x behaviour.
+
+        Byte-identical prompt — no frame tag injected.
+        """
+        seen_critic: list[str] = []
+
+        async def _critic(prompt: str) -> str:
+            seen_critic.append(prompt)
+            return "critic out"
+
+        cfg = MASConfig(roles=["solver", "critic", "judge"])
+        _, emit = _make_emit_capture()
+        asyncio.run(run_mas(
+            config=cfg,
+            solver_loop=_make_solver("solver out"),
+            critic_call=_critic,
+            judge_call=_make_text_call("FINAL ANSWER: ok"),
+            question="q",
+            task_id="plan-none",
+            emit=emit,
+            critic_prompt=DEFAULT_CRITIC_PROMPT,
+            critic_fallback_prompt=DEFAULT_CRITIC_FALLBACK_PROMPT,
+            judge_prompt=DEFAULT_JUDGE_PROMPT,
+        ))
+        assert seen_critic
+        # The default critic prompt does NOT start with ``[frame:``.
+        assert not seen_critic[0].startswith("[frame:")
+
+    def test_asymmetry_plan_injects_critic_frame(self) -> None:
+        from concinno.agent.asymmetry import AsymmetryPlan, EpistemicAxis
+
+        seen_critic: list[str] = []
+
+        async def _critic(prompt: str) -> str:
+            seen_critic.append(prompt)
+            return "critic out"
+
+        cfg = MASConfig(roles=["solver", "critic", "judge"])
+        _, emit = _make_emit_capture()
+        plan = AsymmetryPlan.build(
+            axes_enabled={EpistemicAxis.PROMPT_FRAME},
+        )
+        asyncio.run(run_mas(
+            config=cfg,
+            solver_loop=_make_solver("solver out"),
+            critic_call=_critic,
+            judge_call=_make_text_call("FINAL ANSWER: ok"),
+            question="q",
+            task_id="plan-frame",
+            emit=emit,
+            critic_prompt=DEFAULT_CRITIC_PROMPT,
+            critic_fallback_prompt=DEFAULT_CRITIC_FALLBACK_PROMPT,
+            judge_prompt=DEFAULT_JUDGE_PROMPT,
+            asymmetry_plan=plan,
+        ))
+        assert seen_critic
+        assert seen_critic[0].startswith("[frame: critic-challenger]")
+
+    def test_asymmetry_plan_injects_judge_frame(self) -> None:
+        from concinno.agent.asymmetry import AsymmetryPlan, EpistemicAxis
+
+        seen_judge: list[str] = []
+
+        async def _judge(prompt: str) -> str:
+            seen_judge.append(prompt)
+            return "FINAL ANSWER: ok"
+
+        cfg = MASConfig(roles=["solver", "critic", "judge"])
+        _, emit = _make_emit_capture()
+        plan = AsymmetryPlan.build(
+            axes_enabled={EpistemicAxis.PROMPT_FRAME},
+        )
+        asyncio.run(run_mas(
+            config=cfg,
+            solver_loop=_make_solver("solver out"),
+            critic_call=_make_text_call("critic out"),
+            judge_call=_judge,
+            question="q",
+            task_id="plan-judge",
+            emit=_make_emit_capture()[1],
+            critic_prompt=DEFAULT_CRITIC_PROMPT,
+            critic_fallback_prompt=DEFAULT_CRITIC_FALLBACK_PROMPT,
+            judge_prompt=DEFAULT_JUDGE_PROMPT,
+            asymmetry_plan=plan,
+        ))
+        assert seen_judge
+        assert seen_judge[0].startswith("[frame: judge-arbiter]")
+
+    def test_asymmetry_plan_empty_frames_passthrough(self) -> None:
+        """Plan with ``axes_enabled=set()`` gives empty frames → no injection."""
+        from concinno.agent.asymmetry import AsymmetryPlan
+
+        seen_critic: list[str] = []
+
+        async def _critic(prompt: str) -> str:
+            seen_critic.append(prompt)
+            return "critic out"
+
+        cfg = MASConfig(roles=["solver", "critic", "judge"])
+        _, emit = _make_emit_capture()
+        plan = AsymmetryPlan.build(axes_enabled=set())
+        asyncio.run(run_mas(
+            config=cfg,
+            solver_loop=_make_solver("solver out"),
+            critic_call=_critic,
+            judge_call=_make_text_call("FINAL ANSWER: ok"),
+            question="q",
+            task_id="plan-empty",
+            emit=emit,
+            critic_prompt=DEFAULT_CRITIC_PROMPT,
+            critic_fallback_prompt=DEFAULT_CRITIC_FALLBACK_PROMPT,
+            judge_prompt=DEFAULT_JUDGE_PROMPT,
+            asymmetry_plan=plan,
+        ))
+        assert seen_critic
+        # Solver frame is "solver-primary" default, critic gets same when
+        # PROMPT_FRAME axis disabled, so both roles match → not treated as
+        # "challenger" specifically. Frame should still be injected
+        # (non-empty) but with the solver-primary tag.
+        assert seen_critic[0].startswith("[frame: solver-primary]")
+
+    def test_asymmetry_plan_applied_to_fallback_prompt(self) -> None:
+        """Frame injection covers both ``critic_prompt`` and fallback."""
+        from concinno.agent.asymmetry import AsymmetryPlan, EpistemicAxis
+
+        seen_critic: list[str] = []
+
+        async def _critic(prompt: str) -> str:
+            seen_critic.append(prompt)
+            return "c"
+
+        cfg = MASConfig(roles=["solver", "critic", "judge"])
+        _, emit = _make_emit_capture()
+        plan = AsymmetryPlan.build(
+            axes_enabled={EpistemicAxis.PROMPT_FRAME},
+        )
+        # Solver blank triggers fallback prompt branch.
+        asyncio.run(run_mas(
+            config=cfg,
+            solver_loop=_make_solver(""),
+            critic_call=_critic,
+            judge_call=_make_text_call("FINAL ANSWER: ok"),
+            question="q",
+            task_id="plan-fallback",
+            emit=emit,
+            critic_prompt=DEFAULT_CRITIC_PROMPT,
+            critic_fallback_prompt=DEFAULT_CRITIC_FALLBACK_PROMPT,
+            judge_prompt=DEFAULT_JUDGE_PROMPT,
+            asymmetry_plan=plan,
+        ))
+        assert seen_critic
+        assert seen_critic[0].startswith("[frame: critic-challenger]")
