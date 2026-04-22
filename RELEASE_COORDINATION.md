@@ -3,20 +3,20 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-22 — **2.15.0 prepared, pending publish**）
+## 現況 snapshot（2026-04-22 — **2.15.1 LIVE**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.14.1` — <https://pypi.org/project/concinno/2.14.1/> (2026-04-21 ship，Switch-First Registry) |
-| `pyproject.toml` version | `2.15.0` (本地 prepared) |
-| `src/concinno/__init__.py __version__` | `2.15.0` (本地 prepared) |
-| CHANGELOG.md 最新 release heading | `## [2.15.0] - 2026-04-22` |
-| 三源對齊狀態 | ✅ 三源互相對齊 2.15.0（本地）|
-| 下一 publish 目標 | **2.15.0** — Agent skill ecosystem Phase 0（daemon + plugin discovery + credentials + MCP bridge fallback + 5 ref tool + 4 獨家 meta-skill）|
-| 本地 commit | TBD — 本次 session 交付待 commit |
-| 本地 tag | TBD — 預計 `v2.15.0` |
-| Pending Publish Queue | **2.15.0 pending**（release_auth.json `disabled=true` 所以 publish 全鏈 auto；Phase 0 收尾 + CI/RunPod 驗 full regression 後 publish）|
-| 上個版本 | `2.14.1` — Switch-First Registry L0 鐵律 #6 硬化 |
+| Registry latest (PyPI) | `2.15.1` (2026-04-22 ship，credentials wheel fix patch) |
+| `pyproject.toml` version | `2.15.1` |
+| `src/concinno/__init__.py __version__` | `2.15.1` |
+| CHANGELOG.md 最新 release heading | `## [2.15.1] - 2026-04-22` |
+| 三源對齊狀態 | ✅ 三源互相對齊 2.15.1 |
+| 本地 commit | `4b2324c` (patch: restore concinno.core.credentials module) |
+| 本地 tag | `v2.15.1` (pushed origin 2026-04-22) |
+| Pending Publish Queue | 空（2.15.0 + 2.15.1 都已 published；release_auth.json `disabled=true` 全鏈 auto）|
+| 上個版本 | `2.15.0` — Agent skill ecosystem Phase 0 (daemon + plugin discovery + credentials + MCP bridge + 5 ref tool + 4 meta-skill) |
+| 下游 sub-package | [`concinno-skills-google`](../concinno-skills-google/) 0.1.0 ready-to-publish（GoogleCalendar tool 示範 entry_points 生態，等用戶字串 + 新 PyPI token）|
 
 ## Pending Publish Queue (current)
 
