@@ -6,10 +6,15 @@ from concinno.agent.prompts import (
     AGENT_GUIDANCE_ARITHMETIC,
     AGENT_GUIDANCE_COMPUTE_TOOLS,
     AGENT_GUIDANCE_EXACT_QUOTE,
+    AGENT_GUIDANCE_EXACT_UNIT,
+    AGENT_GUIDANCE_FACTUAL_COUNT,
     AGENT_GUIDANCE_NO_REFUSAL,
     AGENT_GUIDANCE_SEARCH_DISCIPLINE,
     AGENT_GUIDANCE_UNCERTAINTY,
+    ANCHOR_PATTERNS,
+    build_targeted_guidance,
     default_guidance,
+    select_question_anchors,
 )
 
 
@@ -106,3 +111,200 @@ class TestPhase1Guidance:
         out = default_guidance()
         assert AGENT_GUIDANCE_SEARCH_DISCIPLINE not in out
         assert AGENT_GUIDANCE_EXACT_QUOTE not in out
+
+
+class TestExactUnitGuidance:
+    """GAIA #12 layer 2 — unit format confusion fix.
+
+    Gemma4 Q4_K_M, when a question says 'Report in Angstroms, rounded
+    to the nearest picometer', outputs the picometer integer (1456)
+    instead of the Angstrom value (1.456). The targeted guidance
+    must disambiguate that 'rounded to the nearest X' describes
+    precision, not the target unit.
+    """
+
+    def test_names_both_unit_roles(self) -> None:
+        s = AGENT_GUIDANCE_EXACT_UNIT
+        assert "Angstroms" in s
+        assert "picometer" in s.lower()
+
+    def test_shows_concrete_right_vs_wrong(self) -> None:
+        s = AGENT_GUIDANCE_EXACT_UNIT
+        assert "1.456" in s
+        assert "1456" in s
+
+    def test_clarifies_rounded_to_semantics(self) -> None:
+        s = AGENT_GUIDANCE_EXACT_UNIT
+        assert "precision" in s
+
+    def test_not_in_default(self) -> None:
+        assert AGENT_GUIDANCE_EXACT_UNIT not in default_guidance()
+
+
+class TestFactualCountGuidance:
+    """GAIA #3 — 'how many articles by Nature 2020' hard-answered.
+
+    Weak model invented an article count (32 = 800*0.04) without
+    searching. Guidance must force a primary-source lookup.
+    """
+
+    def test_requires_web_search(self) -> None:
+        s = AGENT_GUIDANCE_FACTUAL_COUNT
+        assert "web_search" in s
+
+    def test_mentions_primary_source(self) -> None:
+        s = AGENT_GUIDANCE_FACTUAL_COUNT
+        assert "primary source" in s.lower()
+
+    def test_forbids_estimation(self) -> None:
+        s = AGENT_GUIDANCE_FACTUAL_COUNT
+        assert "Do NOT estimate" in s
+
+    def test_not_in_default(self) -> None:
+        assert AGENT_GUIDANCE_FACTUAL_COUNT not in default_guidance()
+
+
+class TestSelectQuestionAnchors:
+    """ZIQ SPS one-shot classifier — structural prior only."""
+
+    def test_empty_question_returns_empty(self) -> None:
+        assert select_question_anchors("") == ()
+        assert select_question_anchors("   ") == ()
+
+    def test_exact_unit_matches_gaia_12(self) -> None:
+        # GAIA 7dd30055 verbatim
+        q = (
+            "Using the Biopython library in Python, parse the PDB "
+            "file of the protein identified by the PDB ID 5wb7 from "
+            "the RCSB Protein Data Bank. Calculate the distance "
+            "between the first and second atoms as they are listed "
+            "in the PDB file. Report the answer in Angstroms, "
+            "rounded to the nearest picometer."
+        )
+        anchors = select_question_anchors(q)
+        assert AGENT_GUIDANCE_EXACT_UNIT in anchors
+
+    def test_exact_quote_matches_gaia_15(self) -> None:
+        # GAIA 624cbf11 verbatim
+        q = (
+            "What's the last line of the rhyme under the flavor "
+            "name on the headstone visible in the background of the "
+            "photo of the oldest flavor's headstone in the Ben & "
+            "Jerry's online flavor graveyard as of the end of 2022?"
+        )
+        anchors = select_question_anchors(q)
+        assert AGENT_GUIDANCE_EXACT_QUOTE in anchors
+
+    def test_factual_count_matches_gaia_3(self) -> None:
+        # GAIA 04a04a9b verbatim
+        q = (
+            "If we assume all articles published by Nature in 2020 "
+            "(articles, only, not book reviews/columns, etc) relied "
+            "on statistical significance to justify their findings "
+            "and they on average came to a p-value of 0.04, how "
+            "many papers would be incorrect as to their claims of "
+            "statistical significance? Round the value up to the "
+            "next integer."
+        )
+        anchors = select_question_anchors(q)
+        assert AGENT_GUIDANCE_FACTUAL_COUNT in anchors
+
+    def test_simple_question_matches_nothing(self) -> None:
+        # Should not accidentally trigger — must not append guidance.
+        for q in (
+            "What is 2 + 2?",
+            "Is this a test?",
+            "Hello world.",
+        ):
+            assert select_question_anchors(q) == ()
+
+    def test_result_is_tuple(self) -> None:
+        out = select_question_anchors("How many planets orbit the sun?")
+        assert isinstance(out, tuple)
+
+    def test_deterministic_order(self) -> None:
+        # Question triggering multiple anchors yields stable order.
+        q = "How many lines in the poem? Report in meters."
+        out1 = select_question_anchors(q)
+        out2 = select_question_anchors(q)
+        assert out1 == out2
+
+    def test_case_insensitive(self) -> None:
+        q_lower = "how many apples?"
+        q_upper = "HOW MANY APPLES?"
+        assert select_question_anchors(q_lower) == select_question_anchors(
+            q_upper
+        )
+
+
+class TestAnchorPatternsTable:
+    """ANCHOR_PATTERNS is the public ordering contract."""
+
+    def test_three_anchors_registered(self) -> None:
+        assert len(ANCHOR_PATTERNS) == 3
+
+    def test_all_entries_well_formed(self) -> None:
+        import re
+
+        for name, pattern, guidance in ANCHOR_PATTERNS:
+            assert isinstance(name, str) and name
+            assert isinstance(pattern, re.Pattern)
+            assert isinstance(guidance, str) and guidance
+
+    def test_names_unique(self) -> None:
+        names = [entry[0] for entry in ANCHOR_PATTERNS]
+        assert len(names) == len(set(names))
+
+
+class TestBuildTargetedGuidance:
+    """Composer: base + question-specific anchors (no prompt bloat)."""
+
+    def test_no_anchor_match_returns_base_only(self) -> None:
+        out = build_targeted_guidance("What is the capital of France?")
+        assert AGENT_GUIDANCE_UNCERTAINTY in out
+        assert AGENT_GUIDANCE_ARITHMETIC in out
+        # None of the specific anchors should appear
+        assert AGENT_GUIDANCE_EXACT_UNIT not in out
+        assert AGENT_GUIDANCE_EXACT_QUOTE not in out
+        assert AGENT_GUIDANCE_FACTUAL_COUNT not in out
+
+    def test_quote_question_appends_quote_anchor(self) -> None:
+        out = build_targeted_guidance(
+            "Quote verbatim the last line of the song."
+        )
+        assert AGENT_GUIDANCE_EXACT_QUOTE in out
+        # Base blocks still present
+        assert AGENT_GUIDANCE_UNCERTAINTY in out
+
+    def test_unit_question_appends_unit_anchor(self) -> None:
+        out = build_targeted_guidance(
+            "Report the distance in Angstroms, rounded to the "
+            "nearest picometer."
+        )
+        assert AGENT_GUIDANCE_EXACT_UNIT in out
+
+    def test_count_question_appends_count_anchor(self) -> None:
+        out = build_targeted_guidance("How many books were published?")
+        assert AGENT_GUIDANCE_FACTUAL_COUNT in out
+
+    def test_custom_base_overrides_default(self) -> None:
+        out = build_targeted_guidance(
+            "What is the capital?",
+            base=(AGENT_GUIDANCE_UNCERTAINTY,),
+        )
+        assert AGENT_GUIDANCE_UNCERTAINTY in out
+        assert AGENT_GUIDANCE_ARITHMETIC not in out
+
+    def test_deterministic(self) -> None:
+        q = "How many lines? Report in meters. Quote the last line."
+        assert build_targeted_guidance(q) == build_targeted_guidance(q)
+
+    def test_no_leading_or_trailing_newlines(self) -> None:
+        out = build_targeted_guidance("hello")
+        assert not out.startswith("\n")
+        assert not out.endswith("\n")
+
+    def test_empty_question_uses_base_only(self) -> None:
+        out = build_targeted_guidance("")
+        assert AGENT_GUIDANCE_UNCERTAINTY in out
+        assert AGENT_GUIDANCE_EXACT_UNIT not in out

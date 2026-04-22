@@ -6,10 +6,15 @@
 @dependencies stdlib only
 @exports AGENT_GUIDANCE_UNCERTAINTY, AGENT_GUIDANCE_ARITHMETIC,
     AGENT_GUIDANCE_COMPUTE_TOOLS, AGENT_GUIDANCE_NO_REFUSAL,
-    default_guidance
+    AGENT_GUIDANCE_EXACT_QUOTE, AGENT_GUIDANCE_EXACT_UNIT,
+    AGENT_GUIDANCE_FACTUAL_COUNT, AGENT_GUIDANCE_SEARCH_DISCIPLINE,
+    default_guidance, select_question_anchors,
+    build_targeted_guidance
 """
 
 from __future__ import annotations
+
+import re
 
 AGENT_GUIDANCE_UNCERTAINTY = (
     "If the question mentions any technical specification, domain "
@@ -73,6 +78,29 @@ AGENT_GUIDANCE_EXACT_QUOTE = (
     "character."
 )
 
+AGENT_GUIDANCE_EXACT_UNIT = (
+    "This question specifies the unit the answer must be reported "
+    "in (the unit appears directly after the word 'in'). The numeric "
+    "value you output must be in THAT unit — not a sub-unit, not a "
+    "converted precision unit. If the question says 'in Angstroms, "
+    "rounded to the nearest picometer', the answer is a value in "
+    "Angstroms (e.g. 1.456), NOT in picometers (not 1456). The "
+    "phrase 'rounded to the nearest X' describes the precision of "
+    "the answer in the target unit, not the target unit itself."
+)
+
+AGENT_GUIDANCE_FACTUAL_COUNT = (
+    "This question asks for a factual count or number that depends "
+    "on real-world data (publication totals, database records, "
+    "annual statistics). Do NOT estimate or invent the count. Call "
+    "web_search with specific query phrasings (e.g. 'number of "
+    "research articles published by <journal> in <year>', 'total "
+    "papers <journal> <year> count') and consult a primary source "
+    "(publisher's annual report, database query, authoritative "
+    "listing) before computing. If two sources disagree, prefer the "
+    "publisher's own report."
+)
+
 
 def default_guidance() -> str:
     """Return the default joined agent-guidance prompt."""
@@ -81,3 +109,116 @@ def default_guidance() -> str:
         AGENT_GUIDANCE_ARITHMETIC,
         AGENT_GUIDANCE_NO_REFUSAL,
     ))
+
+
+# ─── ZIQ SPS one-shot question-structure classifier ────────────────
+#
+# Cold-start router — no FTRL, no online learning. Uses structural
+# regex priors on question text only (no access to expected answer)
+# to pick which targeted-guidance blocks apply. Replaces the
+# "global append" approach of ``v1_phase1`` which bloated prompts
+# for every question and caused Gemma4-Q4_K_M regression (MEMORY #89).
+#
+# Design invariants:
+#   1. Input is question string only — no expected / ground_truth
+#      leaks (no-cheat).
+#   2. Output is a tuple of AGENT_GUIDANCE_* constants in stable
+#      order (sorted by insertion order in ANCHOR_PATTERNS).
+#   3. A question matching zero patterns returns an empty tuple —
+#      caller appends nothing, keeping the default prompt untouched.
+#   4. Patterns are intentionally conservative (narrow trigger
+#      surfaces) so PASS questions don't accidentally receive inject
+#      and regress under prompt bloat.
+
+_EXACT_UNIT_PATTERN = re.compile(
+    # "Report <noun>? in <UNIT>" — the unit token is the first
+    # alphabetic word after "in", optionally preceded by a noun
+    # ("the answer", "the distance", etc.). We don't capture the
+    # unit value here; presence of the construct is enough to
+    # trigger the targeted guidance.
+    r"\b(?:report|give|express|provide|state|return|answer)\b"
+    r"[^.?!]{0,60}?"
+    r"\bin\s+"
+    r"(?:Angstroms?|Å|picometers?|pm|nanometers?|nm|"
+    r"meters?|centimeters?|cm|millimeters?|mm|kilometers?|km|"
+    r"seconds?|minutes?|hours?|days?|years?|"
+    r"grams?|kilograms?|kg|milligrams?|mg|pounds?|lbs?|"
+    r"degrees?|radians?|Celsius|Fahrenheit|Kelvin|"
+    r"percent|%|bytes?|bits?|hertz|Hz|joules?|watts?|"
+    r"(?:scientific\s+notation))\b",
+    re.IGNORECASE,
+)
+
+_EXACT_QUOTE_PATTERN = re.compile(
+    r"\b(?:last|first|closing|opening|final|second)\s+"
+    r"(?:line|sentence|verse|lyric|stanza|paragraph|word)s?\b"
+    r"|\bverbatim\b"
+    r"|\bexact\s+(?:quote|wording|text|phrase|sentence)\b"
+    r"|\bquote\s+(?:the|from|exactly|verbatim)\b"
+    r"|\bepitaph\b"
+    r"|\binscription\b"
+    r"|\b(?:rhyme|poem|lyric|chorus)\s+(?:under|above|on|of|for)\b",
+    re.IGNORECASE,
+)
+
+_FACTUAL_COUNT_PATTERN = re.compile(
+    r"\bhow\s+many\b"
+    r"|\bwhat\s+is\s+the\s+(?:number|count|total|quantity)\s+of\b"
+    r"|\bif\s+we\s+assume\b[^.?!]{0,200}?\bhow\s+many\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+# Ordered pattern table — order controls deterministic output order
+# when a question matches multiple anchors.
+ANCHOR_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
+    ("exact_unit", _EXACT_UNIT_PATTERN, AGENT_GUIDANCE_EXACT_UNIT),
+    ("exact_quote", _EXACT_QUOTE_PATTERN, AGENT_GUIDANCE_EXACT_QUOTE),
+    (
+        "factual_count",
+        _FACTUAL_COUNT_PATTERN,
+        AGENT_GUIDANCE_FACTUAL_COUNT,
+    ),
+)
+
+
+def select_question_anchors(question: str) -> tuple[str, ...]:
+    """Return guidance blocks whose regex matches the question text.
+
+    ZIQ SPS one-shot router: structural prior only, no FTRL, no
+    expected-answer leak. An empty-string / whitespace question
+    returns ``()`` (caller appends nothing).
+
+    Returns tuple of AGENT_GUIDANCE_* constants in the order defined
+    by ANCHOR_PATTERNS (stable).
+    """
+    if not question or not question.strip():
+        return ()
+    out: list[str] = []
+    for _name, pattern, guidance in ANCHOR_PATTERNS:
+        if pattern.search(question):
+            out.append(guidance)
+    return tuple(out)
+
+
+def build_targeted_guidance(
+    question: str,
+    *,
+    base: tuple[str, ...] = (
+        AGENT_GUIDANCE_UNCERTAINTY,
+        AGENT_GUIDANCE_ARITHMETIC,
+    ),
+) -> str:
+    """Compose guidance = base blocks + question-specific anchors.
+
+    Keeps the baseline v1 prompt unchanged for questions that match
+    no anchor (empty overlay). Matching questions receive ONLY the
+    specific anchor text appended, avoiding MEMORY #89 prompt bloat
+    regression where every question got every Phase-1 block.
+
+    Returns a newline-joined guidance string ready to drop into the
+    system-suffix template (no leading/trailing newlines).
+    """
+    anchors = select_question_anchors(question)
+    blocks = base + anchors
+    return "\n".join(blocks)
