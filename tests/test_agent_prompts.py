@@ -5,7 +5,9 @@ from __future__ import annotations
 from concinno.agent.prompts import (
     AGENT_GUIDANCE_ARITHMETIC,
     AGENT_GUIDANCE_COMPUTE_TOOLS,
+    AGENT_GUIDANCE_EXACT_QUOTE,
     AGENT_GUIDANCE_NO_REFUSAL,
+    AGENT_GUIDANCE_SEARCH_DISCIPLINE,
     AGENT_GUIDANCE_UNCERTAINTY,
     default_guidance,
 )
@@ -73,3 +75,34 @@ class TestComputeToolsGuidance:
 
     def test_distinct_from_arithmetic_guidance(self) -> None:
         assert AGENT_GUIDANCE_COMPUTE_TOOLS != AGENT_GUIDANCE_ARITHMETIC
+
+
+class TestPhase1Guidance:
+    """Phase 1 GAIA additions: multi-source search + verbatim quotes.
+
+    These guidance blocks target the B/C/G/I FAIL classes from the
+    baseline N=20 per-task analysis: search noise, empty-retry, and
+    paraphrase-vs-verbatim format mismatches.
+    """
+
+    def test_search_discipline_requires_multi_query(self) -> None:
+        s = AGENT_GUIDANCE_SEARCH_DISCIPLINE
+        assert "web_search" in s
+        assert "2 different" in s
+        assert "cross-reference" in s
+
+    def test_search_discipline_has_retry_and_cap(self) -> None:
+        s = AGENT_GUIDANCE_SEARCH_DISCIPLINE
+        assert "reformulate" in s
+        assert "5 web_search" in s
+
+    def test_exact_quote_demands_verbatim(self) -> None:
+        s = AGENT_GUIDANCE_EXACT_QUOTE
+        assert "fetch_url" in s
+        assert "EXACT" in s
+        assert "Never paraphrase" in s
+
+    def test_phase1_blocks_not_in_default(self) -> None:
+        out = default_guidance()
+        assert AGENT_GUIDANCE_SEARCH_DISCIPLINE not in out
+        assert AGENT_GUIDANCE_EXACT_QUOTE not in out

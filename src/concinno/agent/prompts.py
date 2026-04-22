@@ -53,6 +53,26 @@ AGENT_GUIDANCE_NO_REFUSAL = (
     "scored as wrong. A best-guess value beats a refusal."
 )
 
+AGENT_GUIDANCE_SEARCH_DISCIPLINE = (
+    "For any factual claim (dates, numbers, names, titles), call "
+    "web_search with AT LEAST 2 different query phrasings and "
+    "cross-reference the results before committing. If sources "
+    "disagree, prefer the most-cited or most-authoritative answer "
+    "over the first. If the initial search returns empty, "
+    "reformulate with different keywords and retry — do not give up "
+    "after a single query. Cap at 5 web_search calls per question "
+    "(diminishing returns beyond that)."
+)
+
+AGENT_GUIDANCE_EXACT_QUOTE = (
+    "For questions asking for a quote, lyric, line, title, or any "
+    "verbatim excerpt: call fetch_url on the source page when "
+    "available and reproduce the EXACT text, including original "
+    "punctuation, capitalization, and spacing. Never paraphrase, "
+    "summarize, or rephrase — the grader compares character-for-"
+    "character."
+)
+
 
 def default_guidance() -> str:
     """Return the default joined agent-guidance prompt."""
