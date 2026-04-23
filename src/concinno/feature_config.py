@@ -60,6 +60,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block Agent spawn when context tokens exceed threshold",
         "description_zh": "Token 超過閾值時阻擋 Agent spawn",
+        "ziq_autotunable": True,  # agent_threshold / critical_threshold are outcome-learnable
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -100,6 +102,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block Edit/Write on existing files not yet Read this session",
         "description_zh": "阻擋未讀就改的操作（防止盲改）",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -132,6 +136,8 @@ FEATURE_META: dict[str, dict] = {
             "同一 session 執行型 Agent 超過 N 次後阻擋。"
             "研究型 Agent（Explore/Plan/唯讀）不限次數。"
         ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -160,6 +166,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block repeated Edit on same file N+ times (with lint exception)",
         "description_zh": "同檔案連續 Edit N+ 次時阻擋（lint 修復例外）",
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -197,12 +205,16 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_quality",
         "description": "Python(ruff) / Rust(cargo) / Go(vet) static analysis",
         "description_zh": "Python/Rust/Go 靜態分析",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {},
     },
     "structural_guard": {
         "category": "hard_quality",
         "description": "Structural analysis (func length / nesting / TODO debt / file size)",
         "description_zh": "結構分析（函數長度/巢狀深度/TODO 債務/檔案大小）",
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "max_func_lines": {
                 "type": "int", "default": 50, "recommended": 50,
@@ -222,24 +234,32 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_quality",
         "description": "tsc --noEmit type checking with SHA256 cache",
         "description_zh": "TypeScript 型別檢查（有快取）",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {},
     },
     "linting": {
         "category": "hard_quality",
         "description": "ESLint for JavaScript files",
         "description_zh": "JavaScript ESLint 檢查",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {},
     },
     "handoff_format": {
         "category": "hard_quality",
         "description": "Validate handoff file structure on write",
         "description_zh": "寫交接檔時驗證結構（lint 級錯誤）",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {},
     },
     "prompt_guard": {
         "category": "hard_gate",
         "description": "Clarity gate + multi-question detection for UserPromptSubmit",
         "description_zh": "清晰度 gate + 多問題偵測（UserPromptSubmit 階段）",
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "clarity_threshold": {
                 "type": "float",
@@ -268,6 +288,8 @@ FEATURE_META: dict[str, dict] = {
         "description": "Block session stop when work was done but no handoff file updated",
         "description_zh": "Session 有工作但無交接更新時阻擋停止",
         "routing_policy": "always_on",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "enabled": {
                 "type": "bool",
@@ -325,6 +347,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "cognitive",
         "description": "Proactive knowledge injection when user prompt matches blind-spot rules",
         "description_zh": "用戶提示命中盲區規則時主動注入知識斷言",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "enabled": {
                 "type": "bool",
@@ -346,6 +370,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "ux",
         "description": "Clean edit streak celebrations (🔥x5, ✅ fixed, etc.)",
         "description_zh": "連擊慶祝（🔥x5、✅ 修復 等）",
+        "ziq_autotunable": False,
+        "cosmetic": True,
         "params": {
             "milestone_interval": {
                 "type": "int",
@@ -364,18 +390,24 @@ FEATURE_META: dict[str, dict] = {
         "category": "ux",
         "description": "Visual session end summary (token/streak/files box)",
         "description_zh": "Session 結束時視覺化摘要框",
+        "ziq_autotunable": False,
+        "cosmetic": True,
         "params": {},
     },
     "deny_marker": {
         "category": "ux",
         "description": "Red ANSI counter on every deny (✖ 阻擋 #N)",
         "description_zh": "每次阻擋時的紅色計數通知",
+        "ziq_autotunable": False,
+        "cosmetic": True,
         "params": {},
     },
     "token_display": {
         "category": "ux",
         "description": "Append real token usage to CRITICAL/MILESTONE UX messages",
         "description_zh": "在錯誤/里程碑訊息後附加真實 token 用量",
+        "ziq_autotunable": False,
+        "cosmetic": True,
         "params": {},
     },
     # ── Boundary Guard (was soft, now hard gate via BoundaryGuard) ──
@@ -383,12 +415,16 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Hook/library boundary violation detection (PreToolUse DENY)",
         "description_zh": "偵測 Hook/庫邊界違規（PreToolUse 硬擋）",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {},
     },
     "publish_scan": {
         "category": "hard_gate",
         "description": "Pre-publish artifact scan for secrets, keys, and personal paths",
         "description_zh": "發布前掃描打包物是否夾帶私鑰/密碼/個人路徑",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -409,6 +445,8 @@ FEATURE_META: dict[str, dict] = {
         "description_zh": (
             "阻擋 Agent 修改身份配置（CLAUDE.md、.claude/rules/、settings.json、hook 設定）"
         ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -424,6 +462,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block long-running Bash commands without run_in_background",
         "description_zh": "阻擋未設 background 的長時間 Bash 指令",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -439,6 +479,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block complex python -c one-liners (>5 lines)",
         "description_zh": "阻擋過長的 python -c 指令（>5 行）",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -454,6 +496,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block whitepaper IP keywords from leaking to external paths",
         "description_zh": "阻擋白皮書核心 IP 關鍵字外流到外部路徑",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -469,6 +513,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block ambiguous prompts combined with irreversible operations",
         "description_zh": "阻擋模糊意圖 + 不可逆操作的組合",
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -495,6 +541,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "TADS four-level circuit breaker based on hijack_score (L0→L2→L3→L4)",
         "description_zh": "TADS 四級斷路器：挾持分數分級 deny（L0→L2→L3→L4）",
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -543,6 +591,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block new proposals in planning files without side-effect analysis",
         "description_zh": "規劃檔新提案缺少副作用分析時阻擋（動序 Poka-Yoke）",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -558,6 +608,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Lock after deploy with UI changes until screenshot verification",
         "description_zh": "deploy + UI 改動後鎖定，直到截圖驗證完成才釋放",
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -578,6 +630,8 @@ FEATURE_META: dict[str, dict] = {
         "description_zh": (
             "企業級交付驗證 — 阻擋未驗證的工作提交"
         ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -612,6 +666,8 @@ FEATURE_META: dict[str, dict] = {
         "category": "hard_gate",
         "description": "Block after N consecutive tool failures (stuck detection)",
         "description_zh": "連續 N 次工具失敗後阻擋（卡住偵測）",
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -645,6 +701,8 @@ FEATURE_META: dict[str, dict] = {
             "高風險操作前注入固態語言紅隊提示"
             "（架構修改、大量刪除、新模組、部署）"
         ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "deletion_threshold": {
                 "type": "int",
@@ -669,6 +727,8 @@ FEATURE_META: dict[str, dict] = {
         "description_zh": (
             "設計理論強制：規劃檔 Vertical Slice 可追溯性 + 程式碼 Deep Module 比率檢查"
         ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -702,6 +762,8 @@ FEATURE_META: dict[str, dict] = {
             "蝴蝶效應守衛：發現問題必須立即處理，不處理就不能繼續。"
             "Session 級 Issue Ledger 追蹤，非修復操作被 deny"
         ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -742,6 +804,8 @@ FEATURE_META: dict[str, dict] = {
             "切換動態（Guard Pipeline + 學習循環）和靜態（純 prompt pipeline）模式。"
             "動態是靜態的嚴格超集"
         ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
         "params": {
             "mode": {
                 "type": "str",
@@ -837,6 +901,8 @@ FEATURE_META: dict[str, dict] = {
             " — forces thinking + responses in configured language"
         ),
         "description_zh": "每次工具呼叫注入語言強制 — 思考和回答都用設定語言",
+        "ziq_autotunable": False,
+        "cosmetic": True,
         "params": {
             "language": {
                 "type": "str",
@@ -992,12 +1058,30 @@ def validate_value(name: str, key: str, value: Any) -> list[str]:
 
 
 def set_feature(
-    name: str, key: str, value: Any, *, force: bool = False,
+    name: str,
+    key: str,
+    value: Any,
+    *,
+    force: bool = False,
+    origin: tuple[str, ...] = ("manual",),
 ) -> list[str]:
     """Set a feature config value. Returns risk warnings.
 
-    If force=False and there are warnings, does NOT apply the change.
-    If force=True, applies regardless of warnings.
+    Args:
+        name: FEATURE_META key.
+        key: Param name (or ``"enabled"``).
+        value: New value.
+        force: When False and validation produces warnings, change is NOT
+            applied. When True, applied regardless of warnings.
+        origin: Provenance tuple recorded in the preset-cascade origin
+            sidecar (``~/.concinno/preset_origins.json``) — examples:
+            ``("manual",)``, ``("preset", "benchmark")``,
+            ``("ziq", "autotune", "full")``. Wired for narrower-scope v4
+            so ``concinno preset show`` can explain why a value is
+            what it is.
+
+    Returns:
+        Risk-warning strings (empty on safe change).
     """
     warnings = validate_value(name, key, value)
 
@@ -1013,7 +1097,29 @@ def set_feature(
     except Exception as e:
         return [f"Failed to set: {e}"]
 
+    # Record origin sidecar for preset-cascade inspection. Fail-soft —
+    # origin tracking is observability, not gating.
+    try:
+        from concinno.preset_cascade import _record_origin
+
+        _record_origin(name, key, origin)
+    except Exception:  # pragma: no cover — optional sidecar
+        pass
+
     return warnings
+
+
+def list_autotunable() -> list[str]:
+    """Return FEATURE_META names that ZIQ may auto-tune (non-cosmetic).
+
+    Used by :class:`concinno.ziq_autotune_loop.ZIQAutoTuneLoop.tick` to
+    short-circuit the walk over safety-only / cosmetic entries.
+    """
+    return sorted(
+        name
+        for name, meta in FEATURE_META.items()
+        if meta.get("ziq_autotunable") and not meta.get("cosmetic", False)
+    )
 
 
 # ── Preset Profiles ──────────────────────────────────────

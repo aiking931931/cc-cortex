@@ -65,6 +65,34 @@ def main(hook_data: dict | None = None) -> None:
     except (ImportError, Exception):
         pass
 
+    # --- narrower-scope v4: inject active preset into agent context ---
+    _emit_active_preset()
+
+
+def _emit_active_preset() -> None:
+    """Emit active v4 preset name as hookSpecificOutput.additionalContext.
+
+    The agent reads this on its first turn so primacy-bias can't drop
+    the user's cascade choice (MEMORY #71 Switch-First directive).
+    Fail-soft: any error -> silent, the hook contract stays intact.
+    """
+    try:
+        from concinno.preset_cascade import get_active_preset
+
+        name = get_active_preset()
+    except Exception:
+        return
+    try:
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": f"concinno: active_preset={name}\n",
+            },
+        }
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
+
 
 if __name__ == "__main__":
     main()

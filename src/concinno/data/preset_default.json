@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "presets": {
+    "benchmark": {
+      "name": "benchmark",
+      "summary": {
+        "release_auth.disabled": true,
+        "sweep_guard.enabled": false,
+        "handoff_required_guard.enabled": false,
+        "butterfly_guard.enabled": false,
+        "redteam.enabled": false,
+        "token_gate.agent_threshold": 160000,
+        "consecutive_fail_gate.max_fails": 5,
+        "sentinel_gate.max_repeats": 10,
+        "session_summary.enabled": false,
+        "streak_ux.enabled": false,
+        "language_enforce.language": "English"
+      },
+      "full_ref": null,
+      "index": {
+        "release_auth.disabled": "publish skips gate (benchmark speed)",
+        "sweep_guard.enabled": "no end-of-session sweep nagging",
+        "handoff_required_guard.enabled": "no handoff nagging during runs",
+        "butterfly_guard.enabled": "tolerate mid-run discovered issues",
+        "redteam.enabled": "skip red/blue team review (batch mode)",
+        "token_gate.agent_threshold": "higher ctx budget for deep runs",
+        "consecutive_fail_gate.max_fails": "allow more retries before halt",
+        "sentinel_gate.max_repeats": "tolerate more same-file edit loops",
+        "session_summary.enabled": "no visual summary box",
+        "streak_ux.enabled": "no celebration noise",
+        "language_enforce.language": "English for benchmark reproducibility"
+      }
+    },
+    "general": {
+      "name": "general",
+      "summary": {
+        "release_auth.disabled": false,
+        "sweep_guard.enabled": true,
+        "handoff_required_guard.enabled": true,
+        "butterfly_guard.enabled": true,
+        "redteam.enabled": true,
+        "token_gate.agent_threshold": 140000,
+        "consecutive_fail_gate.max_fails": 3,
+        "sentinel_gate.max_repeats": 5,
+        "session_summary.enabled": true,
+        "streak_ux.enabled": true,
+        "language_enforce.language": "English"
+      },
+      "full_ref": null,
+      "index": {
+        "release_auth.disabled": "publish gate enforced (user opt-out via ~/.concinno/release_auth.json)",
+        "sweep_guard.enabled": "end-of-session sweep runs",
+        "handoff_required_guard.enabled": "block stop without handoff update",
+        "butterfly_guard.enabled": "fix discovered issues immediately",
+        "redteam.enabled": "red/blue for architecture decisions",
+        "token_gate.agent_threshold": "standard 140K agent spawn ceiling",
+        "consecutive_fail_gate.max_fails": "3-strike halt on tool failures",
+        "sentinel_gate.max_repeats": "5-edit loop cutoff on same file",
+        "session_summary.enabled": "session-end summary box",
+        "streak_ux.enabled": "celebration at milestones",
+        "language_enforce.language": "default English enforcement"
+      }
+    },
+    "prod": {
+      "name": "prod",
+      "summary": {
+        "release_auth.disabled": false,
+        "sweep_guard.enabled": true,
+        "handoff_required_guard.enabled": true,
+        "butterfly_guard.enabled": true,
+        "redteam.enabled": true,
+        "token_gate.agent_threshold": 120000,
+        "consecutive_fail_gate.max_fails": 2,
+        "sentinel_gate.max_repeats": 4,
+        "session_summary.enabled": true,
+        "streak_ux.enabled": false,
+        "language_enforce.language": "English"
+      },
+      "full_ref": null,
+      "index": {
+        "release_auth.disabled": "publish strictly gated",
+        "sweep_guard.enabled": "mandatory end-of-session sweep",
+        "handoff_required_guard.enabled": "no stop without handoff",
+        "butterfly_guard.enabled": "zero tolerance for discovered issues",
+        "redteam.enabled": "red/blue always on for decisions",
+        "token_gate.agent_threshold": "tighter 120K ceiling for prod stability",
+        "consecutive_fail_gate.max_fails": "2-strike halt (fail fast)",
+        "sentinel_gate.max_repeats": "4-edit loop cutoff (strict)",
+        "session_summary.enabled": "mandatory summary for audit",
+        "streak_ux.enabled": "no UX noise in prod",
+        "language_enforce.language": "English for audit logs"
+      }
+    }
+  }
+}

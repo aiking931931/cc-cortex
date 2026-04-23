@@ -1424,6 +1424,10 @@ def main() -> None:
     from .new_feature_cmd import register as _register_new_feature
     _register_new_feature(sub)
 
+    # narrower-scope v4 — preset cascade CLI
+    from .preset_cmd import register as _register_preset
+    _register_preset(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)
