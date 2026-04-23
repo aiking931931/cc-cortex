@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.1] - 2026-04-23
+
+Patch: **``__version__`` string sync** — 2.18.0's wheel shipped with
+``src/concinno/__init__.py::__version__ = "2.17.1"`` (leftover from the
+concurrent 2.17.1 hotfix branch) while ``pyproject.toml::version`` was
+``2.18.0``. Result: ``pip install concinno==2.18.0`` installs correctly
+but ``import concinno; print(concinno.__version__)`` returns ``"2.17.1"``,
+which is a cosmetic-but-misleading inconsistency. 2.18.1 bumps both
+sources to ``"2.18.1"`` so ``__version__`` matches the PyPI tag. No
+API or behavior change vs 2.18.0.
+
 ## [2.18.0] - 2026-04-23
 
 Minor: **multimodal pipeline (image)** + **paraphrase-risk retry mode**
