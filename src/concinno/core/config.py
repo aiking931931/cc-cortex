@@ -179,6 +179,17 @@ class Config:
         config_file = self._config_path or (
             os.path.join(self._hooks_dir, "cc_config.json") if self._hooks_dir else ""
         )
+        # 2.17.1 fallback: hook subprocesses spawn a fresh Python without
+        # any hooks_dir pre-init, so get_config() there yields a blank
+        # singleton that never reads cc_config.json. Look at the default
+        # ~/.claude/hooks/cc_config.json before giving up so toast_enabled
+        # and similar notification switches actually take effect.
+        if not config_file or not os.path.isfile(config_file):
+            fallback = os.path.join(
+                os.path.expanduser("~"), ".claude", "hooks", "cc_config.json"
+            )
+            if os.path.isfile(fallback):
+                config_file = fallback
         if config_file and os.path.isfile(config_file):
             try:
                 with open(config_file, "r", encoding="utf-8") as f:

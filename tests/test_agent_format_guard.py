@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from concinno.agent.format_guard import (
     FORMAT_RETRY_REMINDER,
+    PARAPHRASE_RETRY_REMINDER,
     FormatFailureMode,
     classify_output_format,
+    retry_reminder_for_mode,
 )
 
 # ─── empty mode ─────────────────────────────────────
@@ -210,3 +212,119 @@ def test_priority_special_token_over_retry_talk() -> None:
     assert (
         classify_output_format(raw, ans) is FormatFailureMode.SPECIAL_TOKEN
     )
+
+
+# ─── paraphrase_risk mode (requires question argument) ───
+
+
+def test_paraphrase_risk_headstone_rhyme() -> None:
+    """Baseline GAIA #15: 'last line of the rhyme under … headstone'
+    with a summary answer — classifier catches it so the retry layer
+    gets a chance to re-ask for a verbatim quote."""
+    q = (
+        "What's the last line of the rhyme under the flavor name on "
+        "the headstone visible in the background of the photo of the "
+        "oldest flavor's headstone in the Ben & Jerry's online "
+        "flavor graveyard as of the end of 2022?"
+    )
+    ans = "- physical graveyard is located in factory"
+    assert (
+        classify_output_format("stream", ans, question=q)
+        is FormatFailureMode.PARAPHRASE_RISK
+    )
+
+
+def test_paraphrase_risk_verbatim_keyword() -> None:
+    """The `verbatim` keyword alone is enough to classify."""
+    q = "Give the verbatim text of the final stanza of the poem."
+    ans = "three words here roughly paraphrased"
+    assert (
+        classify_output_format("stream", ans, question=q)
+        is FormatFailureMode.PARAPHRASE_RISK
+    )
+
+
+def test_paraphrase_risk_does_not_trigger_on_single_word() -> None:
+    """Single-word answers to verbatim questions can't be a
+    paraphrase — a single concrete token is either right or wrong,
+    no 'close enough' class. Avoid wasting a retry round on them."""
+    q = "What is the last word of the lyric?"
+    ans = "goodbye"
+    assert classify_output_format("stream", ans, question=q) is None
+
+
+def test_paraphrase_risk_does_not_trigger_without_question() -> None:
+    """If callers don't pass ``question`` we can't evaluate
+    paraphrase risk — classifier returns None instead of
+    false-positive on all long answers."""
+    ans = "Three or more words here but no question to check"
+    assert classify_output_format("stream", ans) is None
+
+
+def test_paraphrase_risk_does_not_trigger_on_non_quote_question() -> None:
+    """A factual-count question must not inherit paraphrase risk."""
+    q = "How many studio albums did the artist release between 2000 and 2010?"
+    ans = "The artist released three studio albums during that period"
+    assert classify_output_format("stream", ans, question=q) is None
+
+
+# ─── retry_reminder_for_mode dispatch ────────────────
+
+
+def test_retry_reminder_empty_is_format() -> None:
+    assert (
+        retry_reminder_for_mode(FormatFailureMode.EMPTY)
+        is FORMAT_RETRY_REMINDER
+    )
+
+
+def test_retry_reminder_retry_talk_is_format() -> None:
+    assert (
+        retry_reminder_for_mode(FormatFailureMode.RETRY_TALK)
+        is FORMAT_RETRY_REMINDER
+    )
+
+
+def test_retry_reminder_quote_dump_is_format() -> None:
+    assert (
+        retry_reminder_for_mode(FormatFailureMode.QUOTE_DUMP)
+        is FORMAT_RETRY_REMINDER
+    )
+
+
+def test_retry_reminder_special_token_is_format() -> None:
+    assert (
+        retry_reminder_for_mode(FormatFailureMode.SPECIAL_TOKEN)
+        is FORMAT_RETRY_REMINDER
+    )
+
+
+def test_retry_reminder_paraphrase_risk_is_paraphrase() -> None:
+    """Paraphrase risk uses the verbatim-focused reminder, not the
+    generic format reminder."""
+    assert (
+        retry_reminder_for_mode(FormatFailureMode.PARAPHRASE_RISK)
+        is PARAPHRASE_RETRY_REMINDER
+    )
+
+
+def test_paraphrase_reminder_mentions_verbatim() -> None:
+    assert "verbatim" in PARAPHRASE_RETRY_REMINDER.lower()
+    assert "exact" in PARAPHRASE_RETRY_REMINDER.lower()
+
+
+def test_paraphrase_reminder_is_question_agnostic() -> None:
+    """Same no-cheat contract as FORMAT_RETRY_REMINDER — the verbatim
+    reminder must not contain answer-like hints from any GAIA
+    question."""
+    rem = PARAPHRASE_RETRY_REMINDER.lower()
+    for forbidden in (
+        "egalitarian",
+        "34689",
+        "142",
+        "morarji",
+        "so we had to let it die",
+    ):
+        assert forbidden not in rem, (
+            f"paraphrase reminder leaks answer-like token {forbidden!r}"
+        )

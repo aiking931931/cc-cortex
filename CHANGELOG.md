@@ -7,6 +7,162 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-04-23
+
+Minor: **multimodal pipeline (image)** + **paraphrase-risk retry mode**
++ **Concinno-native LLM binding roadmap**. AI King 2026-04-23
+directive after the gemma4:26b N=20 baseline showed 3 distinct
+format-failure classes (empty / retry-talk / quote-dump /
+special-token already in 2.17) plus a fourth text-only class
+(paraphrase-near-miss on verbatim quote questions) plus one
+vision-only class (#15 flavor-graveyard headstone) that needed a
+new tool + provider pathway to let the multimodal model actually
+see an image.
+
+### Added — paraphrase_risk
+
+- **`concinno.agent.format_guard.FormatFailureMode.PARAPHRASE_RISK`** —
+  fifth failure-mode enum member with its own regex
+  (`_PARAPHRASE_QUESTION_RE`: `last line`, `verbatim`,
+  `exact quote/wording`, `epitaph`, `inscription`, `headstone`,
+  `rhyme under/above/on/of/for/at`) and its own reminder
+  `PARAPHRASE_RETRY_REMINDER` focused on verbatim-match rather than
+  think-aloud rejection. Triggers only when the question asks for an
+  exact quote AND the extracted answer is ≥3 words (single-word
+  answers can't be a paraphrase). All checks are question-text +
+  extracted-answer only — no expected-answer read.
+- **`retry_reminder_for_mode(mode)`** — per-mode reminder dispatcher.
+  `EMPTY`/`RETRY_TALK`/`QUOTE_DUMP`/`SPECIAL_TOKEN` still use the
+  generic `FORMAT_RETRY_REMINDER`; `PARAPHRASE_RISK` gets the new
+  verbatim-focused one.
+
+### Added — fetch_image + multimodal provider pathway
+
+- **`concinno.tools.builtin.fetch_image.FetchImageTool`** — new
+  vision-class built-in. Downloads an image URL to base64 and wraps
+  it in a marker-delimited string
+  (`__CONCINNO_IMAGE_B64__ <b64> __CONCINNO_END_IMAGE__
+  mime: image/<x>`). The tool's return type stays `str` so the
+  existing `Tool` protocol doesn't need a schema change; conversion
+  to a multimodal content block happens at the provider boundary on
+  the next inference turn. 10 MB cap, magic-byte MIME fallback for
+  mis-declaring servers, errors shaped `tool error: …`.
+- **`parse_image_marker(content) -> list[dict] | None`** — public
+  helper for OpenAI-compat providers. Walks the content string,
+  emits
+  `[{type:"text",…}, {type:"image_url", image_url:{url:"data:…"}}, …]`
+  blocks in source order. `None` when no marker is present so the
+  caller keeps the original string path.
+
+### Consumer integration — Sancio (persona-api)
+
+- `persona.providers.openai._openai_messages_with_tools` detects
+  `IMAGE_MARKER_START` in any message content and splits it into an
+  OpenAI-compat `content: [{type:"text",…},{type:"image_url",…}]`
+  list for the next LLM call. `tool`-role messages carrying an
+  image marker split into a short text ack on the `tool` line + a
+  synthetic `user` message carrying the multimodal blocks (the
+  OpenAI chat spec forbids multimodal content under the `tool`
+  role). Zero regression on non-image tool results — the marker
+  detection is a cheap substring check.
+- `persona.tools.fetch_image.FetchImageTool` async adapter wraps
+  the Concinno sync tool, registered in `default_tools()` between
+  `FetchUrlTool` and `DateCalcTool` so the agent discovers it
+  automatically.
+
+### Why base64-inline, not URL passthrough
+
+Verified against Ollama 0.21 live (2026-04-23):
+
+```text
+POST /v1/chat/completions {"image_url":{"url":"https://example.com/x.png"}}
+→ 400 "image URLs are not currently supported, please use base64
+       encoded data instead"
+```
+
+The Ollama OpenAI-compat surface requires `data:…;base64,…` URIs,
+so `FetchImageTool` downloads + base64-encodes at fetch time. The
+transcoding is lossless (bytes → b64 → bytes) so "原封不動地傳給
+Gemma4" is preserved in the sense that matters — the model sees
+the exact bytes fetched, no resizing, no re-compression, no
+pixel-level transform. If Ollama ever adds URL passthrough we can
+add a fast-path without breaking the marker protocol.
+
+### Roadmap (2.19+) — not in this ship
+
+AI King 2026-04-23 follow-up: Concinno should bind to Ollama
+natively (and to any local model host with the same capability
+table) rather than go through a remote OpenAI-compat API, plus
+surface an auto-router that prefers the highest-fidelity modality-
+capable target and degrades to a text+caption fallback when the
+brain LLM is text-only. Scope:
+
+1. `concinno.providers.ollama_native` — direct HTTP to Ollama using
+   the native `{"images":[<b64>, …]}` request shape (bypasses the
+   OpenAI-compat translation when both ends are Ollama).
+2. `concinno.providers.router` — reads a capability matrix
+   (text / vision / audio / tools / thinking) and picks the top-
+   rank target satisfying the current request's modality needs.
+   Auto-fallback chain example: `ollama:gemma4-26b` (vision ✅)
+   → `anthropic:claude-sonnet-4-6` (vision ✅) → text-only fallback
+   with upstream captioning hop.
+3. Audio / video modality blocks following the same marker +
+   provider-split pattern as `fetch_image`. Tool name convention
+   `fetch_audio` / `fetch_video`. Gemma 4 has an audio projector
+   in upstream but Ollama has not yet exposed it; the router
+   should degrade gracefully until that lands.
+4. Capability probe: call `/api/show` at provider init and cache
+   `{model: Capabilities}` so the router doesn't hard-code any
+   model's supported modalities.
+
+This 2.18 ship carries the tool + marker protocol + Sancio
+provider transform that make (1)–(4) trivial extensions. None of
+them breaks the 2.18 API surface.
+
+### Testing
+
+- 37 / 37 unit tests pass on the extended `test_agent_format_guard.py`
+  (original 25 + 12 new covering `PARAPHRASE_RISK` trigger + no-
+  trigger cases, `retry_reminder_for_mode` dispatch, paraphrase-
+  reminder no-cheat contract, single-word anti-trigger safety,
+  absence-of-question graceful fall-through, factual-count
+  questions not inheriting paraphrase risk).
+- 5 / 5 Sancio integration tests still pass on
+  `test_agent_run_format_retry.py`.
+- Full Concinno regression 6248 pre-existing tests green.
+
+### Consumer upgrade path
+
+- `pip install -U concinno` → 2.18.0.
+- Consumers using the format_guard facade
+  (`from concinno.agent import classify_output_format,
+  FORMAT_RETRY_REMINDER`) see no breakage — adds a new enum member
+  and a new reminder, existing constants untouched.
+- Consumers using `concinno.tools.builtin.*` gain `FetchImageTool`
+  as a new class; the other tools are unchanged.
+
+## [2.17.1] - 2026-04-23
+
+Patch: **hook subprocess config fallback** — user AI King 2026-04-23
+report「toast_enabled 設了仍不彈」root cause is that every hook
+subprocess (`pythonw -m concinno.hooks.*`) spawns a fresh Python
+interpreter with no `hooks_dir` argument passed to `get_config()`, so
+the singleton `Config` never reads any `cc_config.json` and every
+setting stays at its `_DEFAULTS` value.
+
+### Fixed
+
+- **`concinno.core.config.Config._load`** — when `hooks_dir` is empty
+  and no explicit `config_path` is passed (the universal state for
+  hook subprocesses wired via `settings.json`), fall back to
+  `~/.claude/hooks/cc_config.json` before using defaults. Switches
+  like `notification.toast_enabled` / `toast_app_id` now actually
+  reach `show_toast`, `maybe_show_ask_user_toast`, and other
+  notification code paths invoked from hooks. Existing call sites
+  that do pass `hooks_dir` (e.g. `concinno.cli.main`,
+  `concinno.mcp_server`) are unaffected — they take precedence over
+  the fallback, preserving per-project override behaviour.
+
 ## [2.17.0] - 2026-04-23
 
 Minor: **agent output-format guard** — AI King 2026-04-23 directive,
