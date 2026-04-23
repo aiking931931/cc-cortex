@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-04-23
+
+Minor: **agent output-format guard** — AI King 2026-04-23 directive,
+fix-at-source for GAIA-style benchmark scoring losses. Consumer-facing
+surface is the new `concinno.agent.format_guard` module; the win is
+that any Concinno-driven agent (Sancio today, others tomorrow) gets
+question-agnostic retry-on-malformed-output for free.
+
+### Added
+
+- **`concinno.agent.format_guard`** (`src/concinno/agent/format_guard.py`)
+  — pure-regex, question-independent classifier for four distinct
+  output-format failure modes observed in the 2026-04-22j
+  `gemma4:26b` N=20 run: `empty` (blank raw), `retry_talk`
+  (think-aloud lead-in like `"Wait, I'll search"` /
+  `"Based on the results"`), `quote_dump` (the search-query argument
+  list leaked out as the final answer, e.g.
+  `'average p-value" "Nature" "2020" "0.0'`), `special_token`
+  (chat-template leak: `<|tool_call|>`, `<channel|>`, `<im_start|>`).
+  Exposes `FormatFailureMode` enum + `classify_output_format(raw,
+  extracted_answer) -> FormatFailureMode | None` + question-agnostic
+  `FORMAT_RETRY_REMINDER` string. **No expected-answer / ground-truth
+  input** — the classifier only reads the raw stream and the
+  extractor-normalized answer (precise-fix Skill no-cheat contract).
+  25/25 unit tests in `tests/test_agent_format_guard.py`; zero false
+  positives against the 8 already-passing baseline questions (clean
+  answers like `"egalitarian"`, `"142"`, `"Morarji Desai"` never
+  trigger a retry). Special-token detection is scoped to the
+  extracted answer only — Gemma4 Q4_K_M emits `<channel|>` reasoning
+  markers in the raw stream for every question, so keying off raw
+  would false-positive every time.
+- **Facade re-exports** (`src/concinno/agent/__init__.py`) —
+  `FORMAT_RETRY_REMINDER` / `FormatFailureMode` /
+  `classify_output_format` join the existing `AGENT_GUIDANCE_*` /
+  `extract_sentinel_answer` public surface, so consumers can
+  `from concinno.agent import classify_output_format,
+  FORMAT_RETRY_REMINDER` without reaching into the private submodule.
+
+### Why this lives in Concinno, not in Sancio or the runner
+
+The classifier is 100% question-agnostic (no GAIA-specific strings,
+no answer leak, no scoring rules), and the retry reminder is just an
+output-format rule — both are exactly the kind of **generic
+agent-capability bag** the Concinno vs Sancio boundary doc
+(CLAUDE.md) names as Concinno territory. Sancio consumes it; the
+benchmark runner consumes it; any future Concinno-based agent gets
+the same retry layer by default. Putting this logic in the runner
+or hand-patching Sancio would have left a fix that the next
+benchmark (AgentBench, OSWorld, …) would have to rediscover.
+
+### Consumer upgrade
+
+- Sancio (persona-api): `_run_and_stream` in `agent_api.py` now
+  classifies the first `state.final_text` and, on a non-None
+  failure mode, re-runs `loop.run()` once with the original user
+  message plus `FORMAT_RETRY_REMINDER` appended. Emits a
+  `format_retry` SSE event (`{mode, first_answer_preview}`) so
+  runners can count retries without re-parsing. Opt-out:
+  `SANCIO_FORMAT_RETRY_ENABLED=0`. 5/5 integration tests in
+  `tests/test_agent_run_format_retry.py`. Cost impact: ~2× API on
+  failing questions only; already-passing questions pay zero
+  extra (the classifier returns None on well-formed output and the
+  retry path never fires).
+
 ## [2.16.0] - 2026-04-23
 
 Minor: **switch visibility + upgrade safety** — AI King 2026-04-23 directive

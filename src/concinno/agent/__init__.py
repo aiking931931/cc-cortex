@@ -37,6 +37,11 @@ from concinno.agent.fork_context import (
     normalize_tool_result_for_cache,
     render_for_fork_byte_exact,
 )
+from concinno.agent.format_guard import (
+    FORMAT_RETRY_REMINDER,
+    FormatFailureMode,
+    classify_output_format,
+)
 from concinno.agent.iterative_retrieve import (
     CascadeConfig,
     CascadeStats,
@@ -147,7 +152,9 @@ __all__ = [
     "DispatchRejected",
     "EpistemicAxis",
     "EvolutionScheduler",
+    "FORMAT_RETRY_REMINDER",
     "FileStateCache",
+    "FormatFailureMode",
     "ForkDepthExceeded",
     "ForkInForkRejected",
     "IterativeRetriever",
@@ -173,6 +180,7 @@ __all__ = [
     "blind_label_order",
     "build_targeted_guidance",
     "check",
+    "classify_output_format",
     "create_cache_safe_params",
     "create_subagent_context",
     "default_guidance",
