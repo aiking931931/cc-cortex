@@ -39,8 +39,10 @@ from concinno.agent.fork_context import (
 )
 from concinno.agent.format_guard import (
     FORMAT_RETRY_REMINDER,
+    PARAPHRASE_RETRY_REMINDER,
     FormatFailureMode,
     classify_output_format,
+    retry_reminder_for_mode,
 )
 from concinno.agent.iterative_retrieve import (
     CascadeConfig,

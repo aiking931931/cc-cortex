@@ -44,6 +44,30 @@ question-agnostic retry-on-malformed-output for free.
   `extract_sentinel_answer` public surface, so consumers can
   `from concinno.agent import classify_output_format,
   FORMAT_RETRY_REMINDER` without reaching into the private submodule.
+- **`python -m concinno ...` invocation** — `src/concinno/__main__.py`
+  (2 lines) shims the existing `concinno.cli:main` entry point so users
+  who prefer `python -m <pkg>` over the console script (e.g. pinning
+  interpreter in multi-Python systems) get identical behaviour. Covers
+  the convention gap the console script alone didn't close.
+- **`concinno new-feature <name>` CLI** (`src/concinno/cli/new_feature_cmd.py`)
+  — one-command scaffolder turning the 9-phase pipeline (think / PRD /
+  RFC / red-blue / TDD / impl / review / QA / ship + ecosystem-integration)
+  into a filled-in design doc. Kinds: `skill` / `subpackage` / `guard` /
+  `cli` / `module`. Radius-aware: `--radius=chaotic` marks red-blue
+  phase as mandatory; `--radius=simple` marks it optional-skip.
+  `--dry-run` prints the plan without writing. Existing target-dir
+  collision → exit 2 + clear error. Design doc pre-fills L0 rule #6
+  6-point DoD checklist (Switchable / ZIQ / 3-layer / Lazy /
+  CP-SOTA-logic / CBUA) + the 5-axis commander verdict (真做完 / 接線
+  / 功能正常 / AI 能力提升 / UX 方便).
+- **Global skill `~/.claude/skills/new-feature/`** — `SKILL.md` +
+  `pipeline.md` + `dod-checklist.md`. Triggers on 新功能 / 擴充 /
+  建 skill / add feature / new module / `/new-feature`. Pairs with the
+  CLI above: any agent hearing "add a new skill" routes to this skill,
+  which enforces the 6-point DoD + pinned-Opus-Max red-blue
+  (see `~/.claude/rules/L1/redteam.md` §Model pin) + commander 5-axis
+  verdict at the exit gate. Fixes the long-standing "每次更新品質不齊"
+  problem called out by AI King 2026-04-23.
 
 ### Why this lives in Concinno, not in Sancio or the runner
 

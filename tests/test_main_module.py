@@ -1,6 +1,6 @@
 """Verify ``python -m concinno ...`` invocation works.
 
-Added in 2.17.1 alongside ``src/concinno/__main__.py``. The ``concinno``
+Added in 2.17.0 alongside ``src/concinno/__main__.py``. The ``concinno``
 console script (via ``[project.scripts]``) was already shipped; this
 test guards the equivalent ``python -m concinno`` convention that a lot
 of scripts rely on (e.g. CI that pins a specific Python).
@@ -8,8 +8,23 @@ of scripts rely on (e.g. CI that pins a specific Python).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+
+
+def _child_env() -> dict[str, str]:
+    """Minimal env for subprocess invocation of ``python -m concinno``.
+
+    Passes through PATH (so python can find itself) + PYTHONPATH (so the
+    in-tree ``src/concinno`` wins over any installed copy) + UTF-8
+    enforcement flags so Windows GBK locale doesn't corrupt the CLI's
+    emoji-bearing help text.
+    """
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
 
 
 def test_main_module_help_exits_zero() -> None:
@@ -21,7 +36,7 @@ def test_main_module_help_exits_zero() -> None:
         encoding="utf-8",
         errors="replace",
         timeout=30,
-        env={**_child_env()},
+        env=_child_env(),
     )
     assert result.returncode == 0, (
         f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
