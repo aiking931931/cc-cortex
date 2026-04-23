@@ -317,6 +317,30 @@ Concinno uses a single `cc_config.json` file:
 
 See [examples/cc_config_example.jsonc](examples/cc_config_example.jsonc) for a fully annotated configuration.
 
+### Upgrade Safety (2.16.0+)
+
+**Guarantee**: `pip install --upgrade concinno` never resets user-set values
+in `~/.concinno/*.json` or `~/.claude/*.json`. Your opt-outs survive.
+
+How it works:
+
+- User-tunable values live in `~/.concinno/<feature>.json` — the package
+  install process touches `site-packages/` only, never your home directory.
+- When a new Concinno version ships with different defaults for an existing
+  key (e.g. `release_auth.disabled=False` → user still sees their set
+  `True`), `concinno.config_preservation.preserve_user_values` merges the
+  two dicts with **user scalar always wins**. New keys from the upgrade
+  are added; existing keys keep their user values.
+- `safe_write_config` is atomic (temp-file + `os.replace`) with rotating
+  backups (`.bak.1` / `.bak.2` / `.bak.3`).
+- Corrupted JSON files are **never** silently overwritten — the package
+  emits a stderr warning and falls back to in-memory defaults, leaving
+  the user's file untouched.
+
+Regression test: `tests/test_config_survives_upgrade.py` locks this
+invariant with 25 pytest cases — CI fails if a future PR breaks the
+guarantee.
+
 ---
 
 ## Observability & Audit Logs

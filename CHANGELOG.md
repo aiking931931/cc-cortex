@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-04-23
+
+Minor: **switch visibility + upgrade safety** — AI King 2026-04-23 directive
+鎖定「每次授權都在問很煩」+「所有功能都是有開關和自訂參數」+「PIP 更新時
+保持用戶設定原樣」+「開關不能形同虛設」。四項 CLI + regression test 一次交
+付，`pip install --upgrade concinno` 從此不會覆蓋用戶 opt-out。
+
+### Added
+
+- **`concinno session-switches`** (`src/concinno/cli/session_switches_cmd.py`,
+  ~310 LOC) — SessionStart hook payload 產生器，emit top-10 critical switch
+  的 **non-default** 值摘要，塞進 agent system context 防 primacy-bias 忽略
+  用戶設定（MEMORY #71 根治）。三種輸出格式：`--format=text`（人讀）/
+  `--format=json`（ops pipeline）/ `--format=hook`（stderr-safe 一行塞
+  SessionStart）。Top-10 涵蓋 `release_auth.disabled` / `destruction_guard.enabled`
+  / `handoff_mode` / `toast_notify.enabled` / `locale` / `auto_commit.enabled`
+  / `sweep_guard.enabled` / `butterfly_guard.enabled` / `wiredo.enabled` /
+  `premise_gate.enabled+mode`。用戶可透過 `~/.concinno/session_switches.json`
+  覆寫 `top_n` 或加 `extra_switches` 列表。
+- **`concinno configure-permissions`** (`src/concinno/cli/configure_permissions_cmd.py`,
+  ~320 LOC) — 一鍵把 ~100 條安全 Bash pattern（pytest / ruff / mypy / git
+  status / pip show / python -m build / twine check 等）合併進
+  `~/.claude/settings.json::permissions.allow`，解決「每次授權都在問」痛點。
+  `--preserve-destructive`（預設 ON）保證 `rm -rf` / `git push --force` /
+  `pip uninstall` 等 destructive pattern **絕不進 allow[]**，destruction_guard
+  仍是最後防線。`--publish` opt-in 才加 `twine upload` / `npm publish` 類不
+  可逆 pattern（預設 OFF，保留 host 的不可逆 publish 防呆）。Backup
+  `~/.claude/settings.json.backup-<ISO>` + atomic `os.replace`，merge 不
+  overwrite 既有 allow[]/ask[]/deny[]。
+- **`concinno publish <pkg> <ver>`** (`src/concinno/cli/publish_cmd.py`,
+  ~340 LOC) — 用戶自己終端跑的 PyPI publish CLI，不經 Claude Code host
+  permission gate（host 管不到 user shell）。Pending Publish Queue record 讀取
+  → artifact 驗證（wheel + sdist + `twine check`）→ `release_auth.disabled=True`
+  自動通過 OR `disabled=False` 打 `yes` 確認 → `twine upload --disable-progress-bar`
+  (Windows GBK locale 硬化，MEMORY #34b)。支援 `concinno` 核心 + 任何
+  `concinno-skills-*` sub-package（從 `pyproject.toml::[project].name` 自動偵
+  測）。`--dry-run` 跑完所有 gate 不 upload。
+- **`concinno.config_preservation`** (`src/concinno/config_preservation.py`,
+  ~250 LOC) — 升級 invariant 層：`preserve_user_values` 保證用戶已設值不被
+  新預設覆蓋、`safe_write_config` atomic temp+rename + 3-gen rotating backup、
+  `assert_preservation_invariant` 回歸測試用。所有 user config 存
+  `~/.concinno/<feature>.json`，**pip 安裝永不碰 user home 那層檔案**。
+  Corrupted JSON 政策 = fail-safe（警告 stderr，記憶體 fallback default，不
+  覆寫用戶的壞檔；由用戶決定是否手動修）。
+- **`tests/test_config_survives_upgrade.py`** (~220 LOC, 25 test) — 硬化
+  `pip install --upgrade concinno` 用戶值不被 reset 的保證。涵蓋 1.0→2.16.0
+  升級模擬、巢狀 dict 遞迴 merge、forward-compat（用戶有新版不認的 key 也保
+  留）、malformed JSON 不覆蓋、空目錄 lazy create。
+
+### Infrastructure
+
+- `feature_config.FEATURE_META` 新增兩個 entry：`session_switches`（top_n /
+  hook_format_compact）與 `configure_permissions`（publish_opt_in /
+  preserve_destructive），兩者 `ziq_autotunable=False` + `cosmetic=False`。
+- `core/config.py::_DEFAULTS.features` 新增對應 default block，所有參數
+  source chain 支援（rule default → FEATURE_META → project
+  cc_config.json → `~/.concinno/<feature>.json` → env var → user 本 session）。
+- `cli/main.py` 三個 sub-parser 註冊（`session-switches` / `configure-permissions`
+  / `publish`）lazy-import 避免 cold-start 拉 heavy deps。
+- 87 個新 test（session_switches 19 + configure_permissions 21 + publish 22 +
+  config_survives_upgrade 25），全綠 1.57s local。ruff clean。
+
+### Changed
+
+- `~/.claude/rules/switches.md` index 新增 `session_switches` + `configure_permissions`
+  兩條 row（索引層完整度 20→22 個 feature）。
+- `CLAUDE.md` Hard Rule #7 補上「`test_config_survives_upgrade` 回歸保證」
+  文案（Concinno 2.16.0+ 契約）。
+
+### Notes
+
+- 本版 ship 前必 merge pod's GAIA work（`docs/pod-merge-2.16.0.md` 協調
+  checklist）。本 commit 只把 core-library 4 feature 準備 ready-to-publish，
+  實際 twine upload 留給 pod-merge 完成後的 ship session。
+- `release_authorization.disabled=True` 的用戶從 2.16.0 起**真的**不會再被
+  問 publish 授權字串（gate 檢查順序 L1 rule 已硬化在 2.12.x，這版補上
+  (a) session-start 把狀態塞進 agent context (b) user 自終端自由 publish CLI
+  (c) upgrade 不 reset 用戶 disabled=True）。
+
 ## [2.15.1] - 2026-04-22
 
 Patch: restore `concinno.core.credentials` module in the PyPI wheel.

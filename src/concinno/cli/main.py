@@ -1412,6 +1412,14 @@ def main() -> None:
     from .convention_cmd import register as _register_convention
     _register_convention(sub)
 
+    # 2.16.0 — session-switches / configure-permissions / publish
+    from .configure_permissions_cmd import register as _register_cfg_perms
+    from .publish_cmd import register as _register_publish
+    from .session_switches_cmd import register as _register_switches
+    _register_switches(sub)
+    _register_cfg_perms(sub)
+    _register_publish(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)

@@ -3,24 +3,65 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-22 — **2.15.1 LIVE**）
+## 現況 snapshot（2026-04-23 — **2.16.0 ready-to-ship，等 pod-merge**）
 
 | 欄位 | 值 |
 |---|---|
-| Registry latest (PyPI) | `2.15.1` (2026-04-22 ship，credentials wheel fix patch) |
-| `pyproject.toml` version | `2.15.1` |
-| `src/concinno/__init__.py __version__` | `2.15.1` |
-| CHANGELOG.md 最新 release heading | `## [2.15.1] - 2026-04-22` |
-| 三源對齊狀態 | ✅ 三源互相對齊 2.15.1 |
-| 本地 commit | `4b2324c` (patch: restore concinno.core.credentials module) |
-| 本地 tag | `v2.15.1` (pushed origin 2026-04-22) |
-| Pending Publish Queue | 空（2.15.0 + 2.15.1 都已 published；release_auth.json `disabled=true` 全鏈 auto）|
-| 上個版本 | `2.15.0` — Agent skill ecosystem Phase 0 (daemon + plugin discovery + credentials + MCP bridge + 5 ref tool + 4 meta-skill) |
+| Registry latest (PyPI) | `2.15.1` (2026-04-22) |
+| `pyproject.toml` version | `2.16.0` |
+| `src/concinno/__init__.py __version__` | `2.16.0` |
+| CHANGELOG.md 最新 release heading | `## [2.16.0] - 2026-04-23` |
+| 三源對齊狀態 | ✅ 三源對齊 2.16.0 |
+| 本地 commit | 待 Phase 4 commit (switch-visibility + upgrade-safety 4 feature) |
+| 本地 tag | 待 Phase 4 `v2.16.0` (local only，pod-merge 後才 push) |
+| Pending Publish Queue | **2.16.0 ready-to-publish**（等 pod GAIA branch merge；不可逆 twine upload 留給 merge 完成後 session）|
+| 上個版本 | `2.15.1` — credentials wheel fix patch |
 | 下游 sub-package | [`concinno-skills-google`](../concinno-skills-google/) 0.1.0 ready-to-publish（GoogleCalendar tool 示範 entry_points 生態，等用戶字串 + 新 PyPI token）|
 
 ## Pending Publish Queue (current)
 
 ```yaml
+- version: "2.16.0"
+  state: ready-to-publish
+  queued_by:
+    session: 2026-04-23-switch-visibility-upgrade-safety
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-04-23T00:00+08:00
+  artifacts:
+    wheel: TBD (run `python -m build` after pod-merge)
+    sdist: TBD
+    twine_check: PENDING
+    built_from: TBD (commit Phase 4 交付後填)
+  verification:
+    tests_targeted: "4 new test files: session_switches 19 + configure_permissions 21 + publish 22 + config_survives_upgrade 25 = 87/87 pass in 1.57s"
+    tests_full: PENDING (pod-merge 後在 CI / RunPod 跑)
+    ruff: clean (所有新檔)
+    mypy: not-yet-verified (待 pod-merge 後整批跑)
+    triple_source_aligned: true (pyproject / __init__.py / CHANGELOG 全 2.16.0)
+    redteam_review: SKIPPED (user directive auto mode + CP-optimal single-session delivery)
+  blocking_on:
+    - pod_gaia_branch_merge          # docs/pod-merge-2.16.0.md coordination
+    - full_regression_on_ci_or_runpod  # 本機鐵律禁大規模 test
+    - commit_phase_4_delivery          # working tree 未 commit
+  suggested_command: |
+    # Pod-merge 完成後、本地 ship session 內執行：
+    #   python -m build
+    #   twine check dist/concinno-2.16.0*
+    #   twine upload --disable-progress-bar dist/concinno-2.16.0*
+    #   git tag v2.16.0 && git push origin v2.16.0
+    # 或透過本版新 CLI:
+    #   concinno publish concinno 2.16.0
+  expires_at: 2026-04-30T00:00+08:00  # +7d，過期 artifacts 重建
+  notes: |
+    AI King 2026-04-23 directive 四項交付：
+      1. session-switches CLI — SessionStart hook payload 解 MEMORY #71
+         primacy-bias 違反
+      2. configure-permissions CLI — 一鍵 ~100 條安全 bash pattern 解「每次授權都在問很煩」
+      3. publish CLI — 用戶自終端 twine upload 繞過 host permission gate
+      4. config_preservation — pip upgrade 不 reset 用戶 opt-out 的回歸測試
+    所有 feature 符合 CLAUDE.md Hard Rule #7 六點 DoD；user config 存
+    `~/.concinno/<feature>.json` 保證 pip install --upgrade concinno 不碰。
+
 - version: "2.15.0"
   state: ready-to-publish
   queued_by:
@@ -158,6 +199,26 @@ vs local git diff → 有 delta 即孤兒警訊。
 - `src/concinno/tools/builtin/python_exec.py` + 22 tests（AST + builtin whitelist sandbox）
 - `src/concinno/tools/builtin/date_calc.py` + 14 tests（delta / parse / format，stdlib-only）
 - Release 只 scope `projects/concinno/`，其他不動
+
+## WIP idea backlog（尚未實作，下次 minor 一起考慮）
+
+- **`concinno doctor --fix-settings`**：偵測 `~/.claude/settings.json` JSON
+  損壞（多餘 `}` / trailing comma / UTF-8 BOM）自動修，rebuild permission +
+  hook 結構。
+  - 起源：2026-04-22 session cc_76bb user 被「Settings file failed to
+    parse」toast 擋，根因 line 174 多 `}` — python/node 都能秒偵測秒修，但
+    用戶看到的 CC toast 是 sticky 的（session restart 前不消失）。
+  - Scope：CLI 子命令 `concinno doctor` + 兩模式（`--check` read-only /
+    `--fix` write-back with backup）。Backup 走 `concinno.BackupManager`。
+- **Additional dirs auto-hint guard**：Read tool deny 若看起來是 path 超出
+  `additionalDirectories`（而非 permission rule 缺），在 stderr 提示一行
+  `concinno: path <X> 不在 additionalDirectories；加入
+  ~/.claude/settings.json::permissions.additionalDirectories 即可`。
+  - 起源：同 session，用戶明示指路 `E:\Z_one\所有API.md` 仍被擋，且誤診為
+    「hook 擋讀」— 實際是 CC 內建 path scope，hook 無辜。提示層把診斷時間
+    從 5 min 降到 5 s。
+  - Scope：PostToolUse hook（Read + deny decision + path 分析）。不 deny、
+    不 fix、只 hint。
 
 ## ⛔ 鐵律（Concinno 專屬）
 

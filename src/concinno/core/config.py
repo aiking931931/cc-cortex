@@ -135,6 +135,18 @@ _DEFAULTS = {
             "enabled": True,
             "language": "English",
         },
+        # 2.16.0 — SessionStart switch summary
+        "session_switches": {
+            "enabled": True,
+            "top_n": 10,
+            "hook_format_compact": True,
+        },
+        # 2.16.0 — one-shot safe allowlist bootstrap
+        "configure_permissions": {
+            "enabled": True,
+            "publish_opt_in": False,
+            "preserve_destructive": True,
+        },
     },
     "deny_stderr": True,
     "lint_rules": [],

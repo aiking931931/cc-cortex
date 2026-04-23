@@ -759,6 +759,76 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # ── 2.16.0 — Session summary CLI + permission bootstrap ──
+    "session_switches": {
+        "category": "context",
+        "description": (
+            "SessionStart summary of non-default switches — ensures the agent "
+            "reads user opt-outs before primacy-bias kicks in"
+        ),
+        "description_zh": (
+            "Session 開始時把非預設 switch 值摘要進 agent context，"
+            "避免 primacy bias 忽略用戶設定"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "top_n": {
+                "type": "int",
+                "default": 10,
+                "min": 1,
+                "max": 30,
+                "recommended": 10,
+                "risk_low": "top_n=0 produces empty output — hook becomes noop",
+                "risk_high": "top_n>30 floods agent context",
+            },
+            "hook_format_compact": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Verbose hook output consumes extra tokens in every "
+                    "SessionStart — fine for dev, expensive in prod"
+                ),
+            },
+        },
+    },
+    "configure_permissions": {
+        "category": "utility",
+        "description": (
+            "One-shot allowlist bootstrap — add ~100 safe Bash patterns "
+            "(pytest/ruff/git/pip) to ~/.claude/settings.json so the agent "
+            "stops being prompted for routine ops"
+        ),
+        "description_zh": (
+            "一次把 ~100 條安全 Bash pattern (pytest/ruff/git/pip) 加進 "
+            "~/.claude/settings.json，避免每次日常操作都被 prompt"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "publish_opt_in": {
+                "type": "bool",
+                "default": False,
+                "recommended": False,
+                "risk_off": (
+                    "Default OFF protects against accidental publish "
+                    "bypass; enable only if you trust the agent to never "
+                    "twine upload unintentionally"
+                ),
+            },
+            "preserve_destructive": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Setting this False would let rm -rf / git push --force "
+                    "into allow[] — destruction_guard is the last line of "
+                    "defense, do not disable"
+                ),
+            },
+        },
+    },
     # ── Language Enforcement ──
     "language_enforce": {
         "category": "context",
