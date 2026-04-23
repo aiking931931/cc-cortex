@@ -88,36 +88,50 @@ the exact bytes fetched, no resizing, no re-compression, no
 pixel-level transform. If Ollama ever adds URL passthrough we can
 add a fast-path without breaking the marker protocol.
 
-### Roadmap (2.19+) — not in this ship
+### Roadmap split — Concinno (library) vs Sancio (runtime)
 
-AI King 2026-04-23 follow-up: Concinno should bind to Ollama
-natively (and to any local model host with the same capability
-table) rather than go through a remote OpenAI-compat API, plus
-surface an auto-router that prefers the highest-fidelity modality-
-capable target and degrades to a text+caption fallback when the
-brain LLM is text-only. Scope:
+AI King 2026-04-23 boundary directive reaffirms the
+`CLAUDE.md` routing rule: "Can CC do it?" is the single test. CC
+consumers can run any Concinno library primitive in-process, so
+`Tool` / `FormatGuard` / `parse_image_marker` live in Concinno.
+But CC cannot bind to a local Ollama in place of Anthropic —
+that's a runtime substitution CC doesn't expose. So:
 
-1. `concinno.providers.ollama_native` — direct HTTP to Ollama using
-   the native `{"images":[<b64>, …]}` request shape (bypasses the
-   OpenAI-compat translation when both ends are Ollama).
-2. `concinno.providers.router` — reads a capability matrix
-   (text / vision / audio / tools / thinking) and picks the top-
-   rank target satisfying the current request's modality needs.
-   Auto-fallback chain example: `ollama:gemma4-26b` (vision ✅)
-   → `anthropic:claude-sonnet-4-6` (vision ✅) → text-only fallback
-   with upstream captioning hop.
-3. Audio / video modality blocks following the same marker +
-   provider-split pattern as `fetch_image`. Tool name convention
-   `fetch_audio` / `fetch_video`. Gemma 4 has an audio projector
-   in upstream but Ollama has not yet exposed it; the router
-   should degrade gracefully until that lands.
-4. Capability probe: call `/api/show` at provider init and cache
-   `{model: Capabilities}` so the router doesn't hard-code any
-   model's supported modalities.
+**Concinno 2.19+ (library extensions — CC-compatible):**
 
-This 2.18 ship carries the tool + marker protocol + Sancio
-provider transform that make (1)–(4) trivial extensions. None of
-them breaks the 2.18 API surface.
+1. `fetch_audio` / `fetch_video` built-ins following the same
+   marker + base64 pattern as `fetch_image`. Gemma 4 has an audio
+   projector in upstream; the tool lands before Ollama exposes
+   it so consumers are ready when the capability flips on.
+2. `concinno.agent.capabilities.ModelCapabilities` enum + helper
+   table + `has_capability(model_id, "vision") -> bool` pure
+   function. CC consumers who swap models can ask the same
+   question the Sancio router asks (just without actually doing
+   the swap).
+3. Extend `parse_image_marker` to `parse_media_markers` so one
+   pass splits any modality block (image / audio / video) into
+   the correct OpenAI-compat `{type:...}` shape.
+
+**Sancio 0.4+ (runtime features — CC ceiling, can't live in
+Concinno):**
+
+1. `persona.providers.ollama_native` — direct HTTP to Ollama using
+   the native `{"images":[<b64>, …]}` request shape, skipping the
+   OpenAI-compat translation round-trip entirely when Sancio is
+   co-located with Ollama. CC can't swap providers at runtime, so
+   this is Sancio-only.
+2. `persona.providers.router` — reads the Concinno capability
+   table and picks the top-rank provider satisfying the current
+   request's modality needs. Auto-fallback chain:
+   `ollama-native:gemma4-26b` (vision ✅) →
+   `anthropic:claude-sonnet-4-6` (vision ✅, paid) →
+   `ollama-native:gemma4-latest` (text-only) + captioning hop.
+3. Capability probe via `/api/show` cached per provider init,
+   degrade gracefully when a requested modality isn't available.
+
+This 2.18 ship carries the tool + marker protocol that makes both
+tracks trivial extensions, without baking a CC-incompatible
+runtime substitution into Concinno itself.
 
 ### Testing
 
