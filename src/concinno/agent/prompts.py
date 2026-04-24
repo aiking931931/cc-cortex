@@ -91,15 +91,15 @@ AGENT_GUIDANCE_EXACT_UNIT = (
 )
 
 AGENT_GUIDANCE_FACTUAL_COUNT = (
-    "This question asks for a factual count or number that depends "
-    "on real-world data (publication totals, database records, "
-    "annual statistics). Do NOT estimate or invent the count. Call "
-    "web_search with specific query phrasings (e.g. 'number of "
-    "research articles published by <journal> in <year>', 'total "
-    "papers <journal> <year> count') and consult a primary source "
-    "(publisher's annual report, database query, authoritative "
-    "listing) before computing. If two sources disagree, prefer the "
-    "publisher's own report."
+    "Factual count question. Do NOT estimate. For a person's "
+    "catalogued works (albums, books, films), make ONE call to "
+    "fetch_wikipedia_section with the subject's name and the exact "
+    "section header. That returns only that section's text, so "
+    "count entries in the date range directly. Avoid fetch_url on "
+    "the discography sub-article — it often splits double releases "
+    "and disagrees with the main article. For non-catalogue counts, "
+    "consult the publisher's primary source via web_search. Commit "
+    "FINAL ANSWER after ONE successful lookup."
 )
 
 AGENT_GUIDANCE_PDB_FILE_ORDER = (

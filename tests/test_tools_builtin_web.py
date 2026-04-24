@@ -229,6 +229,51 @@ class TestFetchUrlTool:
         assert "good" in out
         assert "evil" not in out
 
+    def test_default_client_sets_polite_user_agent(self):
+        """When ``client=None`` the auto-created ``httpx.Client``
+        must identify itself to avoid 403s from Wikimedia and similar
+        hosts that reject the bare ``python-httpx/X`` default UA.
+
+        Regression guard for the GAIA #7 Mercedes Sosa smoke where
+        ``fetch_url`` on ``en.wikipedia.org`` returned 403 until the
+        anchor guidance started routing traffic through this tool.
+        """
+        captured_kwargs: dict[str, object] = {}
+
+        class _SpyClient:
+            def __init__(self, **kwargs):
+                captured_kwargs.update(kwargs)
+
+            def get(self, _url):
+                class _R:
+                    status_code = 200
+                    headers = {"content-type": "text/plain"}
+                    reason_phrase = "ok"
+                    text = "body"
+                    content = b"body"
+                    encoding = "utf-8"
+                return _R()
+
+            def close(self):
+                pass
+
+        import httpx as _httpx
+
+        real_client = _httpx.Client
+        _httpx.Client = _SpyClient  # type: ignore[assignment]
+        try:
+            tool = FetchUrlTool()
+            tool.call(url="https://example.com/")
+        finally:
+            _httpx.Client = real_client  # type: ignore[assignment]
+
+        headers = captured_kwargs.get("headers")
+        assert isinstance(headers, dict)
+        ua = headers.get("User-Agent", "")
+        assert "concinno" in ua.lower()
+        # URL pointer so Wikimedia operators can trace the tool
+        assert "http" in ua.lower()
+
     def test_html_strip_removes_style_tags(self):
         out = strip_html("<style>body{color:red}</style><p>visible</p>")
         assert "visible" in out

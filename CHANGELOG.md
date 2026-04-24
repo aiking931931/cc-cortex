@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.34.0] - 2026-04-25
+
+### Added — `fetch_wikipedia_section` builtin tool
+
+New single-call tool that collapses the three-step lookup
+sequence ("web_search → identify URL → fetch_url → locate section
+→ count entries") into one structured call:
+`fetch_wikipedia_section(subject, section)` returns only that
+section's plain text, HTML stripped, capped at 8000 chars.
+
+Motivation: field tests on GAIA #7 (Mercedes Sosa studio album
+count) showed that weak models (Gemma4-Q4_K_M 26B) fail to emit a
+valid multi-step pipeline — they either loop on `web_search`
+variations ("I'll use web_search to find URL" × 23k chars) or
+resolve the wrong sub-article (`/Mercedes_Sosa_discography` has 5
+rows vs the main article's 3). Collapsing the pipeline into one
+call makes the question tractable for a weak model: after the
+change, Gemma4-26B PASSes #7 (got="3" vs exp="3") on a single
+seed-42 smoke.
+
+Implementation notes:
+
+- Uses the MediaWiki `action=parse` API in two hops (TOC →
+  specific section HTML) rather than the deprecated
+  `/api/rest_v1/page/mobile-sections/` endpoint (returns 404).
+- Carries a polite User-Agent (`concinno/2.34 …`) — the bare
+  `python-httpx/X` default UA is a 403 magnet on Wikimedia APIs.
+- Section matching is case-insensitive with exact > startswith >
+  substring fall-through, tolerating weak-model imprecision
+  ("studio" → "Studio albums").
+- Registered in `concinno.tools.builtin` exports and wired into
+  Sancio's `default_tools()` as `fetch_wikipedia_section`.
+
+Tests in `tests/test_tools_builtin_wiki.py` cover protocol
+conformance, URL canonicalisation, section matching (exact /
+prefix / substring / miss), HTTP error shaping, the missingtitle
+JSON-payload error path, output cap, and polite-UA regression.
+
+### Changed — `AGENT_GUIDANCE_FACTUAL_COUNT` anchor updated
+
+The anchor now directs the model to use the new
+`fetch_wikipedia_section` tool for catalogued-works counts
+(albums / books / films), replacing the previous multi-step
+"fetch_url + manual section-finding" instruction that weak models
+could not reliably execute. Non-catalogue counts still fall back
+to the publisher's primary source via `web_search`.
+
+Word count reduced from ~100 to 77 to stay within the MEMORY #92
+anchor budget. Tests still cover `web_search` / `primary source` /
+`Do NOT estimate` keywords.
+
+Regex (`_FACTUAL_COUNT_PATTERN`) and anchor registration in
+`ANCHOR_PATTERNS` unchanged.
+
+### Fixed — `FetchUrlTool` User-Agent for Wikimedia APIs
+
+The auto-created `httpx.Client` now sets a polite User-Agent
+identifying the tool (`concinno/2.34 …`). Without this, Wikipedia
+and other Wikimedia-hosted APIs return 403 to `python-httpx/X`.
+Pre-existing bug that blocked any GAIA task trying to fetch an
+English Wikipedia URL via `fetch_url`.
+
+### Known gap — anchor injection is still regex-gated, not ZIQ-gated
+
+`ANCHOR_PATTERNS` still injects guidance unconditionally on regex
+match, burning 3-10k tokens per question even when the model
+already knows the answer from its parametric memory. See MEMORY
+#107 for the full gap and the planned `AnchorEntry(
+confidence_gate=…)` schema slated for 2.35+.
+
 ## [2.33.0] - 2026-04-24
 
 ### Added — scaffold alignment with 2.31.0 entry-points groups

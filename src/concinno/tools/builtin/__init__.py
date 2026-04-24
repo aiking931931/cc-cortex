@@ -38,6 +38,7 @@ from .shell import (
     ShellTimeoutError,
 )
 from .sql import DuckDbQuery, SqlToolError
+from .wiki import FetchWikipediaSectionTool
 
 __all__ = [
     # file_io
@@ -77,4 +78,6 @@ __all__ = [
     # rss
     "RssFetch",
     "RssToolError",
+    # wiki
+    "FetchWikipediaSectionTool",
 ]
