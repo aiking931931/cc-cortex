@@ -13,7 +13,6 @@ from concinno.tools.builtin.sql import (
     _strip_sql_comments,
 )
 
-
 # --------------------------------------------------------------------------- #
 # Safety filter unit tests — run without duckdb installed.                    #
 # --------------------------------------------------------------------------- #

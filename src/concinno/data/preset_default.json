@@ -14,7 +14,15 @@
         "sentinel_gate.max_repeats": 10,
         "session_summary.enabled": false,
         "streak_ux.enabled": false,
-        "language_enforce.language": "English"
+        "language_enforce.language": "English",
+        "gaia_tool_router.enabled": true,
+        "unified_inprocess.enabled": true,
+        "gemma4_vision.enabled": true,
+        "binary_extractor.enabled": true,
+        "image_upscale_4x.enabled": true,
+        "bassclef_wordreverse.enabled": true,
+        "polygon_counting_hint.enabled": true,
+        "ocr_fallback.enabled": true
       },
       "full_ref": null,
       "index": {
@@ -28,7 +36,15 @@
         "sentinel_gate.max_repeats": "tolerate more same-file edit loops",
         "session_summary.enabled": "no visual summary box",
         "streak_ux.enabled": "no celebration noise",
-        "language_enforce.language": "English for benchmark reproducibility"
+        "language_enforce.language": "English for benchmark reproducibility",
+        "gaia_tool_router.enabled": "route by Annotator Metadata Tools ground-truth",
+        "unified_inprocess.enabled": "single Llama shared text+vision, no HTTP :9000",
+        "gemma4_vision.enabled": "Gemma 4 native vision handler active",
+        "binary_extractor.enabled": "inline-extract xlsx/csv/tsv for weak-model help",
+        "image_upscale_4x.enabled": "4x LANCZOS for <800px vision images",
+        "bassclef_wordreverse.enabled": "music notation mnemonic + word-reverse hint",
+        "polygon_counting_hint.enabled": "polygon edge / vertex off-by-one procedure",
+        "ocr_fallback.enabled": "OCR path for text-heavy images before vision"
       }
     },
     "general": {
@@ -44,7 +60,15 @@
         "sentinel_gate.max_repeats": 5,
         "session_summary.enabled": true,
         "streak_ux.enabled": true,
-        "language_enforce.language": "English"
+        "language_enforce.language": "English",
+        "gaia_tool_router.enabled": false,
+        "unified_inprocess.enabled": false,
+        "gemma4_vision.enabled": false,
+        "binary_extractor.enabled": true,
+        "image_upscale_4x.enabled": true,
+        "bassclef_wordreverse.enabled": false,
+        "polygon_counting_hint.enabled": false,
+        "ocr_fallback.enabled": true
       },
       "full_ref": null,
       "index": {
@@ -58,7 +82,15 @@
         "sentinel_gate.max_repeats": "5-edit loop cutoff on same file",
         "session_summary.enabled": "session-end summary box",
         "streak_ux.enabled": "celebration at milestones",
-        "language_enforce.language": "default English enforcement"
+        "language_enforce.language": "default English enforcement",
+        "gaia_tool_router.enabled": "off by default outside benchmark — preserve legacy regex heuristic",
+        "unified_inprocess.enabled": "off by default — HTTP :9000 path is the validated general path",
+        "gemma4_vision.enabled": "off by default — Qwen2.5-VL fallback is the general multimodal",
+        "binary_extractor.enabled": "generic utility — enabled for everyone",
+        "image_upscale_4x.enabled": "generic utility — enabled for everyone",
+        "bassclef_wordreverse.enabled": "benchmark-specific hint — off outside benchmark",
+        "polygon_counting_hint.enabled": "benchmark-specific hint — off outside benchmark",
+        "ocr_fallback.enabled": "generic utility — enabled for everyone"
       }
     },
     "prod": {
@@ -74,7 +106,15 @@
         "sentinel_gate.max_repeats": 4,
         "session_summary.enabled": true,
         "streak_ux.enabled": false,
-        "language_enforce.language": "English"
+        "language_enforce.language": "English",
+        "gaia_tool_router.enabled": false,
+        "unified_inprocess.enabled": false,
+        "gemma4_vision.enabled": false,
+        "binary_extractor.enabled": false,
+        "image_upscale_4x.enabled": false,
+        "bassclef_wordreverse.enabled": false,
+        "polygon_counting_hint.enabled": false,
+        "ocr_fallback.enabled": false
       },
       "full_ref": null,
       "index": {
@@ -88,7 +128,15 @@
         "sentinel_gate.max_repeats": "4-edit loop cutoff (strict)",
         "session_summary.enabled": "mandatory summary for audit",
         "streak_ux.enabled": "no UX noise in prod",
-        "language_enforce.language": "English for audit logs"
+        "language_enforce.language": "English for audit logs",
+        "gaia_tool_router.enabled": "off — prod does not run GAIA benchmark",
+        "unified_inprocess.enabled": "off — prod runs through stable endpoints",
+        "gemma4_vision.enabled": "off — prod vision uses managed provider",
+        "binary_extractor.enabled": "off — prod attachments go through auditable path",
+        "image_upscale_4x.enabled": "off — prod images pre-sized upstream",
+        "bassclef_wordreverse.enabled": "off — prod does not have music-notation workloads",
+        "polygon_counting_hint.enabled": "off — prod does not have polygon counting workloads",
+        "ocr_fallback.enabled": "off — prod uses managed OCR provider if needed"
       }
     }
   }

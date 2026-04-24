@@ -202,6 +202,101 @@ def fieldread_extract(full_text: str, question: str,
     return "\n\n".join(selected)
 
 
+# ── Binary / non-text attachment guidance ─────────────────
+_BINARY_LIB_HINTS: dict[str, str] = {
+    "xlsx": "openpyxl.load_workbook(path, data_only=True)",
+    "xlsm": "openpyxl.load_workbook(path, data_only=True)",
+    "xls": "pandas.read_excel(path)",
+    "csv": "pandas.read_csv(path) or csv.reader(open(path))",
+    "tsv": "pandas.read_csv(path, sep='\\t')",
+    "pdf": "pypdf.PdfReader(path) or pdfplumber.open(path)",
+    "docx": "docx.Document(path)  # python-docx",
+    "pptx": "pptx.Presentation(path)  # python-pptx",
+    "json": "json.load(open(path))",
+    "xml": "xml.etree.ElementTree.parse(path)",
+    "zip": "zipfile.ZipFile(path)",
+    "tar": "tarfile.open(path)",
+    "gz": "gzip.open(path, 'rb')",
+    "sqlite": "sqlite3.connect(path)",
+    "db": "sqlite3.connect(path)",
+    "parquet": "pandas.read_parquet(path)",
+    "mp3": "librosa.load(path) or pydub.AudioSegment.from_mp3(path)",
+    "wav": "wave.open(path) or librosa.load(path)",
+    "mp4": "cv2.VideoCapture(path) or moviepy.editor.VideoFileClip(path)",
+}
+
+
+def build_binary_attachment_hint(file_path: str) -> str:
+    """Compose an agent-facing hint for binary/non-image attachments.
+
+    Runners that cannot inline-extract file bytes (xlsx / pdf / docx / zip /
+    audio / ...) pass ``file_content="__BINARY__"`` plus the local
+    ``file_path``; this hint tells the model how to access the bytes via
+    ``code_exec`` rather than pretending there is no attachment.
+    """
+    if not file_path:
+        return "[Attached file: path missing]"
+    if not os.path.exists(file_path):
+        return f"[Attached file at {file_path} — path not found on disk]"
+    size = os.path.getsize(file_path)
+    ext = os.path.splitext(file_path)[1].lstrip(".").lower()
+    lib_hint = _BINARY_LIB_HINTS.get(
+        ext,
+        f"open({file_path!r}, 'rb') or a standard-library "
+        f"reader appropriate for .{ext}",
+    )
+    return (
+        f"[Attached file: path={file_path}, size={size} bytes, "
+        f"ext=.{ext}. Use code_exec with {lib_hint} to read it. "
+        f"Do NOT answer without actually opening and parsing the file.]"
+    )
+
+
+def extract_tabular_attachment_text(
+    file_path: str, max_chars: int = 8000
+) -> str | None:
+    """Extract structured tabular attachments (xlsx/csv/tsv) to plain text.
+
+    Weak models (Gemma 4 Q4_K_M) often short-circuit to FINAL ANSWER
+    instead of invoking code_exec when told "use openpyxl first", so for
+    deterministic tabular formats we pre-extract on the agent layer and
+    surface the data inline — the model reasons over visible rows rather
+    than being asked to tool-use. Returns ``None`` for unsupported formats
+    or on extraction failure; caller falls back to the hint path.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return None
+    ext = os.path.splitext(file_path)[1].lstrip(".").lower()
+    try:
+        if ext in ("xlsx", "xlsm"):
+            import openpyxl  # optional dep
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            lines = []
+            for sh in wb.sheetnames:
+                ws = wb[sh]
+                lines.append(
+                    f"=== Sheet {sh!r} "
+                    f"({ws.max_row}R x {ws.max_column}C) ==="
+                )
+                for row in ws.iter_rows(values_only=True):
+                    lines.append(
+                        "\t".join(
+                            "" if c is None else str(c) for c in row
+                        )
+                    )
+            text = "\n".join(lines)
+        elif ext in ("csv", "tsv"):
+            with open(file_path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        else:
+            return None
+        if len(text) > max_chars:
+            return text[:max_chars] + "\n[...truncated]"
+        return text
+    except Exception:
+        return None
+
+
 # ── Model Backend ─────────────────────────────────────────
 class ModelBackend:
     def __init__(self, model: str = "gemma"):
@@ -218,6 +313,10 @@ class ModelBackend:
         return self._anthropic_chat(system, messages, max_tokens)
 
     def _gemma_chat(self, system, messages, max_tokens):
+        if os.environ.get("GEMMA_UNIFIED_INPROCESS", "").lower() in (
+            "1", "true", "yes"
+        ):
+            return self._gemma_chat_inprocess(system, messages, max_tokens)
         client = _get_openai()
         msgs = [{"role": "system", "content": system}] + messages
         try:
@@ -237,6 +336,34 @@ class ModelBackend:
             return content
         except Exception as e:
             print(f"  [gemma error] {e}", flush=True)
+            return ""
+
+    def _gemma_chat_inprocess(self, system, messages, max_tokens):
+        """Text chat via the same in-process Llama instance used by vision.
+
+        Gemma 4 + mmproj handler can answer pure-text queries too —
+        the handler's CHAT_FORMAT renders string content without any
+        image_url block. One Llama load serves both modalities
+        (MEMORY #98 Sancio directive 最終形, 單一 weights 服務
+        text+vision，省 VRAM 50% vs 兩 instance co-resident).
+        """
+        try:
+            llm = _get_local_vision_llm()
+        except Exception as err:
+            print(
+                f"  [gemma unified-inproc load error] {err}", flush=True,
+            )
+            return ""
+        msgs = [{"role": "system", "content": system}] + list(messages)
+        try:
+            resp = llm.create_chat_completion(
+                messages=msgs,
+                max_tokens=max_tokens,
+                temperature=0.3,
+            )
+            return resp["choices"][0]["message"]["content"] or ""
+        except Exception as err:
+            print(f"  [gemma unified-inproc gen error] {err}", flush=True)
             return ""
 
     def _anthropic_chat(self, system, messages, max_tokens):
@@ -467,26 +594,73 @@ COMPUTATION:
 NEVER give up. Always provide your best answer."""
 
 
+_MARKDOWN_ONLY_RE = re.compile(r"^[\s*_`#>\-]+$")
+_PLACEHOLDER_RE = re.compile(r"^<[^>]*>$")  # e.g. ``<integer>`` / ``<value>``
+
+
 def _extract_answer(raw: str) -> str:
-    """Extract FINAL ANSWER from LLM output."""
-    fa = re.search(r"FINAL ANSWER:\s*(.+?)(?:\n|$)", raw, re.I)
-    if fa:
-        ans = fa.group(1).strip()
+    """Extract FINAL ANSWER from LLM output (last meaningful match).
+
+    Models emit multiple ``FINAL ANSWER:`` strings:
+      1. System-prompt placeholder — ``Step 8 — FINAL ANSWER: <integer>``
+         (from the reasoning template shown to the model; ``<integer>``
+         / ``<value>`` must not be treated as an answer).
+      2. Section header — ``**Step 8 — FINAL ANSWER:**`` (empty capture,
+         real answer on the next line).
+      3. The real emission — ``FINAL ANSWER: 90`` at the tail.
+
+    Walk matches in reverse; skip empty, markdown-only, and template-
+    placeholder captures. If every ``FINAL ANSWER:`` capture is hollow,
+    fall back to the last non-empty line **after** the last sentinel
+    occurrence — that's where case (2)'s real answer lives.
+    """
+    matches = re.findall(r"FINAL ANSWER:\s*(.*?)(?:\n|$)", raw, re.I)
+    for candidate in reversed(matches):
+        ans = candidate.strip().strip("`").strip("*").strip()
+        if not ans:
+            continue
+        if _MARKDOWN_ONLY_RE.match(ans):
+            continue
+        if _PLACEHOLDER_RE.match(ans):
+            continue
         if len(ans) > 200:
             ans = ans[:200].rsplit(".", 1)[0] or ans[:200]
         return normalize_answer(ans)
-    # Fallback: last non-empty line if short enough
-    # Filter out ReAct format lines that leak into answers
+    # Fallback ladder: tail after the last sentinel first (header-then-
+    # answer case), then the entire raw (body computed answer but header
+    # was hollow). Always skip poison / markdown / placeholder lines.
     poison = ("Thought:", "Action:", "Observation:", "Search",
               "I am unable", "I cannot", "I could not",
               "Unable to", "I need to find")
-    lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
-    for line in reversed(lines):
-        if len(line) < 200 and not any(
-            line.startswith(p) for p in poison
-        ):
-            return normalize_answer(line)
-    return ""
+
+    def _scan(text: str) -> str:
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        for line in reversed(lines):
+            stripped = line.strip("`").strip("*").strip()
+            if not stripped:
+                continue
+            if _MARKDOWN_ONLY_RE.match(stripped):
+                continue
+            if _PLACEHOLDER_RE.match(stripped):
+                continue
+            # Skip lines that are only the sentinel label itself.
+            if re.match(r"^final answer:?$", stripped, re.I):
+                continue
+            if len(stripped) < 200 and not any(
+                stripped.startswith(p) for p in poison
+            ):
+                return normalize_answer(stripped)
+        return ""
+
+    tail_search = re.finditer(r"FINAL ANSWER:", raw, re.I)
+    last_pos = 0
+    for m in tail_search:
+        last_pos = m.end()
+    if last_pos:
+        tail_answer = _scan(raw[last_pos:])
+        if tail_answer:
+            return tail_answer
+    return _scan(raw)
 
 
 # ── ReAct Core (Layer 2) ─────────────────────────────────
@@ -513,13 +687,28 @@ def react_solve(question: str, file_content: str, file_path: str,
                 f"[YouTube transcript]\n{transcript[:6000]}"
             )
 
-    # Vision shortcut
+    # Vision shortcut — `_solve_vision` dispatches internally:
+    # sonnet/opus → Anthropic native; gemma/other → local Qwen2.5-VL
+    # (or configured fallback) via llama-cpp-python chat handler.
     if file_content == "__IMAGE__" and file_path:
-        if backend.tier in ("sonnet", "opus"):
-            return _solve_vision(question, file_path, backend)
-        context_parts.append(
-            "[Image attached — cannot view in this mode]"
+        return _solve_vision(question, file_path, backend)
+
+    # Binary / non-image attachment (xlsx / pdf / docx / zip / audio / ...)
+    # Tabular formats (xlsx/csv/tsv) get extracted inline so weak models
+    # don't have to tool-use; other binaries get a hint + path only.
+    if file_content == "__BINARY__" and file_path:
+        extracted = (
+            extract_tabular_attachment_text(file_path)
+            if _feature_enabled("binary_extractor")
+            else None
         )
+        if extracted is not None:
+            context_parts.append(
+                f"[Attached file content ({os.path.basename(file_path)})]"
+                f"\n{extracted}"
+            )
+        else:
+            context_parts.append(build_binary_attachment_hint(file_path))
 
     # ZIQ SPS: inject tool priority hint (Sonnet/Opus only — Gemma
     # can't follow structured hints well, causes regression)
@@ -655,14 +844,25 @@ def react_solve_split(question: str, file_content: str,
         if transcript:
             observations.append(f"[YouTube]\n{transcript[:4000]}")
 
-    # Vision — delegate to Sonnet if available
+    # Vision — `_solve_vision` dispatches internally (Anthropic vs local)
     if file_content == "__IMAGE__" and file_path:
-        if backend.tier in ("sonnet", "opus"):
-            return _solve_vision(question, file_path, backend)
-        observations.append("[Image attached — cannot view]")
+        return _solve_vision(question, file_path, backend)
 
-    # Gatherer loop
-    history = [{"role": "user", "content": f"Question: {question}"}]
+    # Binary / non-image attachment (xlsx / pdf / docx / zip / audio / ...)
+    if file_content == "__BINARY__" and file_path:
+        observations.append(build_binary_attachment_hint(file_path))
+
+    # Gatherer loop — surface any pre-loaded context (attachments,
+    # transcripts) so the gatherer can plan actions instead of searching
+    # blind. Without this, observations are only visible to the synthesizer
+    # and the gatherer thinks no file was attached.
+    preamble = "\n\n".join(observations)
+    initial_user = (
+        f"Context:\n{preamble}\n\nQuestion: {question}"
+        if preamble
+        else f"Question: {question}"
+    )
+    history = [{"role": "user", "content": initial_user}]
     for step in range(max_steps):
         raw = backend.chat(GATHER_SYSTEM, history, max_tokens=1000)
         if not raw:
@@ -780,8 +980,346 @@ def self_verify(question: str, answer: str,
 
 
 # ── Vision ────────────────────────────────────────────────
+def extract_ocr_text(image_path: str, min_chars: int = 30) -> str:
+    """Extract text from an image via Tesseract OCR.
+
+    Returns the extracted text, or empty string when OCR is unavailable,
+    fails, or yields fewer than ``min_chars`` non-whitespace characters
+    (signalling the image is not text-heavy — caller should fall back
+    to a real vision model).
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+    try:
+        raw = pytesseract.image_to_string(Image.open(image_path)) or ""
+    except Exception as err:
+        print(f"  [ocr error] {err}", flush=True)
+        return ""
+    stripped = raw.strip()
+    meaningful = sum(1 for c in stripped if not c.isspace())
+    return stripped if meaningful >= min_chars else ""
+
+
+def _feature_enabled(name: str, default: bool = True) -> bool:
+    """Check a gaia-skill feature toggle via Concinno config cascade.
+
+    Falls back to ``default`` when the config layer is unavailable
+    (e.g. during isolated unit tests) so the helper never breaks the
+    solver path. Per-session overrides flow through
+    ``cfg.feature(name, "enabled")`` — see ``concinno.feature_config``
+    FEATURE_META and ``concinno.preset_cascade``.
+    """
+    try:
+        from concinno.core.config import get_config
+
+        cfg = get_config()
+        val = cfg.feature(name, "enabled")
+    except Exception:
+        return default
+    if val is None:
+        return default
+    return bool(val)
+
+
+_MUSIC_NOTATION_RE = re.compile(
+    r"\b(bass\s*clef|treble\s*clef|staff|stave|sheet\s*music|"
+    r"(musical\s+)?notation|note(?:s|head)?|ledger\s*line|"
+    r"crotchet|quaver|semibreve|minim)\b",
+    re.I,
+)
+
+# Generic visual reasoning scaffold — replaces the old
+# ``_BASS_CLEF_HINT`` which embedded task-specific answer paths (bass-
+# clef mnemonics + DECADE word reversal + decade/score/century time
+# units). That was effectively hardcoding the GAIA 8f80e01c solution
+# into the prompt — test-set leakage, reviewer bait, unshippable open
+# source. The replacement teaches the model **how** to reason about a
+# visual problem without leaking any solution. Same function for
+# polygon / music / chart / any visual puzzle.
+_VISUAL_REASONING_SCAFFOLD = (
+    "Before answering, work through the image in four explicit steps.\n"
+    "Do NOT jump to a numeric answer; do NOT assume what the question\n"
+    "is asking until Step 3.\n"
+    "\n"
+    "Step 1 — Describe what you see. List every distinct visual element\n"
+    "in the image: shapes, symbols, text, numbers, lines, colours,\n"
+    "positions, relative sizes. Use neutral language. No interpretation.\n"
+    "\n"
+    "Step 2 — Separate content from metadata. Labels / captions / legends\n"
+    "/ axis titles / indices are metadata. Graphical content is the\n"
+    "primary signal. State which is which before counting or computing.\n"
+    "\n"
+    "Step 3 — Restate the question. Paraphrase what is being asked in\n"
+    "one sentence using the vocabulary from Step 1. If the question has\n"
+    "a unit (years / edges / notes / items), name it here.\n"
+    "\n"
+    "Step 4 — Reason step by step. Work from Step-1 content to the\n"
+    "Step-3 question, one operation at a time. If arithmetic is\n"
+    "involved, write each operand and the operator. Double-check by\n"
+    "re-reading Step 1 — does your intermediate result match what you\n"
+    "described?\n"
+    "\n"
+    "Then, and only then, emit ``FINAL ANSWER: <value>``.\n"
+    "If a step is uncertain, say so explicitly instead of guessing.\n"
+)
+
+
+def _is_music_notation_question(question: str) -> bool:
+    """Return True when question text references musical staff/notation."""
+    return bool(_MUSIC_NOTATION_RE.search(question))
+
+
+_POLYGON_COUNTING_RE = re.compile(
+    r"\b(polygon|n-gon|edges?|sides?|vertices|vertex|perimeter|"
+    r"how\s+many\s+(edges?|sides?|corners?))\b",
+    re.I,
+)
+
+# Back-compat aliases — both old hint names now point at the generic
+# visual reasoning scaffold. Kept so anything still importing the old
+# names stays linkable; tests that asserted specific bass-clef or
+# polygon strings have been updated alongside this change.
+_BASS_CLEF_HINT = _VISUAL_REASONING_SCAFFOLD
+_POLYGON_HINT = _VISUAL_REASONING_SCAFFOLD
+
+
+def _is_polygon_counting_question(question: str) -> bool:
+    """Return True when the question asks to count edges/sides/vertices."""
+    return bool(_POLYGON_COUNTING_RE.search(question))
+
+
+def _upscale_image_if_small(
+    image_path: str, min_side: int = 800, factor: int = 4,
+) -> str:
+    """Return a 4×-upscaled copy path for small images, else the original.
+
+    Small notation images (bass-clef puzzles, compact tables) benefit from
+    LANCZOS upscaling before being fed to local multimodal models that
+    struggle with sub-800px detail. Falls back silently to the original
+    path if PIL is unavailable or upscaling fails.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return image_path
+    try:
+        img = Image.open(image_path)
+        w, h = img.size
+    except Exception:
+        return image_path
+    if max(w, h) >= min_side:
+        return image_path
+    try:
+        new_size = (w * factor, h * factor)
+        up = img.resize(new_size, Image.LANCZOS)
+        import tempfile
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=os.path.splitext(image_path)[1] or ".png",
+            prefix="gaia_upscale_",
+        )
+        os.close(fd)
+        up.save(tmp_path)
+        return tmp_path
+    except Exception as err:
+        print(f"  [upscale skip] {err}", flush=True)
+        return image_path
+
+
+_local_vision_llm = None  # lazy-loaded llama_cpp.Llama singleton
+
+
+def _get_local_vision_llm():
+    """Lazy-load open-source vision LLM for local inference.
+
+    Primary use: Gemma-tier backend (no native multimodal in
+    llama-cpp-python 0.3.20) falls back to Qwen2.5-VL-3B-Instruct GGUF
+    served in-process. SM 120 (RTX 5090 Blackwell) mmproj CUDA kernels
+    segfault in llama.cpp 0.3.20; default ``n_gpu_layers=0`` keeps
+    encode/decode on CPU (~5-20s/image) until upstream CUDA fix.
+
+    Env override:
+      GAIA_VISION_MODEL_PATH    GGUF weights (default Qwen2.5-VL-3B Q4_K_M)
+      GAIA_VISION_MMPROJ_PATH   mmproj GGUF (default Q8_0)
+      GAIA_VISION_HANDLER       llama-cpp-python chat handler class name
+                                (default Qwen25VLChatHandler)
+      GAIA_VISION_N_GPU_LAYERS  GPU layer offload (default 0 = CPU)
+      GAIA_VISION_CTX           context size (default 4096)
+    """
+    global _local_vision_llm
+    if _local_vision_llm is not None:
+        return _local_vision_llm
+    model_path = os.environ.get("GAIA_VISION_MODEL_PATH", "")
+    mmproj_path = os.environ.get("GAIA_VISION_MMPROJ_PATH", "")
+    if not model_path or not mmproj_path:
+        raise RuntimeError(
+            "Local vision requires GAIA_VISION_MODEL_PATH and "
+            "GAIA_VISION_MMPROJ_PATH env vars (GGUF paths)."
+        )
+    handler_name = os.environ.get(
+        "GAIA_VISION_HANDLER", "Qwen25VLChatHandler"
+    )
+    n_gpu_layers = int(os.environ.get("GAIA_VISION_N_GPU_LAYERS", "0"))
+    n_ctx = int(os.environ.get("GAIA_VISION_CTX", "4096"))
+
+    from llama_cpp import Llama
+    from llama_cpp import llama_chat_format
+    # Prefer Concinno-shipped custom handlers (e.g. Gemma4) first,
+    # fall back to llama-cpp-python built-ins (Llava / Qwen / MiniCPM).
+    if handler_name == "Gemma4VisionChatHandler":
+        from concinno.llm_runtime.vision_handlers import (
+            get_gemma4_vision_handler_cls,
+        )
+        handler_cls = get_gemma4_vision_handler_cls()
+    else:
+        handler_cls = getattr(llama_chat_format, handler_name)
+    handler = handler_cls(clip_model_path=mmproj_path, verbose=False)
+    _local_vision_llm = Llama(
+        model_path=model_path,
+        chat_handler=handler,
+        n_ctx=n_ctx,
+        n_gpu_layers=n_gpu_layers,
+        verbose=False,
+    )
+    return _local_vision_llm
+
+
+def _solve_vision_local(question: str, image_path: str) -> str:
+    """Solve a vision question with the local Qwen2.5-VL (or fallback
+    open-source multimodal) model. CPU path, ~5-20s/image.
+
+    Music-notation questions (bass clef / staff / noteheads) get:
+      - 4× LANCZOS upscale for small images (<800px) so noteheads land
+        on enough pixels for the visual encoder
+      - a bass-clef mnemonic + word-reverse L/S tag + time-unit hint
+        prepended to the user prompt
+    """
+    try:
+        llm = _get_local_vision_llm()
+    except Exception as err:
+        print(f"  [vision-local load error] {err}", flush=True)
+        return ""
+    music_mode = (
+        _is_music_notation_question(question)
+        and _feature_enabled("bassclef_wordreverse")
+    )
+    polygon_mode = (
+        _is_polygon_counting_question(question)
+        and _feature_enabled("polygon_counting_hint")
+    )
+    upscale_enabled = _feature_enabled("image_upscale_4x")
+    should_upscale = (music_mode or polygon_mode) and upscale_enabled
+    effective_path = (
+        _upscale_image_if_small(image_path) if should_upscale else image_path
+    )
+    try:
+        with open(effective_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except Exception as err:
+        print(f"  [vision-local read error] {err}", flush=True)
+        return ""
+    ext = os.path.splitext(effective_path)[1].lstrip(".").lower() or "png"
+    data_uri = f"data:image/{ext};base64,{b64}"
+    # Both music-notation and polygon-counting questions now share the
+    # generic visual-reasoning scaffold (no task-specific solution paths
+    # hardcoded). Inject once regardless of which feature toggle fired.
+    prelude = f"{_VISUAL_REASONING_SCAFFOLD}\n\n" if (music_mode or polygon_mode) else ""
+    user_text = (
+        f"{prelude}{question}\n\nAnalyze the image carefully and "
+        "think step by step. After your reasoning, end with exactly "
+        "one final line:\n"
+        "FINAL ANSWER: <concise value>\n\n"
+        "The value must be concise (number, word, short phrase). "
+        "Do NOT add units unless asked. Do NOT cut off in the middle "
+        "of reasoning."
+    )
+    try:
+        resp = llm.create_chat_completion(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {"type": "image_url",
+                     "image_url": {"url": data_uri}},
+                ],
+            }],
+            max_tokens=2500,
+            temperature=0.2,
+        )
+        raw = resp["choices"][0]["message"]["content"] or ""
+        return _extract_answer(raw)
+    except Exception as err:
+        print(f"  [vision-local gen error] {err}", flush=True)
+        return ""
+
+
+def _solve_vision_via_ocr(question: str, image_path: str,
+                          backend: ModelBackend) -> str:
+    """Route text-heavy images through OCR + text LLM (Gemma 4 reasoning).
+
+    Works best for tabular / document / headstone-style images where
+    Tesseract reliably extracts readable text. Returns empty string
+    when OCR fails or has insufficient signal; caller should fall back
+    to a real vision model.
+    """
+    ocr_text = extract_ocr_text(image_path)
+    if not ocr_text:
+        return ""
+    prompt = (
+        f"You are answering a question about an image. The image text "
+        f"has been OCR-extracted for you below.\n\n"
+        f"[OCR extracted from image]\n{ocr_text[:4000]}\n\n"
+        f"Question: {question}\n\n"
+        f"Work through the reasoning step by step using the OCR text "
+        f"as evidence. After your reasoning, on a new line, output "
+        f"exactly one final line in this format (no prose after it):\n"
+        f"FINAL ANSWER: <value>\n\n"
+        f"The value must be concise: a number, a word, a short phrase, "
+        f"or a comma-separated list. Do NOT add units unless the "
+        f"question asks. Do NOT leave the answer blank or cut off."
+    )
+    raw = backend.chat(
+        "You answer questions using ONLY the OCR-extracted image text "
+        "provided. Be precise. Always end with exactly one "
+        "'FINAL ANSWER: <value>' line.",
+        [{"role": "user", "content": prompt}],
+        max_tokens=1500,
+    )
+    return _extract_answer(raw)
+
+
 def _solve_vision(question: str, image_path: str,
                   backend: ModelBackend) -> str:
+    """Dispatch vision solve by backend tier and image content.
+
+    Priority order (integrative — all three co-exist under one surface):
+    1. sonnet/opus tier → Anthropic vision (native multimodal, best)
+    2. gemma tier + local vision model configured → local native
+       (Gemma 4 + mmproj via Concinno Gemma4VisionChatHandler, or Qwen /
+       MiniCPM / LLaVA via llama-cpp-python built-in handler)
+    3. Fallback: OCR + text reasoning when local vision unavailable /
+       returns empty (e.g. pure text-heavy images and no GGUF wired)
+    """
+    if backend.tier not in ("sonnet", "opus"):
+        # Primary: local multimodal model (Gemma 4 native vision if
+        # GAIA_VISION_MODEL_PATH is wired; otherwise configured
+        # fallback like Qwen2.5-VL). Vision model sees pixels directly,
+        # preserves purple labels / geometry / musical notation that
+        # OCR flattens away.
+        vision_answer = _solve_vision_local(question, image_path)
+        if vision_answer:
+            return vision_answer
+        # Last-resort: OCR + text LLM (covers deploys that don't ship
+        # a vision GGUF, or where mmproj encoding crashed). Gated by
+        # the ``ocr_fallback`` feature — prod turns it off so the OCR
+        # pipeline never runs outside benchmark.
+        if _feature_enabled("ocr_fallback"):
+            ocr_answer = _solve_vision_via_ocr(question, image_path, backend)
+            if ocr_answer:
+                return ocr_answer
+        return ""
     ext = os.path.splitext(image_path)[1].lower()
     mime = MIME_MAP.get(ext, "image/png")
     try:

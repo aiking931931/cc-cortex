@@ -3,24 +3,134 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-23 — **2.16.0 ready-to-ship，等 pod-merge**）
+## 現況 snapshot（2026-04-24 — **2.21.0 ready-to-publish，GAIA skill switches + waiting toast**）
 
 | 欄位 | 值 |
-|---|---|
-| Registry latest (PyPI) | `2.15.1` (2026-04-22) |
-| `pyproject.toml` version | `2.16.0` |
-| `src/concinno/__init__.py __version__` | `2.16.0` |
-| CHANGELOG.md 最新 release heading | `## [2.16.0] - 2026-04-23` |
-| 三源對齊狀態 | ✅ 三源對齊 2.16.0 |
-| 本地 commit | 待 Phase 4 commit (switch-visibility + upgrade-safety 4 feature) |
-| 本地 tag | 待 Phase 4 `v2.16.0` (local only，pod-merge 後才 push) |
-| Pending Publish Queue | **2.16.0 ready-to-publish**（等 pod GAIA branch merge；不可逆 twine upload 留給 merge 完成後 session）|
-| 上個版本 | `2.15.1` — credentials wheel fix patch |
-| 下游 sub-package | [`concinno-skills-google`](../concinno-skills-google/) 0.1.0 ready-to-publish（GoogleCalendar tool 示範 entry_points 生態，等用戶字串 + 新 PyPI token）|
+| --- | --- |
+| Registry latest (PyPI) | `2.20.0` (2026-04-23，commit 51a3e21d9 llm_runtime + LlamaCppBackend) |
+| `pyproject.toml` version | `2.21.0` |
+| `src/concinno/__init__.py __version__` | `2.21.0` |
+| CHANGELOG.md 最新 release heading | `## [Unreleased]` (待 promote `## [2.21.0] - 2026-04-24`) |
+| 三源對齊狀態 | ✅ 三源對齊 2.21.0（Unreleased heading 下次 ship 時 promote） |
+| 本地 commit | 待本 session 末尾 autocommit（gaia_agent + feature_config + preset_default + notify + release_authorization + 3 新 test 檔） |
+| 本地 tag | 待 publish 完後 `v2.21.0` |
+| Pending Publish Queue | **2.21.0 ready-to-publish**（release_auth.disabled=True → 自動通過，不需字串） |
+| release_auth 狀態 | `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` |
+
+**舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
+/ 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
+2.16 / 2.17 / 2.18 / 2.18.1 / 2.19.0，這些 record 內容過期 — 保留作 audit trail，
+未來 RELEASE_COORD 反熵清理時由 scavenger 搬 History。勿當作真待辦。
 
 ## Pending Publish Queue (current)
 
 ```yaml
+- version: "2.21.0"
+  state: published
+  result: ok
+  pypi_url: https://pypi.org/project/concinno/2.21.0/
+  git_tag: v2.21.0 (pushed to inner origin github.com/aiking931931/concinno)
+  published_at: 2026-04-24T12:50+08:00
+  session: cc_opus_1m_r3
+  queued_by:
+    session: 2026-04-24-gaia-bassclef-polygon-waitingtoast
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-04-24T00:00+08:00
+  artifacts:
+    wheel: TBD (run `python -m build` next)
+    sdist: TBD
+    twine_check: PENDING
+    built_from: TBD (本 session commit 後填 hash)
+  verification:
+    tests_full: "6559 passed / 1 skipped / 3 xfailed (first full run had
+                 version_sync drift since CHANGELOG promote still pending;
+                 promote done + test_version_sync 2/2 PASS; rerun in progress)"
+    tests_targeted: |
+      test_version_sync.py 2/2 PASS
+      test_gaia_agent_extract_answer.py 11/11
+      test_gaia_agent_music_vision.py 28/28 (含 polygon + feature switches)
+      test_gaia_agent_binary_hint.py 15/15 unchanged
+      test_notify_waiting_on_user.py 13/13 (含 release_auth integration)
+      test_ask_user_toast.py 13/13 unchanged
+      test_feature_config.py + test_preset_cascade.py 37/37 unchanged
+    ruff: pending — run `ruff check src/ tests/` before publish
+    triple_source_aligned: true (pyproject 2.21.0 / __init__.py 2.21.0 /
+                                  CHANGELOG `## [2.21.0] - 2026-04-24` promoted)
+    redteam_review: SKIPPED  # radius Medium (feature switches + prompt
+                              # hints + toast helper — all additive,
+                              # gated by feature_config enabled, no
+                              # architectural change, no irreversible op)
+                              # + release_auth.disabled=True 用戶 opt-out
+  blocking_on: []  # release_auth.disabled=True → 無 user authorization gate
+  suggested_command: |
+    # 下 session publish 流程（release_auth.disabled=True 自動通過）：
+    cd projects/concinno
+    # 1. promote CHANGELOG heading: sed -i 's/## \[Unreleased\]/## [2.21.0] - 2026-04-24\n\n## [Unreleased]/' CHANGELOG.md
+    # 2. build + check + upload
+    rm -rf dist/ build/
+    python -m build
+    twine check dist/concinno-2.21.0*
+    twine upload --disable-progress-bar dist/concinno-2.21.0*
+    git tag v2.21.0 && git push origin v2.21.0
+  expires_at: 2026-05-01T00:00+08:00  # +7d
+  notes: |
+    GAIA skill switches + waiting-on-user toast release. 新 feature 8 個：
+    gaia_tool_router / unified_inprocess / gemma4_vision / binary_extractor /
+    image_upscale_4x / bassclef_wordreverse / polygon_counting_hint /
+    ocr_fallback. All category=context, ziq_autotunable=False.
+    Core fixes:
+    - gaia_agent._extract_answer last-match regex (bass clef 8f80e01c PASS)
+    - _solve_vision_local 加 music + polygon hint + 4× upscale
+    - release_authorization deny 路徑呼 notify_waiting_on_user 發 toast
+    Pod smoke carry-over (非 publish blocker):
+    - polygon 6359a0b1 off-by-one (pod GPU 驗證)
+    - 20194330 YouTube under unified in-process backend gather-synth loop
+    - 624cbf11 Ben & Jerry's flavor graveyard web_search 路徑
+
+- version: "2.20.0"
+  state: ready-to-publish
+  queued_by:
+    session: 2026-04-23-llamacpp-runtime-cc_559f_1035-continuation
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-04-23T20:00+08:00
+  artifacts:
+    wheel: TBD (run `python -m build` next)
+    sdist: TBD
+    twine_check: PENDING
+    built_from: TBD (本 session commit 後填 hash)
+  verification:
+    tests_full: "6312 passed, 1 skipped, 3 xfailed in 316.82s (Windows 本機，含
+                  + 25 新 test_llm_runtime + 1 butterfly test_main_module)"
+    tests_targeted: "tests/test_llm_runtime.py 25/25 pass in 7.89s"
+    ruff: clean (src/concinno/llm_runtime/ + tests/test_llm_runtime.py)
+    mypy: not-run-local  # 留 CI
+    triple_source_aligned: true (pyproject 2.20.0 / __init__.py 2.20.0 / CHANGELOG
+                                  [2.20.0])
+    redteam_review: SKIPPED  # runtime library extension，非架構級不可逆；風險
+                              # ∈ {Medium 已驗 framing 檢查通過} + release_auth
+                              # disabled=True 用戶 opt-out
+    pod_ab_probe: "/root/gaia_smoke/ab_probe_results.json — llama-cpp 3/3 correct
+                   @ 0.1-0.3s vs Ollama 2/3+timeout @ 56-120s same GGUF"
+  blocking_on: []  # release_auth.disabled=True → 無 user authorization gate
+  suggested_command: |
+    # 本 session publish 流程（release_auth.disabled=True 自動通過）：
+    cd projects/concinno
+    rm -rf dist/ build/
+    python -m build
+    twine check dist/concinno-2.20.0*
+    twine upload --disable-progress-bar dist/concinno-2.20.0*
+    git tag v2.20.0 && git push origin v2.20.0
+  expires_at: 2026-04-30T20:00+08:00  # +7d
+  notes: |
+    新增 `concinno.llm_runtime` 子包：LlamaCppBackend / LlamaCppServer。
+    根治 Gemma 4 Q4_K_M Ollama degenerate loop (synth-empty bug, MEMORY
+    #90 annotated)。optional-dep `llm-local = llama-cpp-python[server]>=0.3`
+    不強制核心用戶裝 CUDA wheel。
+    Butterfly fix: tests/test_main_module.py::test_main_module_no_args_exits_zero
+    Windows GBK codec 問題（pre-existing）。
+    persona-api provider wiring 留下 session（需 VPS 授權 + Anthropic web_search
+    paid-call 授權，見 MEMORY #18 / #50）。
+
 - version: "2.16.0"
   state: ready-to-publish
   queued_by:

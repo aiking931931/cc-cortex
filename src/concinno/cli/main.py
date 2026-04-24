@@ -1041,6 +1041,40 @@ def cmd_evolve(args: argparse.Namespace) -> None:
     print(f"  Task: {TASK_CONFIG['name']} (every {TASK_CONFIG['min_interval_hours']}h)")
 
 
+def cmd_features(args: argparse.Namespace) -> None:
+    """Export / sync the FEATURE_META Markdown table into README."""
+    from concinno.feature_readme import main as _main
+    raise SystemExit(_main([args.features_command] + (
+        [args.path] if args.features_command == "sync-readme" and args.path else []
+    )))
+
+
+def cmd_commands(args: argparse.Namespace) -> None:
+    """Install / list / clean Concinno slash-commands in ~/.claude/commands/."""
+    from concinno.commands_sync import main as _main
+    extra = [args.path] if getattr(args, "path", None) else []
+    raise SystemExit(_main([args.commands_action] + extra))
+
+
+def cmd_rules(args: argparse.Namespace) -> None:
+    """Install / list / uninstall the bundled official rule set."""
+    from concinno.rules_install import main as _main
+    extra = [args.path] if getattr(args, "path", None) else []
+    raise SystemExit(_main([args.rules_action] + extra))
+
+
+def cmd_gui(args: argparse.Namespace) -> None:
+    """Launch the localhost config GUI (requires ``concinno[gui]`` extras)."""
+    try:
+        from concinno.gui import run as _run
+    except ImportError as err:
+        print(f"[gui] missing dependency: {err}")
+        print("Install with: pip install 'concinno[gui]'")
+        sys.exit(1)
+    print(f"[gui] serving on http://{args.host}:{args.port}  (Ctrl+C to stop)")
+    _run(host=args.host, port=args.port, reload=args.reload)
+
+
 def cmd_uninstall(args: argparse.Namespace) -> None:
     """Remove concinno hooks and config."""
     if not args.yes:
@@ -1424,6 +1458,10 @@ def main() -> None:
     from .new_feature_cmd import register as _register_new_feature
     _register_new_feature(sub)
 
+    # 2.30.1 — `concinno skills {new, list, enable, disable, delete}`
+    from .skills_cmd import register as _register_skills
+    _register_skills(sub)
+
     # narrower-scope v4 — preset cascade CLI
     from .preset_cmd import register as _register_preset
     _register_preset(sub)
@@ -1431,6 +1469,81 @@ def main() -> None:
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)
+
+    # rules — install / list / uninstall bundled official rules
+    p_rules = sub.add_parser(
+        "rules",
+        help="Install / list / uninstall the bundled official rule set",
+    )
+    rules_sub = p_rules.add_subparsers(dest="rules_action")
+    r_install = rules_sub.add_parser(
+        "install", help="Install official rules to ~/.claude/rules/official/",
+    )
+    r_install.add_argument("path", nargs="?", default=None)
+    r_install.set_defaults(func=cmd_rules)
+    r_list = rules_sub.add_parser("list", help="List bundled rule files")
+    r_list.set_defaults(func=cmd_rules)
+    r_dry = rules_sub.add_parser(
+        "dry-run", help="Preview install without writing",
+    )
+    r_dry.add_argument("path", nargs="?", default=None)
+    r_dry.set_defaults(func=cmd_rules)
+    r_uninstall = rules_sub.add_parser(
+        "uninstall", help="Remove installed official rule tree",
+    )
+    r_uninstall.add_argument("path", nargs="?", default=None)
+    r_uninstall.set_defaults(func=cmd_rules)
+
+    # commands — install / list / clean Concinno slash-commands into CC
+    p_cmd = sub.add_parser(
+        "commands",
+        help="Install Concinno slash-commands into ~/.claude/commands/",
+    )
+    cmd_sub = p_cmd.add_subparsers(dest="commands_action")
+    cmd_sync = cmd_sub.add_parser("sync", help="Install/refresh commands")
+    cmd_sync.add_argument("path", nargs="?", default=None)
+    cmd_sync.set_defaults(func=cmd_commands)
+    cmd_list = cmd_sub.add_parser("list", help="List discoverable slash commands")
+    cmd_list.set_defaults(func=cmd_commands)
+    cmd_clean = cmd_sub.add_parser("clean", help="Remove managed command files")
+    cmd_clean.add_argument("path", nargs="?", default=None)
+    cmd_clean.set_defaults(func=cmd_commands)
+
+    # features — FEATURE_META export / README sync
+    p_feat = sub.add_parser(
+        "features",
+        help="Export FEATURE_META as Markdown / sync README",
+    )
+    feat_sub = p_feat.add_subparsers(dest="features_command")
+    feat_export = feat_sub.add_parser(
+        "export-readme",
+        help="Print FEATURE_META Markdown table to stdout",
+    )
+    feat_export.set_defaults(func=cmd_features)
+    feat_sync = feat_sub.add_parser(
+        "sync-readme",
+        help="Inject FEATURE_META table into README.md between anchors",
+    )
+    feat_sync.add_argument("path", nargs="?", default=None,
+                           help="Target README path (default: repo README.md)")
+    feat_sync.set_defaults(func=cmd_features)
+
+    # 2.30.1 — user-feature registry commands (attach to same `features` namespace)
+    from .features_register_cmd import register_features_subcommands
+    register_features_subcommands(feat_sub)
+
+    # gui — localhost config dashboard (requires `concinno[gui]` extras)
+    p_gui = sub.add_parser(
+        "gui",
+        help="Launch localhost config GUI (requires `pip install concinno[gui]`)",
+    )
+    p_gui.add_argument("--host", default="127.0.0.1",
+                       help="Bind host (default: 127.0.0.1 loopback)")
+    p_gui.add_argument("--port", type=int, default=8400,
+                       help="Bind port (default: 8400)")
+    p_gui.add_argument("--reload", action="store_true",
+                       help="Enable uvicorn auto-reload (dev only)")
+    p_gui.set_defaults(func=cmd_gui)
 
     # uninstall
     p_uninstall = sub.add_parser("uninstall", help="Remove concinno hooks and config")

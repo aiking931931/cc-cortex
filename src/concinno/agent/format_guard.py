@@ -66,6 +66,7 @@ class FormatFailureMode(str, Enum):
 
     EMPTY = "empty"
     RETRY_TALK = "retry_talk"
+    THOUGHT_LOOP = "thought_loop"
     QUOTE_DUMP = "quote_dump"
     SPECIAL_TOKEN = "special_token"
     PARAPHRASE_RISK = "paraphrase_risk"
@@ -112,6 +113,15 @@ _SPECIAL_TOKEN_RE = re.compile(
 # it die.", got "- physical graveyard is located in factory"
 # (summary). Structure-only match: question text read, no expected
 # answer leak.
+# Raw-stream length threshold above which a RETRY_TALK lead-in is
+# reclassified as a THOUGHT_LOOP (narration loop). Picked from GAIA
+# 26b baseline traces where thought-loop FAIL tasks ran raw_len
+# 10k-25k while PASS answers typically streamed under ~2k. 3000
+# keeps false positives away from verbose-but-correct reasoning
+# chains that still end on a clean FINAL ANSWER.
+THOUGHT_LOOP_MIN_RAW_LEN = 3000
+
+
 _PARAPHRASE_QUESTION_RE = re.compile(
     r"\b(?:last|first|closing|opening|final|second)\s+"
     r"(?:line|sentence|verse|lyric|stanza|paragraph|word)s?\b"
@@ -159,6 +169,14 @@ def classify_output_format(
     if extracted_answer and _SPECIAL_TOKEN_RE.search(extracted_answer):
         return FormatFailureMode.SPECIAL_TOKEN
     if extracted_answer and _RETRY_TALK_RE.match(extracted_answer):
+        # Promote to THOUGHT_LOOP when the raw stream is long — the
+        # agent narrated extensively without committing. A normal
+        # RETRY_TALK retry asks the model to stop narrating and
+        # commit, but a THOUGHT_LOOP signals the model never actually
+        # invoked a tool, so the retry reminder differs (push toward
+        # emitting a tool call rather than forcing a best-guess).
+        if len(stripped) >= THOUGHT_LOOP_MIN_RAW_LEN:
+            return FormatFailureMode.THOUGHT_LOOP
         return FormatFailureMode.RETRY_TALK
     if extracted_answer and _QUOTE_DUMP_RE.match(extracted_answer):
         return FormatFailureMode.QUOTE_DUMP
@@ -196,6 +214,32 @@ the model into doubling down on the bad format.
 """
 
 
+THOUGHT_LOOP_RETRY_REMINDER = (
+    "\n\nFORMAT REMINDER (tool-use check): your previous reply "
+    "spent thousands of characters narrating planned searches "
+    "(\"I'll search for…\", \"Let me check…\", \"Wait, let's try…\") "
+    "without ever emitting a tool call — the grader saw no evidence "
+    "gathered. On this retry you MUST: (1) make your very first "
+    "action a concrete tool invocation, not narration — web_search "
+    "with a specific query, fetch_url on a known page URL, "
+    "python_exec for numeric computation, run_bash for shell "
+    "commands, fetch_image for visual inspection; (2) keep any "
+    "pre-tool thinking to one short sentence; (3) after at most "
+    "3 tool calls, commit 'FINAL ANSWER: <value>'. Do NOT repeat "
+    "\"I'll search for\" / \"Let me look up\" / \"Let's try\" "
+    "three times in a row — that is the failure pattern the grader "
+    "flagged. A best-guess answer after 1 real tool call beats "
+    "narration with zero calls."
+)
+"""Thought-loop retry reminder for :attr:`FormatFailureMode.THOUGHT_LOOP`.
+
+Distinct from :data:`FORMAT_RETRY_REMINDER` (which tells the model to
+STOP calling tools and commit) because a THOUGHT_LOOP failure means
+the model never called a tool in the first place — the right
+intervention is the opposite: push toward tool-first behaviour.
+"""
+
+
 PARAPHRASE_RETRY_REMINDER = (
     "\n\nFORMAT REMINDER (verbatim-quote check): this question asks "
     "for an EXACT line / rhyme / epitaph / inscription / verbatim "
@@ -220,6 +264,7 @@ rejection. Still fully question-agnostic (no expected answer leak).
 _REMINDER_BY_MODE: dict[FormatFailureMode, str] = {
     FormatFailureMode.EMPTY: FORMAT_RETRY_REMINDER,
     FormatFailureMode.RETRY_TALK: FORMAT_RETRY_REMINDER,
+    FormatFailureMode.THOUGHT_LOOP: THOUGHT_LOOP_RETRY_REMINDER,
     FormatFailureMode.QUOTE_DUMP: FORMAT_RETRY_REMINDER,
     FormatFailureMode.SPECIAL_TOKEN: FORMAT_RETRY_REMINDER,
     FormatFailureMode.PARAPHRASE_RISK: PARAPHRASE_RETRY_REMINDER,
@@ -243,6 +288,8 @@ __all__ = [
     "FORMAT_RETRY_REMINDER",
     "FormatFailureMode",
     "PARAPHRASE_RETRY_REMINDER",
+    "THOUGHT_LOOP_MIN_RAW_LEN",
+    "THOUGHT_LOOP_RETRY_REMINDER",
     "classify_output_format",
     "retry_reminder_for_mode",
 ]

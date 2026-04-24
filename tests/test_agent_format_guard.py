@@ -13,6 +13,8 @@ from __future__ import annotations
 from concinno.agent.format_guard import (
     FORMAT_RETRY_REMINDER,
     PARAPHRASE_RETRY_REMINDER,
+    THOUGHT_LOOP_MIN_RAW_LEN,
+    THOUGHT_LOOP_RETRY_REMINDER,
     FormatFailureMode,
     classify_output_format,
     retry_reminder_for_mode,
@@ -70,6 +72,85 @@ def test_retry_talk_let_me() -> None:
     raw = "stream content"
     ans = "Let me check the primary source one more time"
     assert classify_output_format(raw, ans) is FormatFailureMode.RETRY_TALK
+
+
+# ─── thought_loop mode (long raw + retry_talk lead-in) ───────────
+
+
+def test_thought_loop_promoted_when_raw_long() -> None:
+    # GAIA 17b5a6a3 signature: 25k chars of narration, zero tool
+    # calls, extracted answer starts with "Wait,".
+    raw = "x" * (THOUGHT_LOOP_MIN_RAW_LEN + 1)
+    ans = "Wait, is there any other Amphiprion species that could fit"
+    assert classify_output_format(raw, ans) is FormatFailureMode.THOUGHT_LOOP
+
+
+def test_thought_loop_boundary_exact_threshold() -> None:
+    raw = "x" * THOUGHT_LOOP_MIN_RAW_LEN
+    ans = "Let's try searching for SPFMV SPCSV uniprot entries"
+    assert classify_output_format(raw, ans) is FormatFailureMode.THOUGHT_LOOP
+
+
+def test_thought_loop_gaia_2a649bb1_signature() -> None:
+    # GAIA 2a649bb1 — SPFMV/SPCSV virus enzyme lookup, thought loop
+    raw = "stream " * 5000  # ~30k chars — way over threshold
+    ans = 'Let\'s try searching for "SPFMV" "SPCSV" "20'
+    assert classify_output_format(raw, ans) is FormatFailureMode.THOUGHT_LOOP
+
+
+def test_thought_loop_gaia_676e5e31_signature() -> None:
+    # GAIA 676e5e31 — thought loop starting with "And I'll search"
+    raw = "x" * 11000
+    ans = (
+        "And I'll search for \"Frozen/Chilled section\" that contain "
+        "whole name of item"
+    )
+    assert classify_output_format(raw, ans) is FormatFailureMode.THOUGHT_LOOP
+
+
+def test_retry_talk_stays_when_raw_short() -> None:
+    # Backward compat: short raw + lead-in stays RETRY_TALK.
+    raw = "stream content"  # ~14 chars
+    ans = "Wait, is there any other Amphiprion species"
+    assert classify_output_format(raw, ans) is FormatFailureMode.RETRY_TALK
+
+
+def test_retry_talk_stays_just_below_threshold() -> None:
+    raw = "x" * (THOUGHT_LOOP_MIN_RAW_LEN - 1)
+    ans = "Let me check the primary source one more time"
+    assert classify_output_format(raw, ans) is FormatFailureMode.RETRY_TALK
+
+
+def test_thought_loop_reminder_pushes_tool_first() -> None:
+    rem = retry_reminder_for_mode(FormatFailureMode.THOUGHT_LOOP)
+    # The reminder must actively push tool-first behaviour, NOT
+    # the FORMAT_RETRY_REMINDER "do not call more tools" message.
+    assert "tool call" in rem.lower()
+    assert "first action" in rem.lower() or "first" in rem.lower()
+    assert "web_search" in rem
+    assert "fetch_url" in rem
+
+
+def test_thought_loop_reminder_distinct_from_retry_talk() -> None:
+    # The two modes must route to different reminders — wiring the
+    # wrong one would silently regress #15/#17b5a6a3-style cases.
+    rt = retry_reminder_for_mode(FormatFailureMode.RETRY_TALK)
+    tl = retry_reminder_for_mode(FormatFailureMode.THOUGHT_LOOP)
+    assert rt != tl
+
+
+def test_thought_loop_reminder_no_answer_leak() -> None:
+    # No-cheat: the reminder must not contain any GAIA expected-
+    # answer keywords that could bias the retry toward specific
+    # ground-truth values.
+    rem = THOUGHT_LOOP_RETRY_REMINDER.lower()
+    for leak in (
+        "morarji desai",  # 87c610df
+        "egalitarian",    # c61d22de
+        "amphiprion",     # 17b5a6a3
+        "so we had to let it die",  # 624cbf11
+    ):
+        assert leak not in rem
 
 
 # ─── quote_dump mode ────────────────────────────────

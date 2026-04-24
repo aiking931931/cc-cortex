@@ -684,6 +684,7 @@ def _notify_stop(hook_data: dict) -> None:
     feedback_toast_module_timeout.md.
     """
     import threading
+
     from concinno.core.notify import _get_locale, _t, show_toast
 
     locale = _get_locale()

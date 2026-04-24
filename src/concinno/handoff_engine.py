@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Optional
 
 from concinno.constants import make_deny
@@ -276,7 +277,14 @@ def get_handoff_mode() -> str:
 
 
 def set_handoff_mode(mode: str) -> bool:
-    """Write handoff_mode to cc_config.json. Returns True on success."""
+    """Write handoff_mode to cc_config.json. Returns True on success.
+
+    Side effect (2.21.0+): launches / tears down full-mode bundled
+    services via :func:`concinno.full_mode_services.ensure_services_for_mode`.
+    Currently that means starting the config GUI when flipping to
+    ``full``, stopping it when flipping out. Opt-out env vars documented
+    in :mod:`concinno.full_mode_services`.
+    """
     if mode not in HANDOFF_MODES:
         return False
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
@@ -288,9 +296,30 @@ def set_handoff_mode(mode: str) -> bool:
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        return True
     except Exception:
         return False
+    # Fire-and-forget service lifecycle — failure here must not reverse
+    # the mode change or surface as False to callers (the config write
+    # is the authoritative act).
+    try:
+        from concinno.full_mode_services import ensure_services_for_mode
+        report = ensure_services_for_mode(mode)
+        gui = (report.get("services") or {}).get("gui") or {}
+        status = gui.get("status")
+        if status == "launched":
+            print(
+                f"[handoff_engine] full-mode GUI started on {gui.get('url')}",
+                file=sys.stderr,
+            )
+        elif status == "stopped":
+            print(
+                f"[handoff_engine] full-mode GUI stopped (pid {gui.get('pid')})",
+                file=sys.stderr,
+            )
+    except Exception as err:
+        print(f"[handoff_engine] full-mode services error: {err}",
+              file=sys.stderr)
+    return True
 
 # ── Handoff Reminder State (module-level, per-process) ────
 

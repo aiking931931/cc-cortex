@@ -9,8 +9,10 @@ from concinno.agent.prompts import (
     AGENT_GUIDANCE_EXACT_UNIT,
     AGENT_GUIDANCE_FACTUAL_COUNT,
     AGENT_GUIDANCE_NO_REFUSAL,
+    AGENT_GUIDANCE_PDB_FILE_ORDER,
     AGENT_GUIDANCE_SEARCH_DISCIPLINE,
     AGENT_GUIDANCE_UNCERTAINTY,
+    AGENT_GUIDANCE_VISION,
     ANCHOR_PATTERNS,
     build_targeted_guidance,
     default_guidance,
@@ -164,6 +166,44 @@ class TestFactualCountGuidance:
         assert AGENT_GUIDANCE_FACTUAL_COUNT not in default_guidance()
 
 
+class TestPdbFileOrderGuidance:
+    """GAIA 7dd30055 — 'first and second atoms as listed' in PDB.
+
+    Weak model called ``list(structure.get_atoms())[0] / [1]`` which
+    iterates in Biopython's Model>Chain>Residue>Atom hierarchy order
+    and does NOT follow the raw ATOM-record line order. Got 1.61 Å
+    on 5wb7 instead of the file-order-correct 1.456 Å. This anchor
+    teaches the serial-number sort OR raw-line parse workaround.
+    """
+
+    def test_names_biopython_api(self) -> None:
+        s = AGENT_GUIDANCE_PDB_FILE_ORDER
+        assert "PDBParser" in s
+        assert "get_serial_number" in s
+
+    def test_warns_against_naive_get_atoms_indexing(self) -> None:
+        s = AGENT_GUIDANCE_PDB_FILE_ORDER
+        assert "structure.get_atoms" in s
+        # Must explicitly tell model NOT to index the hierarchy-ordered list
+        assert "Do NOT" in s or "do NOT" in s
+
+    def test_offers_raw_line_alternative(self) -> None:
+        s = AGENT_GUIDANCE_PDB_FILE_ORDER
+        assert "ATOM" in s
+        assert "HETATM" in s
+        # Fixed-width column spec for x/y/z
+        assert "31-38" in s
+        assert "47-54" in s
+
+    def test_reminds_precision_for_picometer_unit(self) -> None:
+        s = AGENT_GUIDANCE_PDB_FILE_ORDER
+        assert "picometer" in s
+        assert "3 decimal" in s
+
+    def test_not_in_default(self) -> None:
+        assert AGENT_GUIDANCE_PDB_FILE_ORDER not in default_guidance()
+
+
 class TestSelectQuestionAnchors:
     """ZIQ SPS one-shot classifier — structural prior only."""
 
@@ -209,6 +249,97 @@ class TestSelectQuestionAnchors:
         anchors = select_question_anchors(q)
         assert AGENT_GUIDANCE_FACTUAL_COUNT in anchors
 
+    def test_vision_matches_gaia_15(self) -> None:
+        # GAIA 624cbf11 verbatim — requires reading a rhyme inscribed
+        # on a headstone visible in the background of a photograph,
+        # hence BOTH EXACT_QUOTE and VISION should fire.
+        q = (
+            "What's the last line of the rhyme under the flavor "
+            "name on the headstone visible in the background of the "
+            "photo of the oldest flavor's headstone in the Ben & "
+            "Jerry's online flavor graveyard as of the end of 2022?"
+        )
+        anchors = select_question_anchors(q)
+        assert AGENT_GUIDANCE_VISION in anchors
+        assert AGENT_GUIDANCE_EXACT_QUOTE in anchors
+
+    def test_vision_photo_of_x(self) -> None:
+        q = "In the photo of the 1969 Apollo crew, who is on the far left?"
+        assert AGENT_GUIDANCE_VISION in select_question_anchors(q)
+
+    def test_vision_written_on_sign(self) -> None:
+        q = "What is written on the sign at the entrance to the museum?"
+        assert AGENT_GUIDANCE_VISION in select_question_anchors(q)
+
+    def test_vision_screenshot_shows(self) -> None:
+        q = "In the screenshot shown in the paper, what value is reported?"
+        assert AGENT_GUIDANCE_VISION in select_question_anchors(q)
+
+    def test_vision_does_not_trigger_on_metaphorical_image(self) -> None:
+        # Generic "image of" without photo/picture framing — keep narrow
+        # so regression on PASS questions is minimized. "image" alone is
+        # too common (e.g. "brand image", "self image") to trigger.
+        assert AGENT_GUIDANCE_VISION not in select_question_anchors(
+            "What is the public image of the company?"
+        )
+        assert AGENT_GUIDANCE_VISION not in select_question_anchors(
+            "Describe the image the poet creates in the second stanza."
+        )
+
+    def test_vision_does_not_trigger_on_plain_factual(self) -> None:
+        # PASS questions without visual signals must stay empty.
+        for q in (
+            "What is the population of France in 2020?",
+            "Who wrote Hamlet?",
+            "How many Olympic medals did Simone Biles win?",
+        ):
+            assert AGENT_GUIDANCE_VISION not in select_question_anchors(q)
+
+    def test_pdb_file_order_matches_gaia_7dd30055(self) -> None:
+        # GAIA 7dd30055 verbatim — 5wb7 first/second atoms distance
+        q = (
+            "Using the Biopython library in Python, parse the PDB "
+            "file of the protein identified by the PDB ID 5wb7 from "
+            "the RCSB Protein Data Bank. Calculate the distance "
+            "between the first and second atoms as they are listed "
+            "in the PDB file. Report the answer in Angstroms, "
+            "rounded to the nearest picometer."
+        )
+        anchors = select_question_anchors(q)
+        assert AGENT_GUIDANCE_PDB_FILE_ORDER in anchors
+
+    def test_pdb_file_order_matches_attachment_phrasing(self) -> None:
+        q = (
+            "Given the attached .pdb file, compute the distance "
+            "between the first and second ATOM records as listed."
+        )
+        assert AGENT_GUIDANCE_PDB_FILE_ORDER in select_question_anchors(q)
+
+    def test_pdb_does_not_trigger_without_order_phrasing(self) -> None:
+        # Generic PDB question without file-order ambiguity must NOT
+        # fire — avoids prompt bloat on PASS-capable questions.
+        for q in (
+            "What is the resolution of the PDB entry 1abc?",
+            "How many chains does the PDB file contain?",
+            "Which protein corresponds to PDB ID 2xyz?",
+        ):
+            assert AGENT_GUIDANCE_PDB_FILE_ORDER not in (
+                select_question_anchors(q)
+            )
+
+    def test_pdb_does_not_trigger_without_pdb_context(self) -> None:
+        # "First and second atoms" without a PDB file reference is
+        # ambiguous for many non-PDB contexts (generic chemistry,
+        # molecular dynamics, etc.) — stay silent.
+        for q in (
+            "What is the bond length between the first and second atoms "
+            "of the methane molecule?",
+            "List the first and second atoms in ethanol.",
+        ):
+            assert AGENT_GUIDANCE_PDB_FILE_ORDER not in (
+                select_question_anchors(q)
+            )
+
     def test_simple_question_matches_nothing(self) -> None:
         # Should not accidentally trigger — must not append guidance.
         for q in (
@@ -240,8 +371,8 @@ class TestSelectQuestionAnchors:
 class TestAnchorPatternsTable:
     """ANCHOR_PATTERNS is the public ordering contract."""
 
-    def test_three_anchors_registered(self) -> None:
-        assert len(ANCHOR_PATTERNS) == 3
+    def test_five_anchors_registered(self) -> None:
+        assert len(ANCHOR_PATTERNS) == 5
 
     def test_all_entries_well_formed(self) -> None:
         import re

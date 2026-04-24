@@ -54,6 +54,31 @@ DEFAULT_MAX_ROWS_PER_SHEET = 400
 # Per-cell truncation — individual notes fields can exceed 10 KB.
 DEFAULT_MAX_CELL_CHARS = 500
 
+# Inline cap. Any rendered attachment longer than this gets returned as
+# a short summary (path + format + size + head excerpt + processing hint)
+# rather than the full text. Stops 2.9 MB PDB / 512 KB log files from
+# getting stuffed into the tool_response message history and blowing
+# the LLM context window on the next agent_loop turn.
+#
+# Origin: 2026-04-23 pod v0ggvz5dcsu9gu GAIA task 7dd30055 (5wb7 PDB,
+# 2,897,856 bytes) — InProcessLlamaCppBackend raised
+# "Requested tokens (9479) exceed context window of 8192" on round 2
+# because read_attachment had returned ~700K tokens of atom coords.
+# The fix is general: any weak-model + small-ctx deploy needs the tool
+# to stay under the context budget regardless of file size. Large
+# attachments are processed via python_exec ``open(path)`` directly.
+#
+# Budget math: 15,000 chars ≈ 3,500 Gemma tokens ≈ 45% of 8K ctx after
+# system prompt + question + prior turns; leaves headroom for the
+# model's own response. Tuneable per deploy via env var or kwarg.
+DEFAULT_MAX_INLINE_CHARS = 15000
+
+# How much of the head of a too-large attachment to include in the
+# summary. Short enough to stay under budget, long enough for the model
+# to recognise the format (first few atoms of a PDB, first row of a
+# gargantuan CSV, first lines of a log).
+DEFAULT_HEAD_PREVIEW_CHARS = 800
+
 #: Extensions handled via the plain-text path (decoded with utf-8 replace).
 _PLAIN_TEXT_EXTENSIONS = frozenset(
     {
@@ -221,11 +246,23 @@ class ReadAttachmentTool:
         *,
         path: str,
         max_bytes: int = DEFAULT_MAX_BYTES,
+        max_inline_chars: int | None = None,
     ) -> str:
         """Dispatch on extension and return a model-ready text rendering.
 
+        Args:
+            path: Absolute path to the attachment.
+            max_bytes: Byte cap on raw file read (plain-text path).
+            max_inline_chars: Character cap on the final rendered text
+                before we swap to a summary-only reply. ``None`` pulls
+                the default from the ``CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS``
+                env var or :data:`DEFAULT_MAX_INLINE_CHARS`. Set very
+                large to disable the summary fallback entirely.
+
         Returns:
-            The extracted text. On failure returns ``"error: ..."`` so
+            The extracted text, or a ``[read_attachment: file too
+            large ...]`` summary block when the rendering would exceed
+            the inline cap. On failure returns ``"error: ..."`` so
             the agent loop treats it as an observation and can retry
             with a different tool rather than raising.
         """
@@ -241,17 +278,23 @@ class ReadAttachmentTool:
         if not os.path.isfile(abs_path):
             return f"error: not a regular file: {abs_path}"
 
+        # Resolve inline cap once so downstream truncation + summary
+        # use the same number.
+        if max_inline_chars is None:
+            max_inline_chars = _resolve_max_inline_chars()
+
         ext = Path(abs_path).suffix.lower()
         try:
             if ext in {".xlsx", ".xlsm"}:
-                return _read_xlsx(abs_path)
-            if ext == ".csv":
-                return _read_csv(abs_path)
-            if ext in _PLAIN_TEXT_EXTENSIONS:
-                return _read_plain_text(abs_path, max_bytes)
-            # Unknown extension — try plain-text path; binary sniff
-            # inside _read_plain_text returns a clear error.
-            return _read_plain_text(abs_path, max_bytes)
+                rendered = _read_xlsx(abs_path)
+            elif ext == ".csv":
+                rendered = _read_csv(abs_path)
+            elif ext in _PLAIN_TEXT_EXTENSIONS:
+                rendered = _read_plain_text(abs_path, max_bytes)
+            else:
+                # Unknown extension — try plain-text path; binary sniff
+                # inside _read_plain_text returns a clear error.
+                rendered = _read_plain_text(abs_path, max_bytes)
         except ReadAttachmentError as exc:
             return f"error: {exc}"
         except Exception as exc:  # noqa: BLE001 — observation tool
@@ -259,3 +302,82 @@ class ReadAttachmentTool:
                 f"error: read_attachment runtime: "
                 f"{type(exc).__name__}: {exc}"
             )
+
+        # Inline-cap guard. Large attachments get summarised so the
+        # tool_response stays well under the LLM context budget.
+        if max_inline_chars > 0 and len(rendered) > max_inline_chars:
+            return _summarise_large_attachment(
+                abs_path=abs_path,
+                rendered=rendered,
+                max_inline_chars=max_inline_chars,
+            )
+        return rendered
+
+
+def _resolve_max_inline_chars() -> int:
+    """Pick the inline cap from env or default.
+
+    Env override: ``CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS``.
+    Non-integer / negative values fall back to the default so a
+    malformed deploy env doesn't accidentally disable the guard.
+    ``0`` explicitly disables the cap (full content always returned).
+    """
+    raw = os.environ.get("CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS")
+    if raw is None:
+        return DEFAULT_MAX_INLINE_CHARS
+    try:
+        value = int(raw.strip())
+    except (ValueError, AttributeError):
+        return DEFAULT_MAX_INLINE_CHARS
+    if value < 0:
+        return DEFAULT_MAX_INLINE_CHARS
+    return value
+
+
+def _summarise_large_attachment(
+    *,
+    abs_path: str,
+    rendered: str,
+    max_inline_chars: int,
+) -> str:
+    """Return a short path + format + head + processing-hint summary.
+
+    The hint actively steers the model toward ``python_exec`` with a
+    plain ``open(path)`` so a Biopython / pandas / json / CSV parse
+    happens outside the prompt. Without this the model tends to retry
+    ``read_attachment`` or ``read_file`` on the same path and blow
+    context again.
+
+    Summary total size is bounded: head preview + fixed boilerplate
+    stays under ~1,200 chars regardless of input size.
+    """
+    size_bytes = 0
+    try:
+        size_bytes = os.path.getsize(abs_path)
+    except OSError:
+        pass
+    ext = Path(abs_path).suffix.lower() or "(none)"
+    head = rendered[:DEFAULT_HEAD_PREVIEW_CHARS]
+    # Stop the head at the last newline so we don't cut mid-token.
+    if len(head) == DEFAULT_HEAD_PREVIEW_CHARS:
+        last_nl = head.rfind("\n")
+        if last_nl > DEFAULT_HEAD_PREVIEW_CHARS // 2:
+            head = head[:last_nl]
+    rendered_chars = len(rendered)
+    return (
+        "[read_attachment: file too large to inline — returned summary "
+        f"only (rendered {rendered_chars} chars > cap {max_inline_chars}).]\n"
+        f"path: {abs_path}\n"
+        f"size_bytes: {size_bytes}\n"
+        f"extension: {ext}\n"
+        "how_to_process: Use python_exec with "
+        "`with open(path) as f: ...` (or the relevant library — "
+        "Biopython PDB.PDBParser, pandas.read_csv, json.load — for "
+        "structured formats). Do NOT retry read_attachment or "
+        "read_file on this path; the content has already been fully "
+        "rendered on disk and would overflow the LLM context window.\n"
+        "head_preview (first "
+        f"{len(head)} chars):\n"
+        f"{head}\n"
+        "[end of read_attachment summary]"
+    )

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Concinno Config</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>Concinno Config</h1>
+  <nav class="tabs">
+    <button type="button" data-tab="features" class="active">Features</button>
+    <button type="button" data-tab="skills">Skills</button>
+    <button type="button" data-tab="commands">Slash Commands</button>
+    <button type="button" data-tab="harness">Host Permissions</button>
+    <button type="button" data-tab="ziq">ZIQ Posterior</button>
+    <button type="button" data-tab="state">Runtime State</button>
+  </nav>
+  <span id="live-indicator" class="live" title="Live poll every 3s">● live</span>
+  <span id="status" class="status">Loading…</span>
+</header>
+
+<main>
+  <section id="tab-features" class="tab active">
+    <div class="toolbar">
+      <input id="filter" type="search" placeholder="Filter by name, description, category, example…">
+      <select id="sort" title="Sort order">
+        <option value="category-name">Sort: Category → Name</option>
+        <option value="name">Sort: Name (A–Z)</option>
+        <option value="non-default-first">Sort: Non-default first</option>
+        <option value="ziq-first">Sort: ZIQ-tunable first</option>
+        <option value="effect-scope">Sort: Effect scope</option>
+      </select>
+      <label class="toggle-switch"><input id="only-non-default" type="checkbox"> Only non-default</label>
+      <label class="toggle-switch"><input id="confirm-risky" type="checkbox" checked> Confirm on risk</label>
+    </div>
+    <div id="active-facets" class="active-facets"></div>
+    <div id="features-list" class="list"></div>
+  </section>
+
+  <section id="tab-skills" class="tab">
+    <p class="hint">
+      Claude Code <strong>skills</strong> — Markdown SOPs + external
+      integrations auto-loaded at SessionStart from
+      <code>~/.claude/skills/</code> and <code>./.claude/skills/</code>.
+      Toggle writes to <code>~/.concinno/skills.json</code> as the
+      source-of-truth; a future SessionStart hook will honour it
+      (currently advisory). Includes MCP / Agent / Hammer and any other
+      skill package.
+    </p>
+    <div class="toolbar">
+      <input id="skills-filter" type="search" placeholder="Filter by name, description, example…">
+      <select id="skills-sort" title="Sort order">
+        <option value="name">Sort: Name (A–Z)</option>
+        <option value="enabled">Sort: Enabled first</option>
+        <option value="scope">Sort: Scope</option>
+      </select>
+    </div>
+    <div id="skills-roots" class="roots-panel"></div>
+    <div id="skills-scope-chips" class="active-facets"></div>
+    <div id="skills-list" class="list"></div>
+  </section>
+
+  <section id="tab-commands" class="tab">
+    <p class="hint">
+      Slash commands the host agent pops up when you type <code>/</code>
+      (Claude Code reads <code>~/.claude/commands/</code>; Cursor / Codex
+      adapters will read their own conventions when shipped).
+      Concinno-managed commands are tagged
+      <span class="badge ziq">concinno</span>. Click <em>Resync</em> to
+      reinstall after a Concinno upgrade.
+    </p>
+    <div class="toolbar">
+      <input id="commands-filter" type="search" list="commands-datalist"
+             placeholder="Type to autocomplete / filter (slug or description)…">
+      <datalist id="commands-datalist"></datalist>
+      <button type="button" id="commands-sync" class="lang-switch">Resync concinno commands</button>
+    </div>
+    <div id="commands-list"></div>
+  </section>
+
+  <section id="tab-harness" class="tab">
+    <p class="hint">
+      Host-agent bash sandbox permission rules (Claude Code today,
+      Cursor / Codex tomorrow via portable adapters). This is the
+      <strong>second</strong> gate, separate from concinno
+      <code>release_authorization</code>. Concinno
+      <code>disabled=True</code> does not open this layer. Edit the JSON
+      file directly and restart the host agent to pick up changes.
+    </p>
+    <div class="toolbar">
+      <input id="harness-filter" type="search" placeholder="Filter allow/deny/ask rules…">
+      <select id="harness-bucket" title="Permission bucket">
+        <option value="all">Bucket: All</option>
+        <option value="allow">Bucket: allow</option>
+        <option value="deny">Bucket: deny</option>
+        <option value="ask">Bucket: ask</option>
+      </select>
+    </div>
+    <div id="harness-list"></div>
+  </section>
+
+  <section id="tab-ziq" class="tab">
+    <p class="hint">
+      ZIQ auto-tune posterior (<code>~/.concinno/ziq_posterior.json</code>).
+      Read-only here — actual tuning happens in the online-learning loop.
+      Manual values on the <em>Features</em> tab always win when explicitly
+      pinned 🔒. Feature-level ZIQ toggle turns the whole feature opaque
+      to the tuner.
+    </p>
+    <div id="ziq-summary" class="ziq-summary"></div>
+    <div id="ziq-overrides"></div>
+  </section>
+
+  <section id="tab-state" class="tab">
+    <p class="hint">Live runtime-state snapshot — polled every 3s.</p>
+    <div id="state-panels"></div>
+  </section>
+</main>
+
+<footer class="info">
+  <span><strong>Effect scope:</strong></span>
+  <span class="legend-item"><span class="badge effect-immediate">immediate</span><span class="legend-text">next tool-call / subprocess picks up the change</span></span>
+  <span class="legend-item"><span class="badge effect-process">process restart</span><span class="legend-text">running daemons must restart</span></span>
+  <span class="legend-item"><span class="badge effect-session">session restart</span><span class="legend-text">hook-injected content only updates on SessionStart</span></span>
+  <span class="spacer"></span>
+  <span><strong>Pin:</strong> 🔒 = operator-pinned (ZIQ will not override); 🔄 = ZIQ-tunable</span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

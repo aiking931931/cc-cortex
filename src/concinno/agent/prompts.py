@@ -8,6 +8,7 @@
     AGENT_GUIDANCE_COMPUTE_TOOLS, AGENT_GUIDANCE_NO_REFUSAL,
     AGENT_GUIDANCE_EXACT_QUOTE, AGENT_GUIDANCE_EXACT_UNIT,
     AGENT_GUIDANCE_FACTUAL_COUNT, AGENT_GUIDANCE_SEARCH_DISCIPLINE,
+    AGENT_GUIDANCE_VISION, AGENT_GUIDANCE_PDB_FILE_ORDER,
     default_guidance, select_question_anchors,
     build_targeted_guidance
 """
@@ -101,6 +102,48 @@ AGENT_GUIDANCE_FACTUAL_COUNT = (
     "publisher's own report."
 )
 
+AGENT_GUIDANCE_PDB_FILE_ORDER = (
+    "This question references atom or residue ordering in a PDB "
+    "file. Biopython's ``list(structure.get_atoms())`` yields atoms "
+    "in Model > Chain > Residue > Atom hierarchy order, which is "
+    "NOT guaranteed to match the ATOM-record line order in the "
+    "original .pdb text (altloc / DisorderedAtom / multi-model "
+    "entries reorder). For questions that ask for the 'first', "
+    "'second', or 'Nth' atom 'as listed in the PDB file', rely on "
+    "the atom serial number — it preserves the file's line order:\n"
+    "  from Bio.PDB import PDBParser\n"
+    "  s = PDBParser(QUIET=True).get_structure('x', path)\n"
+    "  ordered = sorted(s.get_atoms(), "
+    "key=lambda a: a.get_serial_number())\n"
+    "  d = ordered[0] - ordered[1]  # Atom subtraction "
+    "returns distance in Angstroms\n"
+    "Alternative (no Biopython): read the raw text and take the "
+    "first two lines starting with 'ATOM  ' / 'HETATM'; parse "
+    "fixed-width columns 31-38 (x), 39-46 (y), 47-54 (z); compute "
+    "sqrt of the sum of squared coordinate differences. Do NOT use "
+    "``list(structure.get_atoms())[0] / [1]`` — that is hierarchy "
+    "order, not file order. Round to the precision the question "
+    "requests (e.g. 'nearest picometer' reported in Angstroms = "
+    "3 decimal places)."
+)
+
+AGENT_GUIDANCE_VISION = (
+    "This question requires visual inspection — identifying a "
+    "subject, reading text, or locating something inside a "
+    "photograph, picture, screenshot, or image frame. You MUST call "
+    "fetch_image with the direct image URL so the next inference "
+    "turn can actually see the image. Narrating what you would look "
+    "at, describing a planned search, or restating the question is "
+    "NOT a substitute for invoking the tool. Concrete call:\n"
+    "  fetch_image(url=\"https://example.com/photo.jpg\")\n"
+    "If you do not yet have the direct image URL, first use "
+    "web_search or fetch_url to locate the page, extract a direct "
+    "image URL (ending .jpg/.jpeg/.png/.webp/.gif), then call "
+    "fetch_image on THAT URL. Producing FINAL ANSWER on a visual "
+    "question without having called fetch_image at least once is "
+    "scored wrong."
+)
+
 
 def default_guidance() -> str:
     """Return the default joined agent-guidance prompt."""
@@ -168,6 +211,56 @@ _FACTUAL_COUNT_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_VISION_PATTERN = re.compile(
+    # 1. "photo/picture/image of X" — the question anchors on a
+    #    specific image; agent must see it.
+    r"\b(?:photo|photograph|picture|screenshot|thumbnail|still"
+    r"|frame)s?\s+(?:of|showing|depicting|shows|depicts|taken\s+of"
+    r"|featuring|that\s+shows?)\b"
+    # 2. "in/on/from the photo / background / picture / screenshot"
+    r"|\b(?:in|within|on|from)\s+the\s+"
+    r"(?:photo|photograph|picture|image|screenshot|background|frame"
+    r"|thumbnail)\b"
+    # 3. "visible/shown/depicted/pictured in [the] background/photo"
+    r"|\b(?:visible|shown|depicted|pictured|appearing|seen"
+    r"|displayed|captured)\s+"
+    r"(?:in|on|within|behind|next\s+to)\s+"
+    r"(?:the|a|an)?\s*"
+    r"(?:photo|photograph|picture|image|background|screenshot"
+    r"|frame)\b"
+    # 4. "what is written/inscribed/shown on X" (reading text on an
+    #    object in an image)
+    r"|\bwhat(?:'s|\s+is)\s+"
+    r"(?:written|inscribed|shown|depicted|visible|printed|engraved"
+    r"|painted|displayed)\s+(?:on|in|at)\b"
+    # 5. "headstone/tombstone/sign/label + visible/shown/pictured"
+    #    (narrow companion to EXACT_QUOTE for visual-object questions)
+    r"|\b(?:headstone|tombstone|gravestone|sign|plaque|label"
+    r"|poster|banner|billboard)\s+"
+    r"(?:visible|shown|pictured|in\s+the\s+background|depicted)\b",
+    re.IGNORECASE,
+)
+
+
+# Co-occurrence check: PDB / .pdb / Protein Data Bank context AND
+# an ordinal reference that pins to file line order (not residue
+# number). Both lookaheads must match so we don't fire on generic
+# "PDB ID 1abc" questions that have no file-order ambiguity.
+_PDB_FILE_ORDER_PATTERN = re.compile(
+    r"(?=.*?(?:\bPDB\s+(?:file|ID)\b|\.pdb\b"
+    r"|\bProtein\s+Data\s+Bank\b))"
+    r"(?=.*?(?:"
+    # Ordinal + atom/residue/record within 40 chars
+    r"\b(?:first|second|third|fourth|fifth"
+    r"|1st|2nd|3rd|4th|5th)\b"
+    r"[\s\S]{0,40}?"
+    r"\b(?:atoms?|residues?|HETATMs?|records?)\b"
+    r"|\bas\s+(?:they\s+are\s+)?listed\b"
+    r"|\bin\s+(?:the\s+)?(?:order|file\s+order)\b"
+    r"))",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 # Ordered pattern table — order controls deterministic output order
 # when a question matches multiple anchors.
@@ -178,6 +271,12 @@ ANCHOR_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
         "factual_count",
         _FACTUAL_COUNT_PATTERN,
         AGENT_GUIDANCE_FACTUAL_COUNT,
+    ),
+    ("vision", _VISION_PATTERN, AGENT_GUIDANCE_VISION),
+    (
+        "pdb_file_order",
+        _PDB_FILE_ORDER_PATTERN,
+        AGENT_GUIDANCE_PDB_FILE_ORDER,
     ),
 )
 

@@ -255,6 +255,60 @@ Concinno ships ~40 modules organized into 5 layers:
 
 ---
 
+
+
+## Feature Switches
+
+<!-- BEGIN: feature-index -->
+<!-- Auto-generated from FEATURE_META. Run `concinno features sync-readme` to refresh. -->
+
+| Feature | Category | Effect scope | ZIQ-tunable | Description |
+|---------|----------|--------------|-------------|-------------|
+| `insight_engine` | cognitive | immediate |  | Proactive knowledge injection when user prompt matches blind-spot rules |
+| `bassclef_wordreverse` | context | immediate |  | Inject bass-clef mnemonic + word-reverse L/S tag + time-unit hint for music-notation vision questions |
+| `binary_extractor` | context | immediate |  | Inline-extract xlsx/csv/tsv attachments into the prompt (bypasses weak-model tool-use discipline) |
+| `cognitive_anchor` | context | session_restart | ✓ | Inject solid-state language red-team prompts before high-risk operations (architecture edits, large deletions, new modules, deploys) |
+| `gaia_tool_router` | context | immediate |  | Route GAIA questions by the Annotator-Metadata Tools field (ground-truth tool list) instead of self-regex heuristic |
+| `gemma4_vision` | context | immediate |  | Enable Gemma 4 native vision handler (Gemma4VisionChatHandler) in place of Qwen2.5-VL fallback |
+| `image_upscale_4x` | context | immediate |  | Auto 4× LANCZOS upscale for small (<800 px) images before vision inference — music notation / compact tables benefit |
+| `language_enforce` | context | session_restart |  | Inject language enforcement on every tool call — forces thinking + responses in configured language |
+| `ocr_fallback` | context | immediate |  | Route text-heavy images through OCR + text-LLM reasoning (charts / headstones / documents) before vision |
+| `pipeline_mode` | context | immediate |  | Toggle between Dynamic (Guard Pipeline + learning loop) and Static (pure prompt pipeline, no guards) mode. Dynamic is a strict superset of Static |
+| `polygon_counting_hint` | context | immediate |  | Inject a systematic walk-the-boundary procedure + label-as-metadata warning for polygon edge/vertex counting vision questions (off-by-one defence) |
+| `session_switches` | context | session_restart |  | SessionStart summary of non-default switches — ensures the agent reads user opt-outs before primacy-bias kicks in |
+| `unified_inprocess` | context | immediate |  | Use a single in-process Llama instance for both text and vision (KV cache shared, no HTTP :9000 hop) |
+| `agent_cap` | hard_gate | immediate | ✓ | Block execution-type Agent spawn after N times per session. Research agents (Explore/Plan/read-only) are uncapped. |
+| `bash_background_gate` | hard_gate | immediate |  | Block long-running Bash commands without run_in_background |
+| `boundary_guard` | hard_gate | immediate |  | Hook/library boundary violation detection (PreToolUse DENY) |
+| `butterfly_guard` | hard_gate | immediate | ✓ | Butterfly Effect: discover issue → must fix before continuing. Tracks issues in a session-scoped ledger, denies non-fix operations |
+| `clarity_gate` | hard_gate | immediate | ✓ | Block ambiguous prompts combined with irreversible operations |
+| `consecutive_fail_gate` | hard_gate | immediate | ✓ | Block after N consecutive tool failures (stuck detection) |
+| `delivery_gate` | hard_gate | immediate | ✓ | Enterprise delivery verification — block submission of unverified work |
+| `handoff_required_guard` | hard_gate | immediate |  | Block session stop when work was done but no handoff file updated |
+| `hijack_gate` | hard_gate | immediate | ✓ | TADS four-level circuit breaker based on hijack_score (L0→L2→L3→L4) |
+| `identity_guard` | hard_gate | immediate |  | Block Agent from modifying identity configs (CLAUDE.md, .claude/rules/, settings.json, hook configs) |
+| `prompt_guard` | hard_gate | session_restart | ✓ | Clarity gate + multi-question detection for UserPromptSubmit |
+| `proposal_guard` | hard_gate | immediate |  | Block new proposals in planning files without side-effect analysis |
+| `publish_scan` | hard_gate | immediate |  | Pre-publish artifact scan for secrets, keys, and personal paths |
+| `python_c_gate` | hard_gate | immediate |  | Block complex python -c one-liners (>5 lines) |
+| `read_first_gate` | hard_gate | immediate |  | Block Edit/Write on existing files not yet Read this session |
+| `sentinel_gate` | hard_gate | immediate | ✓ | Block repeated Edit on same file N+ times (with lint exception) |
+| `token_gate` | hard_gate | immediate | ✓ | Block Agent spawn when context tokens exceed threshold |
+| `ui_verify` | hard_gate | immediate |  | Lock after deploy with UI changes until screenshot verification |
+| `whitepaper_guard` | hard_gate | immediate |  | Block whitepaper IP keywords from leaking to external paths |
+| `code_guard` | hard_quality | immediate |  | Python(ruff) / Rust(cargo) / Go(vet) static analysis |
+| `design_theory` | hard_quality | immediate | ✓ | Enforce design principles: Vertical Slice traceability on planning files, Deep Module ratio check on code files |
+| `handoff_format` | hard_quality | immediate |  | Validate handoff file structure on write |
+| `linting` | hard_quality | immediate |  | ESLint for JavaScript files |
+| `structural_guard` | hard_quality | immediate | ✓ | Structural analysis (func length / nesting / TODO debt / file size) |
+| `typescript` | hard_quality | immediate |  | tsc --noEmit type checking with SHA256 cache |
+| `configure_permissions` | utility | immediate |  | One-shot allowlist bootstrap — add ~100 safe Bash patterns (pytest/ruff/git/pip) to ~/.claude/settings.json so the agent stops being prompted for routine ops |
+| `deny_marker` | ux | session_restart |  | Red ANSI counter on every deny (✖ 阻擋 #N) |
+| `session_summary` | ux | session_restart |  | Visual session end summary (token/streak/files box) |
+| `streak_ux` | ux | session_restart |  | Clean edit streak celebrations (🔥x5, ✅ fixed, etc.) |
+| `token_display` | ux | session_restart |  | Append real token usage to CRITICAL/MILESTONE UX messages |
+
+<!-- END: feature-index -->
 ## CLI
 
 ### `concinno status`

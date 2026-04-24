@@ -4,7 +4,8 @@
 @responsibility Sound playback, toast notifications, session title
     generation, i18n (Win/macOS/Linux)
 @dependencies (none — stdlib only)
-@exports play_sound, show_toast, make_session_title
+@exports play_sound, show_toast, make_session_title,
+    notify_waiting_on_user
 """
 
 import base64
@@ -519,6 +520,87 @@ def show_toast(
                 timeout=5,
                 capture_output=True,
             )
+        return True
+    except Exception:
+        return False
+
+
+# ── Generic "waiting on user" helper (2.21.0) ───────────────────────
+
+_WAITING_TOAST_STRINGS = {
+    "en": "Claude is waiting — input needed",
+    "zh-TW": "Claude 在等你 — 需要回應",
+    "zh-CN": "Claude 在等你 — 需要回应",
+    "ja": "Claude が応答待ち — 入力が必要",
+    "ko": "Claude가 대기 중 — 입력 필요",
+}
+
+
+def notify_waiting_on_user(
+    context: str,
+    *,
+    title: str | None = None,
+    tag: str = "concinno-waiting-on-user",
+    group: str = "concinno-waiting-on-user",
+    async_fire: bool = True,
+) -> bool:
+    """Surface a toast when the agent needs the user to respond / decide.
+
+    Distinct from :func:`show_toast` (low-level) and
+    ``hooks.ask_user_toast.maybe_show_ask_user_toast`` (Claude Code
+    ``AskUserQuestion`` tool only). Call this from any code path that
+    is *about to block* on user input — ``release_authorization``
+    deny branches, destruction-guard confirmation prompts,
+    custom CLI wizards — so the user learns to respond without
+    foreground-watching the terminal.
+
+    Args:
+        context: Short human-readable reason (<=80 chars preferred);
+            e.g. ``"publish concinno 2.21.0 needs 'go publish ...'"``.
+        title: Optional override. Default is the locale-aware
+            ``"Claude is waiting — input needed"`` style title.
+        tag/group: Toast replacement keys — a burst of prompts
+            collapses to ONE toast instead of stacking.
+        async_fire: Fire on a daemon thread (default) so the caller
+            does not block on COM / WinRT cold init. Set False for
+            deterministic testing.
+
+    Returns:
+        ``True`` when a toast was emitted (or queued for async fire),
+        ``False`` on hard error or when toasts are disabled in config.
+    """
+    try:
+        locale = _get_locale()
+    except Exception:
+        locale = "en"
+    resolved_title = (
+        title
+        if title is not None
+        else _WAITING_TOAST_STRINGS.get(locale, _WAITING_TOAST_STRINGS["en"])
+    )
+    message = (context or "").strip()[:120] or resolved_title
+
+    def _fire() -> bool:
+        try:
+            return show_toast(
+                title=resolved_title,
+                message=message,
+                tag=tag,
+                group=group,
+            )
+        except Exception:
+            return False
+
+    if not async_fire:
+        return _fire()
+
+    import threading
+    try:
+        threading.Thread(
+            target=_fire,
+            name="concinno-waiting-on-user-toast",
+            daemon=True,
+        ).start()
         return True
     except Exception:
         return False

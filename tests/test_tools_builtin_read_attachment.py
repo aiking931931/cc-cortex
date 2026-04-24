@@ -25,9 +25,12 @@ import pytest
 from openpyxl import Workbook
 
 from concinno.tools.builtin.read_attachment import (
+    DEFAULT_HEAD_PREVIEW_CHARS,
+    DEFAULT_MAX_INLINE_CHARS,
     DEFAULT_MAX_ROWS_PER_SHEET,
     ReadAttachmentError,
     ReadAttachmentTool,
+    _resolve_max_inline_chars,
 )
 
 # ── Contract ─────────────────────────────────────────
@@ -212,3 +215,157 @@ def test_openpyxl_missing_returns_clean_error(
 def test_readattachmenterror_is_exception() -> None:
     # Type contract — raised internally, string-wrapped by ``call``.
     assert issubclass(ReadAttachmentError, Exception)
+
+
+# ── Inline cap / summary fallback ────────────────────────
+
+
+def test_small_file_under_cap_returns_full_content(tmp_path: Path) -> None:
+    """Below the inline cap the tool behaves exactly as before."""
+    p = tmp_path / "small.txt"
+    body = "hello world\n" * 50  # ~600 chars — well under 15k default
+    p.write_text(body)
+    out = ReadAttachmentTool().call(path=str(p))
+    assert out.startswith("hello world")
+    assert "read_attachment: file too large" not in out
+
+
+def test_large_file_over_cap_returns_summary(tmp_path: Path) -> None:
+    """Over the inline cap the tool returns a short summary only."""
+    p = tmp_path / "big.pdb"
+    # Mimic a PDB: many short lines so the size-on-disk and the
+    # rendered-chars both clear the cap.
+    body = "ATOM  12345  N   ALA A   1      11.104  13.207  10.266\n" * 1000
+    p.write_text(body)
+    out = ReadAttachmentTool().call(
+        path=str(p), max_inline_chars=2000,
+    )
+    # Summary markers present.
+    assert "read_attachment: file too large" in out
+    assert "path:" in out
+    assert str(p) in out
+    assert "size_bytes:" in out
+    assert "extension: .pdb" in out
+    assert "how_to_process" in out
+    assert "python_exec" in out
+    # Head preview present but bounded.
+    assert "head_preview" in out
+    assert "ATOM" in out
+    # Summary itself must not exceed a reasonable budget.
+    assert len(out) < 2500
+
+
+def test_large_file_summary_steers_to_python_exec(tmp_path: Path) -> None:
+    """Summary actively routes the model to ``python_exec`` with
+    ``open(path)`` — the whole point of the inline cap."""
+    p = tmp_path / "big.log"
+    p.write_text("line\n" * 5000)
+    out = ReadAttachmentTool().call(
+        path=str(p), max_inline_chars=500,
+    )
+    assert "python_exec" in out
+    # Explicit anti-retry guidance — without this weak models loop on
+    # re-reading the same path.
+    assert "Do NOT retry" in out or "retry" in out.lower()
+
+
+def test_max_inline_chars_kwarg_overrides_default(tmp_path: Path) -> None:
+    p = tmp_path / "medium.txt"
+    body = "a" * 5000
+    p.write_text(body)
+    # With a very small cap we get a summary.
+    assert "file too large" in ReadAttachmentTool().call(
+        path=str(p), max_inline_chars=1000,
+    )
+    # With a huge cap we get the full content.
+    out = ReadAttachmentTool().call(
+        path=str(p), max_inline_chars=10_000_000,
+    )
+    assert "file too large" not in out
+    assert out.startswith("a" * 100)
+
+
+def test_max_inline_chars_zero_disables_cap(tmp_path: Path) -> None:
+    """Setting the cap to 0 returns the full rendering. Useful for
+    debug deploys or test runs where truncation would hide signal."""
+    p = tmp_path / "text.txt"
+    body = "x" * 50_000
+    p.write_text(body)
+    out = ReadAttachmentTool().call(path=str(p), max_inline_chars=0)
+    assert "file too large" not in out
+    assert out.startswith("x" * 100)
+
+
+def test_env_override_applies_when_kwarg_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS", "500")
+    p = tmp_path / "log.txt"
+    p.write_text("line\n" * 1000)
+    out = ReadAttachmentTool().call(path=str(p))
+    assert "file too large" in out
+
+
+def test_env_override_malformed_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Garbage env value must not silently disable the guard."""
+    monkeypatch.setenv("CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS", "not-an-int")
+    assert _resolve_max_inline_chars() == DEFAULT_MAX_INLINE_CHARS
+
+
+def test_env_override_negative_falls_back_to_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS", "-42")
+    assert _resolve_max_inline_chars() == DEFAULT_MAX_INLINE_CHARS
+
+
+def test_env_override_zero_is_honoured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS", "0")
+    assert _resolve_max_inline_chars() == 0
+
+
+def test_env_override_positive_integer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONCINNO_READ_ATTACHMENT_MAX_INLINE_CHARS", "7500")
+    assert _resolve_max_inline_chars() == 7500
+
+
+def test_head_preview_bounded(tmp_path: Path) -> None:
+    """The head preview obeys :data:`DEFAULT_HEAD_PREVIEW_CHARS` even when
+    the underlying rendering is enormous — cheap guardrail against a
+    regression where the summary silently becomes almost as large as
+    the original."""
+    p = tmp_path / "big.pdb"
+    p.write_text("A" * 100_000)
+    out = ReadAttachmentTool().call(path=str(p), max_inline_chars=2000)
+    # Find the head_preview block and verify it stays under the cap.
+    idx = out.find("head_preview")
+    assert idx >= 0
+    preview_block = out[idx:]
+    # Preview content is everything after the "chars):\n" marker up to
+    # the terminator.
+    start = preview_block.find("chars):\n")
+    end = preview_block.find("[end of read_attachment summary]")
+    assert start > 0
+    assert end > start
+    preview_text = preview_block[start + len("chars):\n"):end].rstrip()
+    assert len(preview_text) <= DEFAULT_HEAD_PREVIEW_CHARS + 5
+
+
+def test_binary_rejection_unaffected_by_cap(tmp_path: Path) -> None:
+    """Binary sniff short-circuits before the cap — error string is
+    returned, not a summary. Keeps the failure taxonomy clean."""
+    p = tmp_path / "blob.bin"
+    # A head that looks binary (NUL byte is a strong binary signal
+    # inside _looks_binary).
+    p.write_bytes(b"\x00\x01\x02\x03" * 1000 + b"A" * 50000)
+    out = ReadAttachmentTool().call(
+        path=str(p), max_inline_chars=500,
+    )
+    assert out.startswith("error:")
+    assert "file too large" not in out

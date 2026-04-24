@@ -57,7 +57,10 @@ def test_main_module_no_args_exits_zero() -> None:
         [sys.executable, "-m", "concinno"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=30,
+        env=_child_env(),
     )
     # Accept either 0 or 2 — both are conventional argparse outcomes.
     assert result.returncode in (0, 2), (

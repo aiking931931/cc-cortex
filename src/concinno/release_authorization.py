@@ -310,9 +310,24 @@ def check_authorization(
     required = format_required_string(package, version)
     matcher = _compile_match_regex(required)
 
+    def _notify_waiting(mode_label: str) -> None:
+        """Surface a toast so the user sees the agent is blocked."""
+        try:
+            from concinno.core.notify import notify_waiting_on_user
+
+            notify_waiting_on_user(
+                f"{operation} {package}@{version} needs: {required}"
+                f" (mode={mode_label})",
+                tag="concinno-release-auth",
+                group="concinno-release-auth",
+            )
+        except Exception:  # pragma: no cover — toast is a side-effect
+            pass
+
     if cfg.mode == AuthorizationMode.STRING_MATCH:
         if transcript_text and matcher.search(transcript_text):
             return True, ""
+        _notify_waiting("STRING_MATCH")
         return False, (
             f"release_authorization: operation {operation!r} "
             f"({package}@{version}) requires the user to type the exact "
@@ -334,6 +349,7 @@ def check_authorization(
         for ans in answers:
             if ans and matcher.search(ans):
                 return True, ""
+        _notify_waiting("ASKUSER_ANSWER")
         return False, (
             f"release_authorization: operation {operation!r} "
             f"({package}@{version}) requires the user to select an "

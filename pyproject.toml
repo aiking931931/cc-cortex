@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "2.18.1"
+version = "2.30.1"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "Apache-2.0"
@@ -89,6 +89,14 @@ control-anything = [
 mcp = [
     "mcp>=1.0",
 ]
+# Local GGUF inference runtime — direct llama.cpp bypassing Ollama's
+# degenerate-loop layer on Gemma 4 Q4_K_M (see docs/2.20.0-llamacpp-runtime.md).
+# Pulls in the [server] extras so ``concinno.llm_runtime.LlamaCppServer``
+# can spawn ``python -m llama_cpp.server`` out of the box. The wheel is
+# large and CUDA-specific; not in ``all`` — opt in explicitly.
+llm-local = [
+    "llama-cpp-python[server]>=0.3",
+]
 # Bundles
 lite = []  # zero-dep, regex-only — explicitly named for clarity
 all = [
@@ -115,6 +123,15 @@ dev = [
     "hypothesis>=6.0",
     "ruff>=0.4",
 ]
+# Config GUI — localhost FastAPI + single-page Vanilla JS frontend for
+# visualizing / editing every FEATURE_META switch and ``~/.concinno/*.json``
+# file without round-tripping through an LLM. Launch via ``concinno gui``.
+# Kept out of ``all`` — only install when the operator wants the dashboard.
+gui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
@@ -127,6 +144,13 @@ Repository = "https://github.com/aiking931931/concinno"
 Documentation = "https://github.com/aiking931931/concinno#readme"
 Issues = "https://github.com/aiking931931/concinno/issues"
 Changelog = "https://github.com/aiking931931/concinno/blob/main/CHANGELOG.md"
+
+[project.entry-points."concinno.preset_consumers"]
+# v4 preset cascade consumer group. External consumers register here and
+# Concinno dispatches ``apply_preset(name)`` hooks when ``set_preset()``
+# runs. The Concinno library itself is not a consumer — the block is
+# declared so ``entry_points(group=...)`` never raises on an empty
+# discovery. See ``docs/narrower-scope-v4-ziq-autotune.md`` §2.
 
 [project.scripts]
 concinno = "concinno.cli:main"

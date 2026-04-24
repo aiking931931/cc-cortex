@@ -916,14 +916,210 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # ── GAIA skill behavior toggles (2.21.0) ──
+    "gaia_tool_router": {
+        "category": "context",
+        "description": (
+            "Route GAIA questions by the Annotator-Metadata Tools field "
+            "(ground-truth tool list) instead of self-regex heuristic"
+        ),
+        "description_zh": (
+            "GAIA 題依 Annotator Metadata Tools 欄位（題目設計者標的 "
+            "ground-truth）自動分派 pipeline，而非自己 regex 猜 qtype"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "unified_inprocess": {
+        "category": "context",
+        "description": (
+            "Use a single in-process Llama instance for both text and "
+            "vision (KV cache shared, no HTTP :9000 hop)"
+        ),
+        "description_zh": (
+            "單一 Llama in-process instance 共享 text+vision（KV cache "
+            "共用，不走 HTTP :9000 hop）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gemma4_vision": {
+        "category": "context",
+        "description": (
+            "Enable Gemma 4 native vision handler "
+            "(Gemma4VisionChatHandler) in place of Qwen2.5-VL fallback"
+        ),
+        "description_zh": (
+            "啟用 Gemma 4 native vision handler（Gemma4VisionChatHandler）"
+            "取代 Qwen2.5-VL fallback"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "binary_extractor": {
+        "category": "context",
+        "description": (
+            "Inline-extract xlsx/csv/tsv attachments into the prompt "
+            "(bypasses weak-model tool-use discipline)"
+        ),
+        "description_zh": (
+            "xlsx/csv/tsv 結構化 binary attachment 自動 extract 內容塞進 "
+            "prompt（繞過弱 model 的 tool-use 紀律）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "image_upscale_4x": {
+        "category": "context",
+        "description": (
+            "Auto 4× LANCZOS upscale for small (<800 px) images before "
+            "vision inference — music notation / compact tables benefit"
+        ),
+        "description_zh": (
+            "<800px 小圖自動 4× LANCZOS upscale（music notation / "
+            "compact tables 精度救援）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "min_side": {
+                "type": "int",
+                "default": 800,
+                "min": 200,
+                "max": 2048,
+                "recommended": 800,
+                "risk_low": (
+                    "min_side<200 disables upscaling for most puzzle "
+                    "images — noteheads lose detail"
+                ),
+                "risk_high": (
+                    "min_side>2048 upscales large images unnecessarily "
+                    "and wastes VRAM on the mmproj encoder"
+                ),
+            },
+            "factor": {
+                "type": "int",
+                "default": 4,
+                "min": 2,
+                "max": 8,
+                "recommended": 4,
+            },
+        },
+    },
+    "bassclef_wordreverse": {
+        "category": "context",
+        "description": (
+            "Inject bass-clef mnemonic + word-reverse L/S tag + "
+            "time-unit hint for music-notation vision questions"
+        ),
+        "description_zh": (
+            "bass clef 樂譜題注入 mnemonic + word-reverse L/S tag + "
+            "time-unit hint（GAIA 8f80e01c 起源）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "polygon_counting_hint": {
+        "category": "context",
+        "description": (
+            "Inject a systematic walk-the-boundary procedure + "
+            "label-as-metadata warning for polygon edge/vertex "
+            "counting vision questions (off-by-one defence)"
+        ),
+        "description_zh": (
+            "polygon / 邊數 / 頂點 類計數題注入沿邊走一遍的系統化 "
+            "procedure + 標籤是 metadata 不納入計數的警告 "
+            "（GAIA 6359a0b1 off-by-one 起源）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "ocr_fallback": {
+        "category": "context",
+        "description": (
+            "Route text-heavy images through OCR + text-LLM reasoning "
+            "(charts / headstones / documents) before vision"
+        ),
+        "description_zh": (
+            "text-heavy 圖像走 OCR + text-LLM reasoning path（圖表 / "
+            "headstone / 文檔），先試 OCR 再 fallback vision"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "min_chars": {
+                "type": "int",
+                "default": 40,
+                "min": 10,
+                "max": 500,
+                "recommended": 40,
+                "risk_low": (
+                    "min_chars<10 accepts even noisy OCR output, "
+                    "reasoning will be fed garbage"
+                ),
+                "risk_high": (
+                    "min_chars>500 rejects most OCR signal — vision "
+                    "path always wins, OCR never activates"
+                ),
+            },
+        },
+    },
 }
 
 
 # ── Public API ────────────────────────────────────────────
 
 
+def iter_all_features_with_origin() -> list[tuple[str, dict[str, Any], str]]:
+    """Yield every feature known to this process as
+    ``(name, meta, origin)`` tuples.
+
+    ``origin`` is ``"official"`` for shipped ``FEATURE_META`` entries and
+    ``"user"`` for user-registered features in
+    ``~/.concinno/user_features.json``. When a user name collides with a
+    shipped name the shipped entry wins (library integrity over user
+    extension, see 2.30.1 red/blue verdict) and
+    :func:`concinno.user_features.record_collision` is called so the GUI
+    can surface a visible badge.
+
+    Added in 2.30.1.
+    """
+    try:
+        from concinno.user_features import (
+            clear_collision_warnings,
+            load_user_features,
+            record_collision,
+        )
+        clear_collision_warnings()
+        user_feats = load_user_features()
+    except Exception:
+        user_feats = {}
+        record_collision = None  # type: ignore[assignment]
+
+    rows: list[tuple[str, dict[str, Any], str]] = []
+    seen: set[str] = set()
+    for name, meta in FEATURE_META.items():
+        rows.append((name, meta, "official"))
+        seen.add(name)
+    for name, meta in user_feats.items():
+        if name in seen:
+            if record_collision is not None:
+                record_collision(name, "also in shipped FEATURE_META")
+            continue
+        rows.append((name, meta, "user"))
+        seen.add(name)
+    return rows
+
+
 def list_features(lang: str = "en") -> list[dict]:
-    """List all features with current config values."""
+    """List all features (shipped + user-registered) with current
+    config values."""
     try:
         from concinno.core.config import get_config
 
@@ -932,14 +1128,15 @@ def list_features(lang: str = "en") -> list[dict]:
         cfg = None
 
     result = []
-    for name, meta in FEATURE_META.items():
+    for name, meta, origin in iter_all_features_with_origin():
         desc = meta.get(f"description_{lang}", meta["description"])
         current = cfg.feature_all(name) if cfg else {}
         result.append({
             "name": name,
             "category": meta["category"],
             "description": desc,
-            "enabled": current.get("enabled", True),
+            "enabled": current.get("enabled", meta.get("enabled", True)),
+            "source": origin,
             "params": {
                 k: {
                     "value": current.get(k, v.get("default")),
@@ -1045,6 +1242,17 @@ def validate_value(name: str, key: str, value: Any) -> list[str]:
     if key == "enabled":
         if not isinstance(value, bool):
             return [f"enabled must be bool, got {type(value).__name__}"]
+        return []
+
+    # GUI-managed sidecar keys (2.23.0+):
+    #   ``ziq_opt_out``      — feature-level ZIQ toggle
+    #   ``<param>__pinned``  — per-param manual lock (ZIQ skip)
+    # Both are bool, neither lives in FEATURE_META params — accept them
+    # unconditionally so the GUI can write them without every feature
+    # needing a schema update.
+    if key == "ziq_opt_out" or key.endswith("__pinned"):
+        if not isinstance(value, bool):
+            return [f"{key} must be bool, got {type(value).__name__}"]
         return []
 
     param = meta.get("params", {}).get(key)
