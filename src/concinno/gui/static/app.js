@@ -225,6 +225,7 @@
         <span class="badge cat" data-facet="category" data-val="${escapeHtml(f.category || "")}">${escapeHtml(f.category || "?")}</span>
         ${f.ziq_autotunable ? '<span class="badge ziq" data-facet="flag" data-val="ziq">ZIQ-tunable</span>' : ""}
         ${f.cosmetic ? '<span class="badge cosmetic" data-facet="flag" data-val="cosmetic">cosmetic</span>' : ""}
+        ${f.source === "user" ? '<span class="badge source-user" title="User-registered feature from ~/.concinno/user_features.json">user</span>' : ""}
         <span class="badge effect-${scope.replace("_","-")}" data-facet="effect" data-val="${scope}">${scope}</span>
         ${nonDefaultScore(f) > 0 ? '<span class="badge non-default">modified</span>' : ""}
         ${ziqToggle}
@@ -388,11 +389,26 @@
     try {
       const data = await fetchJSON("/api/features");
       featuresCache = data.features || [];
+      renderCollisions(data.collisions || []);
       renderFeatures();
       if (showStatus) setStatus(`${featuresCache.length} features loaded`);
     } catch (err) {
       setStatus(`Error: ${err.message}`, "err");
     }
+  }
+
+  // 2.30.2 — show shipped-wins collision warnings from /api/features
+  function renderCollisions(collisions) {
+    const bar = $("#collision-bar");
+    if (!bar) return;
+    if (!collisions || collisions.length === 0) {
+      bar.hidden = true;
+      bar.innerHTML = "";
+      return;
+    }
+    bar.hidden = false;
+    const items = collisions.map((c) => `<li>${escapeHtml(c)}</li>`).join("");
+    bar.innerHTML = `<strong>Shadowed user features:</strong> shipped entries with the same name took precedence.<ul>${items}</ul>`;
   }
 
   $("#filter").addEventListener("input", renderFeatures);
@@ -738,4 +754,36 @@
   tick();
 
   loadFeatures();
+
+  // 2.30.2 — ?tab= + ?highlight= URL query-param support.
+  // Called by `concinno skills new` and `concinno features register`
+  // so the post-scaffold URL lands on the right tab and pulses the
+  // new card. Runs once at boot; later tab switches ignore the query.
+  (function applyUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    const highlight = params.get("highlight");
+    if (tab) {
+      const btn = $$(`nav.tabs button[data-tab="${tab}"]`)[0];
+      if (btn) btn.click();
+    }
+    if (!highlight) return;
+    // Poll briefly for the card to land in the DOM (loadFeatures /
+    // loadSkills are async). Give up after ~3s — the digest-poll will
+    // eventually render it and the user can refresh manually.
+    const target = String(highlight);
+    let tries = 0;
+    const scroller = setInterval(() => {
+      tries += 1;
+      const card = document.querySelector(`[data-name="${CSS.escape(target)}"]`);
+      if (card) {
+        clearInterval(scroller);
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("pulse-highlight");
+        setTimeout(() => card.classList.remove("pulse-highlight"), 2600);
+      } else if (tries > 20) {
+        clearInterval(scroller);
+      }
+    }, 150);
+  })();
 })();

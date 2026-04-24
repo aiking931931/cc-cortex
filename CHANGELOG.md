@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.30.2] - 2026-04-24
+
+### Added — GUI polish + legacy templates removed
+
+- **GUI source badge** — feature cards render a purple `user` badge
+  when the entry is user-registered (shipped entries render without a
+  badge to keep the list clean).
+- **GUI collision warning bar** — new amber banner at the top of the
+  Features tab surfaces shadowed user-entries returned by
+  `/api/features.collisions` so users are not silently ghosted when
+  a user feature name collides with a shipped one.
+- **GUI URL query-params `?tab=` + `?highlight=`** — `concinno skills
+  new` and `concinno features register` print a URL; clicking it now
+  lands on the right tab, polls briefly for the card to render, then
+  scroll-into-views + pulses purple for ~2.6 s.
+- **Legacy `src/concinno/templates/rules/` removed** — pre-2.28.0
+  bundled duplicate (autonomous / cbua / commands / handoff / redteam
+  / wiredo) no longer shipped. `rules/official/L1/` is the sole rule
+  tree in the wheel. Reduces duplicate content in `pip install
+  concinno` + removes ambiguity about which copy is canonical.
+
+### Deferred to 2.31.0
+
+- Entry-points plugin mechanism for third-party `concinno-skills-*`
+  sub-packages (requires its own red/blue CBUA design pass).
+- `_parse_skill_md()` fuzz round-trip test (red MEDIUM-3 low priority).
+- Master card component unification (WIREDO inherited dimension).
+
 ## [2.30.1] - 2026-04-24
 
 ### Added — User-level feature registry + `concinno skills new` + `concinno features register`
