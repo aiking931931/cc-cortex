@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-04-24
+
+### Added — `concinno plugins` CLI (list / allowlist)
+
+- **Unified `concinno plugins list`** — extended the pre-existing
+  guards-only view with `concinno.features` + `concinno.skills`
+  entry-points plugins (shipped in 2.31.0) and CLI-scope allowlist
+  state. Accepts `--format text|json` and `--verbose` (verbose
+  includes built-in guards details and per-plugin errors; default
+  defers the guards pipeline construction for speed).
+- **`concinno plugins allowlist` subcommand tree** — new verbs
+  `add <pkg>` / `remove <pkg>` / `show [--format text|json]` /
+  `export-env [--format text|json]`. The allowlist is persisted at
+  `~/.concinno/plugins_allowlist.json` (schema v0, UNSTABLE).
+- **`~/.concinno/plugins_allowlist.json`** — new CLI-managed
+  allowlist file. **Runtime gating in
+  `concinno.plugins.plugin_allowlist` is NOT wired to this file** —
+  it remains env-var only (2.31.0 behaviour). Users who want
+  runtime enforcement of the file run `concinno plugins allowlist
+  export-env` and source the printed `export` line into their
+  shell. This separation avoids the dual-source-allowlist
+  race / intersection-vs-union debate raised by the Red Opus
+  attack (FATAL-2).
+- **Pre-install warn** — `allowlist add <pkg>` warns to stderr when
+  the package is not currently installed (typo protection); `list`
+  tags such rows `NOT INSTALLED`.
+- **mtime race protection** — `add_to_allowlist` /
+  `remove_from_allowlist` re-stat the file before `os.replace` to
+  detect concurrent GUI / second-CLI race; one automatic retry then
+  stderr warn + abort (Red Opus FATAL-5).
+- **Real-EP integration test** — new `tests/test_plugins_cmd_real_ep.py`
+  uses `pip install -e` on a one-file fake distribution to exercise
+  the actual `importlib.metadata` code path (Red Opus FATAL-1).
+  Skipped when the environment cannot pip-install.
+- **Performance bench** — `tests/test_plugins_cmd_list.py::TestPerformance`
+  measures cold-call latency on real `importlib.metadata.distributions()`
+  output (Red Opus HIGH-3).
+- **4 new test files**, 33 new tests (32 pass + 1 skip for the
+  real-EP integration test; 158/158 full regression green
+  including 2.31.0 + 2.30.x coverage).
+
+### UNSTABLE surface note (IMPORTANT)
+
+2.32.0 ships the `concinno plugins` CLI output and the allowlist
+file schema with **`schema_version: 0` (UNSTABLE)**:
+
+- JSON output shape of `--format json` may evolve in minor versions
+  without semver-major. CI consumers pin at their own risk.
+- Subcommand vocabulary (`list`, `allowlist {add,remove,show,
+  export-env}`) may rename with a deprecation window in minor versions.
+- `schema_version` will bump to `1` (semver-major guarantee on
+  breaking changes) only after **≥3 real downstream
+  `concinno-skills-*` packages** have exercised the CLI on a release
+  cadence (currently 0). This avoids freezing design decisions in
+  a pre-consumer phase — Red Opus attack HIGH-2 verdict accepted.
+
+### Refactor
+
+- `cli.main.cmd_plugins_list` now delegates to the new
+  `cli.plugins_cmd.cmd_plugins_list` orchestrator. The pre-2.32.0
+  guards-only body is retained as
+  `cmd_plugins_list_guards_only` for diagnostic fallback.
+- `src/concinno/plugins/allowlist_file.py` — new module following
+  the `user_features.json` pattern (atomic write via
+  `tempfile.mkstemp` + `os.replace`, fail-closed on malformed JSON,
+  schema version-aware read).
+
+### Commander adjudication record
+
+Red Opus attack returned 6 FATAL + 5 HIGH + 2 MEDIUM + 4
+"should-not-exist" claims. Commander 5-state × 4-framing
+adjudication ruled:
+
+- **Accepted + re-scope**: scope reduced 920 LOC → ~780 LOC. Killed
+  the proposed `audit` subcommand (folded into `list --verbose` /
+  `list --format json`). Renamed `trust`/`untrust` to
+  `allowlist add`/`allowlist remove` (Red HIGH-4 — `trust`
+  vocabulary implies crypto verification that the loader doesn't
+  enforce).
+- **Accepted + root-cause fix**: dropped the runtime signature
+  change to `plugin_allowlist()` entirely. File allowlist is
+  CLI-scope only; runtime stays env-var-only per 2.31.0. Eliminates
+  the intersection-vs-union semantics debate Red raised in FATAL-2.
+- **Rejected**: "ecosystem singleton / 0 plugins exist" attack —
+  library-design infrastructure is a design-time invariant per
+  `projects/concinno/CLAUDE.md` line 3 ("library for strangers, not
+  for me"). Same framing error family as the 2.31.0 Red's
+  singleton attack.
+
+Full adjudication: `_AI_BRAIN/05_Planning/concinno-2.32.0-commander-adjudication.md`.
+Spec + v2 amendments: `_AI_BRAIN/05_Planning/concinno-2.32.0-plugins-cli-spec.md`.
+
 ## [2.31.0] - 2026-04-24
 
 ### Added — Entry-points plugin groups for features + skills

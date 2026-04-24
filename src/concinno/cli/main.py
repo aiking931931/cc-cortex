@@ -714,8 +714,22 @@ def cmd_validate(args: argparse.Namespace) -> None:
     print(format_report(results))
 
 
-def cmd_plugins_list(_args: argparse.Namespace) -> None:
-    """List all guards (built-in + plugins)."""
+def cmd_plugins_list(args: argparse.Namespace) -> None:
+    """Unified plugin listing (guards + features + skills + allowlist).
+
+    2.32.0 delegates to :mod:`concinno.cli.plugins_cmd` which
+    orchestrates all three ``concinno.*`` entry-points groups
+    (``concinno.guards``, ``concinno.features``, ``concinno.skills``)
+    plus the file + env allowlist state. The pre-2.32.0 guards-only
+    body below is kept as ``cmd_plugins_list_guards_only`` for
+    diagnostic use under ``--verbose``.
+    """
+    from .plugins_cmd import cmd_plugins_list as _unified
+    _unified(args)
+
+
+def cmd_plugins_list_guards_only(_args: argparse.Namespace) -> None:
+    """Pre-2.32.0 guards-only view. Retained for diagnostic fallback."""
     from ..guards.registry import create_default_pipeline
     from ..plugin_loader import discover_plugins
 
@@ -1329,7 +1343,18 @@ def main() -> None:
     p_plug = sub.add_parser("plugins", help="Manage guard plugins")
     plug_sub = p_plug.add_subparsers(dest="plugins_command")
 
-    plug_list = plug_sub.add_parser("list", help="List all guards (built-in + plugins)")
+    plug_list = plug_sub.add_parser(
+        "list",
+        help="List all plugins (guards / features / skills) + allowlist",
+    )
+    plug_list.add_argument(
+        "--format", choices=("text", "json"), default="text",
+        help="Output format (default: text)",
+    )
+    plug_list.add_argument(
+        "--verbose", action="store_true",
+        help="Include built-in guard details and per-plugin error info",
+    )
     plug_list.set_defaults(func=cmd_plugins_list)
 
     plug_validate = plug_sub.add_parser("validate", help="Validate a plugin file")
@@ -1338,6 +1363,10 @@ def main() -> None:
 
     plug_scan = plug_sub.add_parser("scan", help="Scan for installed plugin entrypoints")
     plug_scan.set_defaults(func=cmd_plugins_scan)
+
+    # 2.32.0 -- allowlist subcommand tree for file-based persistence.
+    from .plugins_cmd import register_allowlist_subparsers
+    register_allowlist_subparsers(plug_sub)
 
     p_plug.set_defaults(
         func=lambda a: cmd_plugins_list(a) if not a.plugins_command else None,
