@@ -171,6 +171,32 @@
     },
   };
 
+  // Source-badge builder shared across feature / skill cards.
+  // Returns an HTML span for any row whose `source` (or `scope`)
+  // indicates a user / plugin / merged origin. Empty string when the
+  // row is the default `official` / `user-default` case.
+  //
+  // Added in the 2.33.1 handoff §3.1 follow-up: both feature and
+  // skill cards had grown three-way branching for plugin badge
+  // rendering inline; consolidating here drops ~8 lines of duplicate
+  // HTML string logic and keeps future source-kind additions
+  // (e.g. `remote:<url>`) in one place.
+  function renderSourceBadge(source) {
+    if (!source || typeof source !== "string") return "";
+    if (source === "user") {
+      return '<span class="badge source-user" title="User-registered feature from ~/.concinno/user_features.json">user</span>';
+    }
+    if (source.startsWith("plugin:")) {
+      const pkg = source.slice(7);
+      return `<span class="badge source-plugin" title="From installed package ${escapeHtml(pkg)}">${escapeHtml(source)}</span>`;
+    }
+    if (source.startsWith("merged:")) {
+      const sources = source.slice(7);
+      return `<span class="badge source-merged" title="Merged from multiple sources: ${escapeHtml(sources)}">merged</span>`;
+    }
+    return "";
+  }
+
   function nonDefaultScore(f) {
     let s = f.enabled === false ? 2 : 0;
     for (const p of Object.values(f.params || {})) if (p.is_modified) s += 1;
@@ -225,9 +251,7 @@
         <span class="badge cat" data-facet="category" data-val="${escapeHtml(f.category || "")}">${escapeHtml(f.category || "?")}</span>
         ${f.ziq_autotunable ? '<span class="badge ziq" data-facet="flag" data-val="ziq">ZIQ-tunable</span>' : ""}
         ${f.cosmetic ? '<span class="badge cosmetic" data-facet="flag" data-val="cosmetic">cosmetic</span>' : ""}
-        ${f.source === "user" ? '<span class="badge source-user" title="User-registered feature from ~/.concinno/user_features.json">user</span>' : ""}
-        ${typeof f.source === "string" && f.source.startsWith("plugin:") ? `<span class="badge source-plugin" title="From installed package ${escapeHtml(f.source.slice(7))}">${escapeHtml(f.source)}</span>` : ""}
-        ${typeof f.source === "string" && f.source.startsWith("merged:") ? `<span class="badge source-merged" title="Merged from multiple sources: ${escapeHtml(f.source.slice(7))}">merged</span>` : ""}
+        ${renderSourceBadge(f.source)}
         <span class="badge effect-${scope.replace("_","-")}" data-facet="effect" data-val="${scope}">${scope}</span>
         ${nonDefaultScore(f) > 0 ? '<span class="badge non-default">modified</span>' : ""}
         ${ziqToggle}
