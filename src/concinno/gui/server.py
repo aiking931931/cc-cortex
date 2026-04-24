@@ -227,16 +227,36 @@ def _register_feature_routes(app: "FastAPI") -> None:
 
     @app.get("/api/features/collisions")
     def list_collisions() -> JSONResponse:
-        """Return warnings from the last merge between shipped
-        ``FEATURE_META`` and ``~/.concinno/user_features.json``.
-        User names that collide with shipped entries are shadowed
-        (shipped wins) — this endpoint lets the GUI surface a badge.
+        """Return warnings from the last three-way merge (shipped /
+        user / plugin) plus any plugin load errors.
+
+        Extended in 2.31.0: ``plugin_load_errors`` surfaces
+        entry-points ``ep.load()`` failures (malformed packages,
+        import-time crashes, schema rejection) so a user with a
+        broken plugin sees it in the GUI rather than silent skip.
         """
         # Trigger a fresh merge so the buffer reflects current files.
         from concinno.feature_config import iter_all_features_with_origin
         from concinno.user_features import collision_warnings
         iter_all_features_with_origin()
-        return JSONResponse({"collisions": collision_warnings()})
+
+        plugin_load_errors: list[dict[str, Any]] = []
+        try:
+            from concinno.plugins import discover_feature_entrypoints
+            for plugin_meta in discover_feature_entrypoints():
+                if plugin_meta.errors:
+                    plugin_load_errors.append({
+                        "package": plugin_meta.package,
+                        "entry_point": plugin_meta.entry_point_name,
+                        "errors": list(plugin_meta.errors),
+                    })
+        except Exception:
+            pass
+
+        return JSONResponse({
+            "collisions": collision_warnings(),
+            "plugin_load_errors": plugin_load_errors,
+        })
 
     @app.get("/api/features/{name}")
     def get_feature(name: str) -> JSONResponse:
@@ -457,20 +477,15 @@ def _write_skills_state(state: dict[str, dict[str, Any]]) -> None:
 
 
 def _parse_skill_md(path: Path) -> dict[str, Any]:
-    """Extract name + description from a SKILL.md frontmatter block."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return {}
-    meta: dict[str, Any] = {}
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end > 0:
-            for line in text[3:end].splitlines():
-                if ":" in line:
-                    k, _, v = line.partition(":")
-                    meta[k.strip()] = v.strip().strip('"').strip("'")
-    return meta
+    """Extract SKILL.md frontmatter.
+
+    Thin wrapper kept for backward compatibility -- real parser moved
+    to :mod:`concinno.skill_parser` in 2.31.0 (hardened for
+    plugin-supplied frontmatter: BOM / CRLF / block lists / truthy
+    tokens / malformed recovery).
+    """
+    from concinno.skill_parser import parse_skill_md
+    return parse_skill_md(path)
 
 
 def _discover_skills() -> list[dict[str, Any]]:
@@ -511,6 +526,18 @@ def _discover_skills() -> list[dict[str, Any]]:
         for child in sorted(cwd_root.iterdir()):
             if child.is_dir():
                 _ingest_skill(child, state, seen, scope="project")
+    # Plugin-level scan (2.31.0) -- lowest precedence. ``_ingest_skill``
+    # is overwrite-semantics so we must explicitly skip name-collisions
+    # before delegating, otherwise plugin would shadow user / project.
+    try:
+        from concinno.plugins import iter_plugin_skill_roots
+
+        for plugin_root, pkg_name in iter_plugin_skill_roots():
+            if plugin_root.is_dir():
+                _scan_plugin_root(plugin_root, pkg_name, state, seen)
+    except Exception:
+        # Plugin discovery failure must not abort skill enumeration.
+        pass
     return sorted(seen.values(), key=lambda r: r["name"].lower())
 
 
@@ -523,6 +550,46 @@ def _scan_subdir(
     for child in sorted(parent.iterdir()):
         if child.is_dir():
             _ingest_skill(child, state, into, scope=scope)
+
+
+def _scan_plugin_root(
+    plugin_root: Path,
+    pkg_name: str,
+    state: dict[str, dict[str, Any]],
+    into: dict[str, dict[str, Any]],
+) -> None:
+    """Walk one plugin's skills root, skipping name collisions.
+
+    ``_ingest_skill`` overwrites ``into[name]`` so plugin-sourced
+    skills must be filtered here (not after the fact) to preserve
+    higher-precedence user / project sources.
+    """
+    scope = f"plugin:{pkg_name}"
+    for child in sorted(plugin_root.iterdir()):
+        if not child.is_dir():
+            continue
+        skill_name = _resolve_plugin_skill_name(child)
+        if skill_name in into:
+            continue
+        _ingest_skill(child, state, into, scope=scope)
+
+
+def _resolve_plugin_skill_name(child: Path) -> str:
+    """Best-effort skill-name resolution for a plugin skill dir.
+
+    Honours the ``name:`` field in SKILL.md frontmatter when present
+    (a plugin may rename a skill dir-wise vs catalogue-wise). Falls
+    back to the directory name when SKILL.md is missing or unreadable.
+    """
+    default = child.name
+    skill_md = child / "SKILL.md"
+    if not skill_md.is_file():
+        return default
+    try:
+        meta = _parse_skill_md(skill_md)
+    except Exception:
+        return default
+    return meta.get("name") or default
 
 
 def _ingest_skill(

@@ -155,7 +155,11 @@ def test_collision_warning_on_merge(isolated_home: Path) -> None:
     rows = iter_all_features_with_origin()
     origins = [row_origin for row_name, _meta, row_origin in rows
                if row_name == shipped_name]
-    # shipped-wins: only the shipped one survives
-    assert origins == ["official"]
+    # 2.31.0 three-layer merge: shipped + user collision now yields a
+    # single merged row (not a user-dropped row). shipped fields still
+    # win per `_merge_feature_meta` semantics, but the user layer is
+    # preserved inside the merge (enabling param-value overrides) and
+    # the origin label reflects both sources.
+    assert origins == ["merged:official+user"]
     warnings = collision_warnings()
     assert any(shipped_name in w for w in warnings)

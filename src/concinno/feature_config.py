@@ -1070,25 +1070,155 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    "plugins_enabled": {
+        "category": "core",
+        "description": (
+            "Master switch for entry-points plugin discovery "
+            "(concinno.features + concinno.skills). Off = ignore all "
+            "installed concinno-skills-* packages. Off via env "
+            "CONCINNO_PLUGINS_ENABLED=0 or allowlist restrictions via "
+            "CONCINNO_PLUGINS_ALLOWLIST=pkg-a,pkg-b. Same trust model "
+            "as pytest/flask/mkdocs plugins -- pip install is the "
+            "trust boundary."
+        ),
+        "description_zh": (
+            "Entry-points plugin 探測總開關（concinno.features + "
+            "concinno.skills）。關閉 = 忽略所有已裝 concinno-skills-* "
+            "套件。可用 env CONCINNO_PLUGINS_ENABLED=0 關閉，或用 "
+            "CONCINNO_PLUGINS_ALLOWLIST=pkg-a,pkg-b 限制允許的套件。"
+            "信任邊界 = pip install，同 pytest/flask/mkdocs 慣例。"
+        ),
+        "enabled": True,
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
 }
 
 
 # ── Public API ────────────────────────────────────────────
 
 
+def _merge_feature_meta(
+    sources: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], str]:
+    """Merge one feature's meta across the three layers.
+
+    Precedence by field (per 2.31.0 spec v2 amendment A4):
+
+    * ``description`` / ``category`` / ``cosmetic`` / ``ziq_autotunable``
+      / ``description_zh``: highest-precedence source wins (shipped >
+      user > plugin).
+    * ``enabled``: low-to-high cascade (plugin default -> user override
+      -> shipped override). Library integrity wins for the final gate.
+    * ``params``: per-param merge. Shipped params are the baseline and
+      define the ``type`` / ``default`` / ``min`` / ``max``. User may
+      override the effective ``value`` (but not redefine the schema).
+      Plugin may introduce new params not in shipped.
+
+    Returns ``(merged_meta, origin_label)``. ``origin_label`` is a
+    single source name for the 1-source case, else a
+    ``"merged:shipped+user"``-style label.
+    """
+    shipped = sources.get("official")
+    user = sources.get("user")
+    plugin = sources.get("plugin")
+
+    merged: dict[str, Any] = {}
+
+    # High-precedence-wins fields.
+    for field in ("description", "description_zh", "category",
+                  "cosmetic", "ziq_autotunable"):
+        for layer in (shipped, user, plugin):
+            if layer is not None and field in layer:
+                merged[field] = layer[field]
+                break
+
+    # enabled cascade: plugin default -> user override -> shipped override.
+    enabled = True  # ultimate default
+    for layer in (plugin, user, shipped):
+        if layer is not None and "enabled" in layer:
+            enabled = layer["enabled"]
+    merged["enabled"] = enabled
+
+    # params per-param merge.
+    shipped_params = dict(shipped.get("params", {})) if shipped else {}
+    plugin_params = dict(plugin.get("params", {})) if plugin else {}
+    user_params = dict(user.get("params", {})) if user else {}
+    merged_params: dict[str, Any] = {}
+    all_param_names = set(shipped_params) | set(plugin_params) | set(user_params)
+    for pname in sorted(all_param_names):
+        if pname in shipped_params:
+            # Shipped defines schema; user may override value fields.
+            p = dict(shipped_params[pname])
+            if pname in user_params:
+                for k, v in user_params[pname].items():
+                    if k in ("default", "value", "recommended"):
+                        p[k] = v
+            merged_params[pname] = p
+        elif pname in plugin_params:
+            p = dict(plugin_params[pname])
+            if pname in user_params:
+                for k, v in user_params[pname].items():
+                    if k in ("default", "value", "recommended"):
+                        p[k] = v
+            merged_params[pname] = p
+        else:
+            merged_params[pname] = dict(user_params[pname])
+    merged["params"] = merged_params
+
+    # Preserve schema_version on plugin-originated rows for downstream
+    # GUI rendering / forward-compat warnings.
+    if plugin is not None and "schema_version" in plugin:
+        merged["schema_version"] = plugin["schema_version"]
+
+    # Origin label. "official" is the legacy backward-compat name for
+    # the shipped layer (pre-2.31.0 used this label). Keep it to avoid
+    # breaking consumers that compare origin strings.
+    present = [name for name in ("official", "user", "plugin") if name in sources]
+    if len(present) == 1:
+        origin = present[0]
+    else:
+        origin = "merged:" + "+".join(present)
+    # Plugin origin includes the package name for GUI surfacing.
+    if "plugin" in sources and "_plugin_pkg" in sources:
+        pkg = sources["_plugin_pkg"]  # type: ignore[assignment]
+        if origin == "plugin":
+            origin = f"plugin:{pkg}"
+        else:
+            origin = origin + f":{pkg}"
+
+    return merged, origin
+
+
 def iter_all_features_with_origin() -> list[tuple[str, dict[str, Any], str]]:
     """Yield every feature known to this process as
     ``(name, meta, origin)`` tuples.
 
-    ``origin`` is ``"official"`` for shipped ``FEATURE_META`` entries and
-    ``"user"`` for user-registered features in
-    ``~/.concinno/user_features.json``. When a user name collides with a
-    shipped name the shipped entry wins (library integrity over user
-    extension, see 2.30.1 red/blue verdict) and
-    :func:`concinno.user_features.record_collision` is called so the GUI
-    can surface a visible badge.
+    Three-layer merge per 2.31.0 spec v2 amendment A4:
 
-    Added in 2.30.1.
+    * ``"shipped"`` -- entries from :data:`FEATURE_META` (always
+      wins on core schema / library-integrity fields)
+    * ``"user"`` -- entries from
+      ``~/.concinno/user_features.json`` (may override ``enabled``
+      and param values; cannot redefine shipped schema)
+    * ``"plugin:<pkg>"`` -- entries from installed
+      ``concinno-skills-*`` packages via the ``concinno.features``
+      entry-points group (lowest precedence; user-features override
+      plugin defaults by name collision)
+
+    ``origin`` labels:
+
+    * Single layer: ``"shipped"`` / ``"user"`` / ``"plugin:<pkg>"``
+    * Multi-layer merged: ``"merged:shipped+user"`` /
+      ``"merged:user+plugin:<pkg>"`` etc.
+
+    When two sources collide on a name
+    :func:`concinno.user_features.record_collision` is called so the
+    GUI's collision-bar can surface the shadow.
+
+    Originally added in 2.30.1 (shipped+user only); plugin layer
+    added in 2.31.0.
     """
     try:
         from concinno.user_features import (
@@ -1102,18 +1232,58 @@ def iter_all_features_with_origin() -> list[tuple[str, dict[str, Any], str]]:
         user_feats = {}
         record_collision = None  # type: ignore[assignment]
 
+    # Plugin layer (2.31.0). Import is lazy + failure-tolerant so a
+    # broken plugin does not take down feature enumeration.
+    plugin_by_name: dict[str, tuple[dict[str, Any], str]] = {}
+    try:
+        from concinno.plugins import iter_valid_feature_plugins
+
+        for name, meta, pkg in iter_valid_feature_plugins():
+            if name in plugin_by_name:
+                # Same name from two plugin packages — first-wins,
+                # mirror ToolRegistry.load_plugins behaviour.
+                if record_collision is not None:
+                    record_collision(
+                        name,
+                        f"plugin collision: also in package {pkg!r}",
+                    )
+                continue
+            plugin_by_name[name] = (meta, pkg)
+    except Exception:
+        plugin_by_name = {}
+
+    shipped_names = set(FEATURE_META.keys())
+    user_names = set(user_feats.keys())
+    plugin_names = set(plugin_by_name.keys())
+    all_names = shipped_names | user_names | plugin_names
+
     rows: list[tuple[str, dict[str, Any], str]] = []
-    seen: set[str] = set()
-    for name, meta in FEATURE_META.items():
-        rows.append((name, meta, "official"))
-        seen.add(name)
-    for name, meta in user_feats.items():
-        if name in seen:
-            if record_collision is not None:
-                record_collision(name, "also in shipped FEATURE_META")
-            continue
-        rows.append((name, meta, "user"))
-        seen.add(name)
+    for name in sorted(all_names):
+        sources: dict[str, Any] = {}
+        if name in shipped_names:
+            sources["official"] = FEATURE_META[name]
+        if name in user_names:
+            sources["user"] = user_feats[name]
+        if name in plugin_names:
+            plugin_meta, pkg = plugin_by_name[name]
+            sources["plugin"] = plugin_meta
+            sources["_plugin_pkg"] = pkg
+
+        # Emit collisions (anything more than one real layer).
+        real_layers = [k for k in ("official", "user", "plugin") if k in sources]
+        if len(real_layers) > 1 and record_collision is not None:
+            winner = real_layers[0]  # official > user > plugin by iter order
+            shadowed = real_layers[1:]
+            for s in shadowed:
+                tag = s if s != "plugin" else f"plugin:{sources.get('_plugin_pkg', '?')}"
+                record_collision(
+                    name,
+                    f"{tag} shadowed by {winner} (merged fields preserved)",
+                )
+
+        merged_meta, origin = _merge_feature_meta(sources)
+        rows.append((name, merged_meta, origin))
+
     return rows
 
 

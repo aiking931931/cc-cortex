@@ -11,7 +11,7 @@ Legacy API (v0.5, deprecated — removed in v1.0)::
 Migration guide: https://github.com/aiking931931/concinno/blob/main/docs/migration-v05-v06.md
 """
 
-__version__ = "2.30.2"
+__version__ = "2.31.0"
 
 import warnings as _warnings
 

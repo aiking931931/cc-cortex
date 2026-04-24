@@ -541,6 +541,22 @@ footer.info .legend-text {
   border-color: #5b21b6;
 }
 
+/* 2.31.0 — source badge (plugin features + skills) */
+.badge.source-plugin {
+  background: #0891b2;
+  color: #fff;
+  border-color: #0e7490;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+/* 2.31.0 — source badge (merged multi-source) */
+.badge.source-merged {
+  background: #f59e0b;
+  color: #1f2937;
+  border-color: #d97706;
+}
+
 /* 2.30.2 — collision warning banner */
 .collision-bar {
   background: #fffbeb;

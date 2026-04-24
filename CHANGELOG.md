@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-04-24
+
+### Added — Entry-points plugin groups for features + skills
+
+- **`concinno.features` entry-points group** — third-party packages
+  (`concinno-skills-*`) can now declare switchable features via
+  `[project.entry-points."concinno.features"]` in their
+  `pyproject.toml`, eliminating the post-install
+  `concinno features register` step. Each entry-point resolves to a
+  `dict[str, dict]` keyed by feature name with FEATURE_META shape.
+- **`concinno.skills` entry-points group** — bundled SKILL.md
+  directories from installed packages are auto-merged into the GUI
+  skills catalogue. Each entry-point resolves to a directory path
+  (`str`, `Path`, or callable-returning-either).
+- **Three-layer feature merge** — `iter_all_features_with_origin()`
+  now merges shipped `FEATURE_META` + `~/.concinno/user_features.json`
+  + plugin features with per-field precedence:
+  - `description`/`category`/`cosmetic`/`ziq_autotunable` — highest
+    source wins (shipped > user > plugin)
+  - `enabled` — cascades low-to-high, shipped has final authority
+    (library integrity)
+  - `params` — per-param merge. Shipped defines schema (type, min,
+    max); user may override `default` / `value` / `recommended`;
+    plugins may add new param names shipped doesn't know about.
+- **`plugins_enabled` master switch** — new shipped `FEATURE_META`
+  entry with env-var override `CONCINNO_PLUGINS_ENABLED=0`. One flip
+  disables the entire plugin discovery layer for security-conscious
+  users, CI, or rescue scenarios.
+- **`CONCINNO_PLUGINS_ALLOWLIST` env var** — comma-separated package
+  names restricting which installed plugins actually load. Default
+  (unset) allows all, matching pytest/flask/mkdocs ecosystem
+  convention. Both dash and underscore package-name variants are
+  accepted (`concinno-skills-google` and `concinno_skills_google`).
+- **`concinno/skill_parser.py`** — `_parse_skill_md` extracted from
+  `gui/server.py` and **hardened** for plugin-supplied frontmatter:
+  BOM / CRLF normalisation, inline and block-list `triggers`, truthy
+  token (`true` / `yes` / `on` / `1`) for boolean fields, BOM
+  tolerance, graceful partial recovery when the closing fence is
+  missing. 22 fuzz cases cover every malformation we could think of.
+- **Backward-compat shim** — `concinno.gui.server._parse_skill_md`
+  still exists and now delegates to `concinno.skill_parser.parse_skill_md`
+  so downstream callers don't break.
+- **GUI surface** — `/api/features/collisions` endpoint extended with
+  `plugin_load_errors` array so packages that throw at `ep.load()` are
+  visible in the collision-bar rather than silently dropped.
+  `renderFeatureCard` renders a cyan `source-plugin:<pkg>` badge; a
+  merged-source feature gets an amber `merged` badge. `renderSkillCard`
+  renders a cyan scope badge for plugin-contributed skills.
+- **`src/concinno/docs/how-to-ship-a-skills-package.md`** — new
+  end-to-end guide for third-party devs, including prior-art
+  comparison (pytest / mkdocs / flask / llama_index / setuptools),
+  explicit security note, testing recipe, and versioning policy.
+- **7 new test files** (90 new tests, all green):
+  - `test_plugins_features.py` — entry-points discovery, schema
+    validation, error handling, allowlist.
+  - `test_plugins_skills.py` — dir resolution, load-raises recovery,
+    allowlist.
+  - `test_plugins_init.py` — `is_plugins_enabled` env-var matrix,
+    allowlist normalisation.
+  - `test_feature_config_plugin_layer.py` — three-layer merge
+    precedence, params cascade, shipped final authority.
+  - `test_skill_parser_fuzz.py` — 22 fuzz cases: BOM / CRLF / block
+    list / truthy tokens / malformed recovery / unicode / emoji.
+  - `test_gui_plugin_skills.py` — mock plugin roots visible via
+    `_discover_skills`, project precedence preserved.
+  - `test_plugin_performance.py` — 10 mocked plugins × 5 features
+    cold-call latency bench.
+
+### Security note
+
+Installing a `concinno-skills-*` package runs its entry-points module
+at Concinno's discovery time — same trust model as pytest plugins
+(`pytest11`), flask extensions, mkdocs plugins, llama-index tools,
+etc. Concinno does not add a signing or sandboxing layer. Users who
+need stricter isolation have two explicit escape hatches:
+
+- `CONCINNO_PLUGINS_ENABLED=0` — disables all plugin discovery.
+- `CONCINNO_PLUGINS_ALLOWLIST=pkg-a,pkg-b` — restricts which installed
+  packages are loaded.
+
+Plugin authors should keep entry-point module imports side-effect-free
+(no I/O at module load, no network at import) so users can audit the
+trust surface straightforwardly.
+
+### Semver commitment (entry-points groups)
+
+The new `concinno.features` and `concinno.skills` entry-points groups
+are a public API surface. Forward policy:
+
+- Breaking changes to the feature meta schema (removing required
+  fields, renaming fields, changing their types) will bump Concinno's
+  **major** version.
+- Forward-compatible additions (new optional fields, new
+  `schema_version` values) can land within **minor** versions.
+- Plugin authors should set `schema_version: 1` in their meta
+  dicts. Concinno accepts unknown-forward `schema_version > 1` with a
+  warning and strips unknown fields until the plugin author updates.
+
+### Internal notes
+
+- `feature_config.iter_all_features_with_origin()` refactored from
+  first-wins skip-on-collision to two-pass merge. Collision events
+  are still recorded via `user_features.record_collision` so the GUI
+  collision-bar surfaces them.
+- `_discover_skills` adds a plugin pass after home + cwd, guarded by
+  explicit `name in seen` check to preserve first-wins precedence
+  (user / project > plugin). `_scan_plugin_root` and
+  `_resolve_plugin_skill_name` helpers keep nesting depth shallow.
+- `concinno/plugins/__init__.py` + `features.py` + `skills.py` = three
+  new module files, ~400 LOC total, exercising the same pattern as
+  the pre-existing `plugin_loader.py` (`concinno.guards`),
+  `tools/registry.py` (`concinno.tools`), and `preset_cascade.py`
+  (`concinno.preset_consumers`).
+- `~/.claude/rules/switches.md` Switch Index updated to row #23
+  documenting the `plugins_enabled` feature + env vars
+  (`CONCINNO_PLUGINS_ENABLED`, `CONCINNO_PLUGINS_ALLOWLIST`).
+
+### Context
+
+- Handoff `_AI_BRAIN/06_Handoffs/concinno/交接_Concinno.md` carry §3.1
+  drove this release — the pre-existing 9 `concinno-skills-*` packages
+  on PyPI auto-mount `concinno.tools` but previously had no path to
+  declare feature switches or bundle skill docs without asking users
+  to run `concinno features register` per feature.
+- Red Opus attack pass (4 FATAL + 3 HIGH + 2 MEDIUM) ruled at
+  `_AI_BRAIN/05_Planning/concinno-2.31.0-commander-adjudication.md`.
+  Spec + amendments at
+  `_AI_BRAIN/05_Planning/concinno-2.31.0-entry-points-plugin-spec.md`.
+- Radius: Medium — extending three established entry-points groups;
+  pattern validated.
+
 ## [2.30.2] - 2026-04-24
 
 ### Added — GUI polish + legacy templates removed

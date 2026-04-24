@@ -226,6 +226,8 @@
         ${f.ziq_autotunable ? '<span class="badge ziq" data-facet="flag" data-val="ziq">ZIQ-tunable</span>' : ""}
         ${f.cosmetic ? '<span class="badge cosmetic" data-facet="flag" data-val="cosmetic">cosmetic</span>' : ""}
         ${f.source === "user" ? '<span class="badge source-user" title="User-registered feature from ~/.concinno/user_features.json">user</span>' : ""}
+        ${typeof f.source === "string" && f.source.startsWith("plugin:") ? `<span class="badge source-plugin" title="From installed package ${escapeHtml(f.source.slice(7))}">${escapeHtml(f.source)}</span>` : ""}
+        ${typeof f.source === "string" && f.source.startsWith("merged:") ? `<span class="badge source-merged" title="Merged from multiple sources: ${escapeHtml(f.source.slice(7))}">merged</span>` : ""}
         <span class="badge effect-${scope.replace("_","-")}" data-facet="effect" data-val="${scope}">${scope}</span>
         ${nonDefaultScore(f) > 0 ? '<span class="badge non-default">modified</span>' : ""}
         ${ziqToggle}
@@ -398,17 +400,40 @@
   }
 
   // 2.30.2 — show shipped-wins collision warnings from /api/features
+  // 2.31.0 — also surface plugin_load_errors from the three-layer merge
   function renderCollisions(collisions) {
     const bar = $("#collision-bar");
     if (!bar) return;
-    if (!collisions || collisions.length === 0) {
-      bar.hidden = true;
-      bar.innerHTML = "";
-      return;
+
+    let pluginErrs = [];
+    fetchJSON("/api/features/collisions").then((data) => {
+      pluginErrs = data.plugin_load_errors || [];
+      draw();
+    }).catch(() => draw());
+
+    function draw() {
+      const hasCollisions = collisions && collisions.length > 0;
+      const hasErrs = pluginErrs && pluginErrs.length > 0;
+      if (!hasCollisions && !hasErrs) {
+        bar.hidden = true;
+        bar.innerHTML = "";
+        return;
+      }
+      bar.hidden = false;
+      let html = "";
+      if (hasCollisions) {
+        const items = collisions.map((c) => `<li>${escapeHtml(c)}</li>`).join("");
+        html += `<strong>Shadowed features:</strong> higher-precedence sources took precedence.<ul>${items}</ul>`;
+      }
+      if (hasErrs) {
+        const rows = pluginErrs.map((e) => {
+          const errs = (e.errors || []).map(escapeHtml).join("; ");
+          return `<li><code>${escapeHtml(e.package)}</code> / <code>${escapeHtml(e.entry_point)}</code> — ${errs}</li>`;
+        }).join("");
+        html += `<strong>Plugin load errors:</strong> one or more installed concinno-skills-* packages failed to load their feature metadata.<ul>${rows}</ul>`;
+      }
+      bar.innerHTML = html;
     }
-    bar.hidden = false;
-    const items = collisions.map((c) => `<li>${escapeHtml(c)}</li>`).join("");
-    bar.innerHTML = `<strong>Shadowed user features:</strong> shipped entries with the same name took precedence.<ul>${items}</ul>`;
   }
 
   $("#filter").addEventListener("input", renderFeatures);
@@ -602,7 +627,14 @@
   function renderSkillCard(s) {
     const card = document.createElement("div");
     card.className = "feature";
-    const scopeBadge = `<span class="badge cat" data-skill-facet="scope" data-val="${escapeHtml(s.scope || "user")}">${escapeHtml(s.scope || "user")}</span>`;
+    const rawScope = s.scope || "user";
+    const isPlugin = rawScope.startsWith("plugin:");
+    const displayScope = isPlugin ? rawScope : rawScope;
+    const scopeClass = isPlugin ? "badge source-plugin" : "badge cat";
+    const scopeTitle = isPlugin
+      ? `From installed package — ${escapeHtml(rawScope.slice(7))}`
+      : "";
+    const scopeBadge = `<span class="${scopeClass}" data-skill-facet="scope" data-val="${escapeHtml(rawScope)}"${scopeTitle ? ` title="${scopeTitle}"` : ""}>${escapeHtml(displayScope)}</span>`;
     const mdBadge = s.has_skill_md
       ? '<span class="badge">SKILL.md</span>'
       : '<span class="badge" title="No SKILL.md — description is from concinno.gui.skill_descriptions fallback">bare dir</span>';
