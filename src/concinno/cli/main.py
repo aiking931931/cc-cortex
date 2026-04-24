@@ -1266,6 +1266,250 @@ def _register_rag(sub: argparse._SubParsersAction) -> None:
     p_rag.set_defaults(func=_rag_default)
 
 
+def _register_backup(sub: argparse._SubParsersAction) -> None:
+    p_backup = sub.add_parser("backup", help="Manage destruction guard backups")
+    backup_sub = p_backup.add_subparsers(dest="backup_command")
+
+    backup_list = backup_sub.add_parser("list", help="List all backups")
+    backup_list.set_defaults(func=cmd_backup_list)
+
+    backup_clean = backup_sub.add_parser("cleanup", help="Clean expired backups")
+    backup_clean.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Retention days (default: from config)",
+    )
+    backup_clean.set_defaults(func=cmd_backup_cleanup)
+
+    backup_restore = backup_sub.add_parser("restore", help="Restore a backup")
+    backup_restore.add_argument("backup_id", help="Backup ID to restore")
+    backup_restore.set_defaults(func=cmd_backup_restore)
+
+    backup_pin = backup_sub.add_parser("pin", help="Pin a backup")
+    backup_pin.add_argument("backup_id", help="Backup ID to pin")
+    backup_pin.set_defaults(func=cmd_backup_pin)
+
+    backup_unpin = backup_sub.add_parser("unpin", help="Unpin a backup")
+    backup_unpin.add_argument("backup_id", help="Backup ID to unpin")
+    backup_unpin.set_defaults(func=cmd_backup_unpin)
+
+    p_backup.set_defaults(
+        func=lambda a: cmd_backup_list(a) if not a.backup_command else None,
+    )
+
+
+def _register_audit(sub: argparse._SubParsersAction) -> None:
+    p_audit = sub.add_parser("audit", help="Attention budget audit + strike scan")
+    p_audit.add_argument(
+        "audit_mode", nargs="?", default="all",
+        choices=["all", "strike", "release", "budget", "upgrade"],
+        help="Scan mode (default: all)",
+    )
+    p_audit.add_argument("--workspace", default="", help="Workspace path")
+    p_audit.add_argument(
+        "--corrections", default="",
+        help="Relative path to corrections JSONL",
+    )
+    p_audit.add_argument(
+        "--budget", default="",
+        help="Relative path to attention-budget.json",
+    )
+    p_audit.add_argument("--dry", action="store_true", help="Dry run (upgrade mode)")
+    p_audit.set_defaults(func=cmd_audit)
+
+
+def _register_pipeline(sub: argparse._SubParsersAction) -> None:
+    p_pipe = sub.add_parser("pipeline", help="Think→Ship pipeline state management")
+    pipe_sub = p_pipe.add_subparsers(dest="pipeline_command")
+
+    pipe_status = pipe_sub.add_parser("status", help="Show pipeline progress")
+    pipe_status.set_defaults(func=cmd_pipeline_status)
+
+    pipe_clear = pipe_sub.add_parser("clear", help="Clear pipeline state")
+    pipe_clear.set_defaults(func=cmd_pipeline_clear)
+
+    pipe_design = pipe_sub.add_parser(
+        "design", help="Generate parallel design prompts"
+    )
+    pipe_design.add_argument("requirements", help="Feature requirements text")
+    pipe_design.add_argument(
+        "--constraint-set",
+        dest="constraint_set",
+        default="performance_vs_readability",
+        help="Constraint set (performance_vs_readability|monolith_vs_modular|defensive_vs_minimal)",
+    )
+    pipe_design.set_defaults(func=cmd_pipeline_design)
+
+    p_pipe.set_defaults(
+        func=lambda a: cmd_pipeline_status(a) if not a.pipeline_command else None,
+    )
+
+
+def _register_plugins(sub: argparse._SubParsersAction) -> None:
+    p_plug = sub.add_parser("plugins", help="Manage guard plugins")
+    plug_sub = p_plug.add_subparsers(dest="plugins_command")
+
+    plug_list = plug_sub.add_parser(
+        "list",
+        help="List all plugins (guards / features / skills) + allowlist",
+    )
+    plug_list.add_argument(
+        "--format", choices=("text", "json"), default="text",
+        help="Output format (default: text)",
+    )
+    plug_list.add_argument(
+        "--verbose", action="store_true",
+        help="Include built-in guard details and per-plugin error info",
+    )
+    plug_list.set_defaults(func=cmd_plugins_list)
+
+    plug_validate = plug_sub.add_parser("validate", help="Validate a plugin file")
+    plug_validate.add_argument("path", help="Path to plugin .py file")
+    plug_validate.set_defaults(func=cmd_plugins_validate)
+
+    plug_scan = plug_sub.add_parser("scan", help="Scan for installed plugin entrypoints")
+    plug_scan.set_defaults(func=cmd_plugins_scan)
+
+    # 2.32.0 -- allowlist subcommand tree for file-based persistence.
+    from .plugins_cmd import register_allowlist_subparsers
+    register_allowlist_subparsers(plug_sub)
+
+    p_plug.set_defaults(
+        func=lambda a: cmd_plugins_list(a) if not a.plugins_command else None,
+    )
+
+
+def _register_aegis(sub: argparse._SubParsersAction) -> None:
+    p_aegis = sub.add_parser(
+        "aegis",
+        help="Inspect live Aegis task/cost state",
+    )
+    aegis_sub = p_aegis.add_subparsers(dest="aegis_command")
+
+    aegis_status = aegis_sub.add_parser(
+        "status",
+        help="Show progress + cost snapshot",
+    )
+    aegis_status.set_defaults(func=cmd_aegis_status)
+
+    aegis_goal = aegis_sub.add_parser(
+        "goal",
+        help="Set the current session's goal",
+    )
+    aegis_goal.add_argument("goal", help="Goal description")
+    aegis_goal.add_argument(
+        "--subtask",
+        action="append",
+        help="Subtask label (repeatable)",
+    )
+    aegis_goal.set_defaults(func=cmd_aegis_goal)
+
+    def _aegis_default(_args: argparse.Namespace) -> None:
+        p_aegis.print_help()
+
+    p_aegis.set_defaults(func=_aegis_default)
+
+
+def _register_evolve(sub: argparse._SubParsersAction) -> None:
+    p_evolve = sub.add_parser(
+        "evolve",
+        help="Weekly evolution digest — research + summarise recent AI/LLM/CC developments",
+    )
+    p_evolve.add_argument(
+        "--install", action="store_true",
+        help="Install recurring weekly schedule (platform-native)",
+    )
+    p_evolve.add_argument(
+        "--run", action="store_true",
+        help="Immediately run the weekly evolve task",
+    )
+    p_evolve.add_argument(
+        "--render-prompt", action="store_true",
+        help="Print the prompt template (debug)",
+    )
+    p_evolve.set_defaults(func=cmd_evolve)
+
+
+def _register_rules(sub: argparse._SubParsersAction) -> None:
+    p_rules = sub.add_parser(
+        "rules",
+        help="Install / list / uninstall the bundled official rule set",
+    )
+    rules_sub = p_rules.add_subparsers(dest="rules_action")
+    r_install = rules_sub.add_parser(
+        "install", help="Install official rules to ~/.claude/rules/official/",
+    )
+    r_install.add_argument("path", nargs="?", default=None)
+    r_install.set_defaults(func=cmd_rules)
+    r_list = rules_sub.add_parser("list", help="List bundled rule files")
+    r_list.set_defaults(func=cmd_rules)
+    r_dry = rules_sub.add_parser(
+        "dry-run", help="Preview install without writing",
+    )
+    r_dry.add_argument("path", nargs="?", default=None)
+    r_dry.set_defaults(func=cmd_rules)
+    r_uninstall = rules_sub.add_parser(
+        "uninstall", help="Remove installed official rule tree",
+    )
+    r_uninstall.add_argument("path", nargs="?", default=None)
+    r_uninstall.set_defaults(func=cmd_rules)
+
+
+def _register_commands(sub: argparse._SubParsersAction) -> None:
+    p_cmd = sub.add_parser(
+        "commands",
+        help="Install Concinno slash-commands into ~/.claude/commands/",
+    )
+    cmd_sub = p_cmd.add_subparsers(dest="commands_action")
+    cmd_sync = cmd_sub.add_parser("sync", help="Install/refresh commands")
+    cmd_sync.add_argument("path", nargs="?", default=None)
+    cmd_sync.set_defaults(func=cmd_commands)
+    cmd_list = cmd_sub.add_parser("list", help="List discoverable slash commands")
+    cmd_list.set_defaults(func=cmd_commands)
+    cmd_clean = cmd_sub.add_parser("clean", help="Remove managed command files")
+    cmd_clean.add_argument("path", nargs="?", default=None)
+    cmd_clean.set_defaults(func=cmd_commands)
+
+
+def _register_features(sub: argparse._SubParsersAction) -> None:
+    p_feat = sub.add_parser(
+        "features",
+        help="Export FEATURE_META as Markdown / sync README",
+    )
+    feat_sub = p_feat.add_subparsers(dest="features_command")
+    feat_export = feat_sub.add_parser(
+        "export-readme",
+        help="Print FEATURE_META Markdown table to stdout",
+    )
+    feat_export.set_defaults(func=cmd_features)
+    feat_sync = feat_sub.add_parser(
+        "sync-readme",
+        help="Inject FEATURE_META table into README.md between anchors",
+    )
+    feat_sync.add_argument("path", nargs="?", default=None,
+                           help="Target README path (default: repo README.md)")
+    feat_sync.set_defaults(func=cmd_features)
+
+    # 2.30.1 — user-feature registry commands (attach to same `features` namespace)
+    from .features_register_cmd import register_features_subcommands
+    register_features_subcommands(feat_sub)
+
+
+def _register_gui(sub: argparse._SubParsersAction) -> None:
+    p_gui = sub.add_parser(
+        "gui",
+        help="Launch localhost config GUI (requires `pip install concinno[gui]`)",
+    )
+    p_gui.add_argument("--host", default="127.0.0.1",
+                       help="Bind host (default: 127.0.0.1 loopback)")
+    p_gui.add_argument("--port", type=int, default=8400,
+                       help="Bind port (default: 8400)")
+    p_gui.add_argument("--reload", action="store_true",
+                       help="Enable uvicorn auto-reload (dev only)")
+    p_gui.set_defaults(func=cmd_gui)
+
+
 def main() -> None:
     """CLI entry point."""
     # Fix Windows console encoding for Unicode output (⬜, ✅, etc.)
@@ -1302,86 +1546,14 @@ def main() -> None:
     p_doctor = sub.add_parser("doctor", help="Check installation health")
     p_doctor.set_defaults(func=cmd_doctor)
 
-    # backup
-    p_backup = sub.add_parser("backup", help="Manage destruction guard backups")
-    backup_sub = p_backup.add_subparsers(dest="backup_command")
-
-    backup_list = backup_sub.add_parser("list", help="List all backups")
-    backup_list.set_defaults(func=cmd_backup_list)
-
-    backup_clean = backup_sub.add_parser("cleanup", help="Clean expired backups")
-    backup_clean.add_argument(
-        "--days",
-        type=int,
-        default=None,
-        help="Retention days (default: from config)",
-    )
-    backup_clean.set_defaults(func=cmd_backup_cleanup)
-
-    backup_restore = backup_sub.add_parser("restore", help="Restore a backup")
-    backup_restore.add_argument("backup_id", help="Backup ID to restore")
-    backup_restore.set_defaults(func=cmd_backup_restore)
-
-    backup_pin = backup_sub.add_parser("pin", help="Pin a backup")
-    backup_pin.add_argument("backup_id", help="Backup ID to pin")
-    backup_pin.set_defaults(func=cmd_backup_pin)
-
-    backup_unpin = backup_sub.add_parser("unpin", help="Unpin a backup")
-    backup_unpin.add_argument("backup_id", help="Backup ID to unpin")
-    backup_unpin.set_defaults(func=cmd_backup_unpin)
-
-    p_backup.set_defaults(
-        func=lambda a: cmd_backup_list(a) if not a.backup_command else None,
-    )
-
-    # autopilot / cognitive (2.33.1 — extracted to module-level register helpers)
+    # backup / autopilot / cognitive (2.33.1 — module-level register helpers)
+    _register_backup(sub)
     _register_autopilot(sub)
     _register_cognitive(sub)
 
-    # audit
-    p_audit = sub.add_parser("audit", help="Attention budget audit + strike scan")
-    p_audit.add_argument(
-        "audit_mode", nargs="?", default="all",
-        choices=["all", "strike", "release", "budget", "upgrade"],
-        help="Scan mode (default: all)",
-    )
-    p_audit.add_argument("--workspace", default="", help="Workspace path")
-    p_audit.add_argument(
-        "--corrections", default="",
-        help="Relative path to corrections JSONL",
-    )
-    p_audit.add_argument(
-        "--budget", default="",
-        help="Relative path to attention-budget.json",
-    )
-    p_audit.add_argument("--dry", action="store_true", help="Dry run (upgrade mode)")
-    p_audit.set_defaults(func=cmd_audit)
-
-    # pipeline
-    p_pipe = sub.add_parser("pipeline", help="Think→Ship pipeline state management")
-    pipe_sub = p_pipe.add_subparsers(dest="pipeline_command")
-
-    pipe_status = pipe_sub.add_parser("status", help="Show pipeline progress")
-    pipe_status.set_defaults(func=cmd_pipeline_status)
-
-    pipe_clear = pipe_sub.add_parser("clear", help="Clear pipeline state")
-    pipe_clear.set_defaults(func=cmd_pipeline_clear)
-
-    pipe_design = pipe_sub.add_parser(
-        "design", help="Generate parallel design prompts"
-    )
-    pipe_design.add_argument("requirements", help="Feature requirements text")
-    pipe_design.add_argument(
-        "--constraint-set",
-        dest="constraint_set",
-        default="performance_vs_readability",
-        help="Constraint set (performance_vs_readability|monolith_vs_modular|defensive_vs_minimal)",
-    )
-    pipe_design.set_defaults(func=cmd_pipeline_design)
-
-    p_pipe.set_defaults(
-        func=lambda a: cmd_pipeline_status(a) if not a.pipeline_command else None,
-    )
+    # audit / pipeline (2.33.1 — module-level register helpers)
+    _register_audit(sub)
+    _register_pipeline(sub)
 
     # validate
     p_validate = sub.add_parser("validate", help="Validate handoff files")
@@ -1390,70 +1562,9 @@ def main() -> None:
     p_validate.add_argument("--fix", action="store_true", help="Auto-fix missing frontmatter")
     p_validate.set_defaults(func=cmd_validate)
 
-    # plugins
-    p_plug = sub.add_parser("plugins", help="Manage guard plugins")
-    plug_sub = p_plug.add_subparsers(dest="plugins_command")
-
-    plug_list = plug_sub.add_parser(
-        "list",
-        help="List all plugins (guards / features / skills) + allowlist",
-    )
-    plug_list.add_argument(
-        "--format", choices=("text", "json"), default="text",
-        help="Output format (default: text)",
-    )
-    plug_list.add_argument(
-        "--verbose", action="store_true",
-        help="Include built-in guard details and per-plugin error info",
-    )
-    plug_list.set_defaults(func=cmd_plugins_list)
-
-    plug_validate = plug_sub.add_parser("validate", help="Validate a plugin file")
-    plug_validate.add_argument("path", help="Path to plugin .py file")
-    plug_validate.set_defaults(func=cmd_plugins_validate)
-
-    plug_scan = plug_sub.add_parser("scan", help="Scan for installed plugin entrypoints")
-    plug_scan.set_defaults(func=cmd_plugins_scan)
-
-    # 2.32.0 -- allowlist subcommand tree for file-based persistence.
-    from .plugins_cmd import register_allowlist_subparsers
-    register_allowlist_subparsers(plug_sub)
-
-    p_plug.set_defaults(
-        func=lambda a: cmd_plugins_list(a) if not a.plugins_command else None,
-    )
-
-    # aegis — task/cost inspection
-    p_aegis = sub.add_parser(
-        "aegis",
-        help="Inspect live Aegis task/cost state",
-    )
-    aegis_sub = p_aegis.add_subparsers(dest="aegis_command")
-
-    aegis_status = aegis_sub.add_parser(
-        "status",
-        help="Show progress + cost snapshot",
-    )
-    aegis_status.set_defaults(func=cmd_aegis_status)
-
-    aegis_goal = aegis_sub.add_parser(
-        "goal",
-        help="Set the current session's goal",
-    )
-    aegis_goal.add_argument("goal", help="Goal description")
-    aegis_goal.add_argument(
-        "--subtask",
-        action="append",
-        help="Subtask label (repeatable)",
-    )
-    aegis_goal.set_defaults(func=cmd_aegis_goal)
-
-    def _aegis_default(_args: argparse.Namespace) -> None:
-        p_aegis.print_help()
-
-    p_aegis.set_defaults(func=_aegis_default)
-
-    # rag (2.33.1 — extracted to module-level register helper)
+    # plugins / aegis / rag (2.33.1 — module-level register helpers)
+    _register_plugins(sub)
+    _register_aegis(sub)
     _register_rag(sub)
 
     # cleanup
@@ -1465,24 +1576,8 @@ def main() -> None:
     p_clean.add_argument("--gc", action="store_true", help="Run aggressive git gc")
     p_clean.set_defaults(func=cmd_cleanup)
 
-    # evolve
-    p_evolve = sub.add_parser(
-        "evolve",
-        help="Weekly evolution digest — research + summarise recent AI/LLM/CC developments",
-    )
-    p_evolve.add_argument(
-        "--install", action="store_true",
-        help="Install recurring weekly schedule (platform-native)",
-    )
-    p_evolve.add_argument(
-        "--run", action="store_true",
-        help="Immediately run the weekly evolve task",
-    )
-    p_evolve.add_argument(
-        "--render-prompt", action="store_true",
-        help="Print the prompt template (debug)",
-    )
-    p_evolve.set_defaults(func=cmd_evolve)
+    # evolve (2.33.1 — module-level register helper)
+    _register_evolve(sub)
 
     # config — layered user/project/env config for mode, locale, flags
     from .config_cmd import register as _register_config
@@ -1516,80 +1611,11 @@ def main() -> None:
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)
 
-    # rules — install / list / uninstall bundled official rules
-    p_rules = sub.add_parser(
-        "rules",
-        help="Install / list / uninstall the bundled official rule set",
-    )
-    rules_sub = p_rules.add_subparsers(dest="rules_action")
-    r_install = rules_sub.add_parser(
-        "install", help="Install official rules to ~/.claude/rules/official/",
-    )
-    r_install.add_argument("path", nargs="?", default=None)
-    r_install.set_defaults(func=cmd_rules)
-    r_list = rules_sub.add_parser("list", help="List bundled rule files")
-    r_list.set_defaults(func=cmd_rules)
-    r_dry = rules_sub.add_parser(
-        "dry-run", help="Preview install without writing",
-    )
-    r_dry.add_argument("path", nargs="?", default=None)
-    r_dry.set_defaults(func=cmd_rules)
-    r_uninstall = rules_sub.add_parser(
-        "uninstall", help="Remove installed official rule tree",
-    )
-    r_uninstall.add_argument("path", nargs="?", default=None)
-    r_uninstall.set_defaults(func=cmd_rules)
-
-    # commands — install / list / clean Concinno slash-commands into CC
-    p_cmd = sub.add_parser(
-        "commands",
-        help="Install Concinno slash-commands into ~/.claude/commands/",
-    )
-    cmd_sub = p_cmd.add_subparsers(dest="commands_action")
-    cmd_sync = cmd_sub.add_parser("sync", help="Install/refresh commands")
-    cmd_sync.add_argument("path", nargs="?", default=None)
-    cmd_sync.set_defaults(func=cmd_commands)
-    cmd_list = cmd_sub.add_parser("list", help="List discoverable slash commands")
-    cmd_list.set_defaults(func=cmd_commands)
-    cmd_clean = cmd_sub.add_parser("clean", help="Remove managed command files")
-    cmd_clean.add_argument("path", nargs="?", default=None)
-    cmd_clean.set_defaults(func=cmd_commands)
-
-    # features — FEATURE_META export / README sync
-    p_feat = sub.add_parser(
-        "features",
-        help="Export FEATURE_META as Markdown / sync README",
-    )
-    feat_sub = p_feat.add_subparsers(dest="features_command")
-    feat_export = feat_sub.add_parser(
-        "export-readme",
-        help="Print FEATURE_META Markdown table to stdout",
-    )
-    feat_export.set_defaults(func=cmd_features)
-    feat_sync = feat_sub.add_parser(
-        "sync-readme",
-        help="Inject FEATURE_META table into README.md between anchors",
-    )
-    feat_sync.add_argument("path", nargs="?", default=None,
-                           help="Target README path (default: repo README.md)")
-    feat_sync.set_defaults(func=cmd_features)
-
-    # 2.30.1 — user-feature registry commands (attach to same `features` namespace)
-    from .features_register_cmd import register_features_subcommands
-    register_features_subcommands(feat_sub)
-
-    # gui — localhost config dashboard (requires `concinno[gui]` extras)
-    p_gui = sub.add_parser(
-        "gui",
-        help="Launch localhost config GUI (requires `pip install concinno[gui]`)",
-    )
-    p_gui.add_argument("--host", default="127.0.0.1",
-                       help="Bind host (default: 127.0.0.1 loopback)")
-    p_gui.add_argument("--port", type=int, default=8400,
-                       help="Bind port (default: 8400)")
-    p_gui.add_argument("--reload", action="store_true",
-                       help="Enable uvicorn auto-reload (dev only)")
-    p_gui.set_defaults(func=cmd_gui)
+    # rules / commands / features / gui (2.33.1 — module-level register helpers)
+    _register_rules(sub)
+    _register_commands(sub)
+    _register_features(sub)
+    _register_gui(sub)
 
     # uninstall
     p_uninstall = sub.add_parser("uninstall", help="Remove concinno hooks and config")
