@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.33.0] - 2026-04-24
+
+### Added — scaffold alignment with 2.31.0 entry-points groups
+
+`concinno new-feature <name> --kind=subpackage` now ships new
+`concinno-skills-*` packages with every 2.31.0 entry-points group
+declared and stub files wired up, so `pip install -e .` +
+`concinno plugins list` shows the new package with OK status on the
+very first build.
+
+Generated additions per scaffold:
+
+- **`src/concinno_skills_<name>/features.py`** — exports empty-but-
+  schema-valid `FEATURE_META: dict[str, dict]` dict. Matching entry in
+  `pyproject.toml`.
+- **`src/concinno_skills_<name>/tools.py`** — placeholder module with
+  a commented-out `Tool` subclass example. Matching entry.
+- **`src/concinno_skills_<name>/skills/__init__.py`** — exports
+  `SKILLS_DIR = str(files(__package__))` so the directory resolves
+  under the `concinno.skills` entry-point.
+- **`src/concinno_skills_<name>/skills/example/SKILL.md`** — working
+  SKILL.md example with well-formed frontmatter (`name` / `description`
+  / `triggers` / `user-invocable`) scaffolded ready to rename.
+- **`pyproject.toml`** — declares all four entry-points groups
+  (`concinno.tools` / `concinno.features` / `concinno.skills` /
+  `concinno.guards`) with usage-comment stubs for each.
+- **Scaffold `dependencies`** — bumped to `concinno>=2.33.0` so the
+  generated package is guaranteed compatible with the entry-points
+  groups it declares.
+
+### Tests
+
+- `tests/test_new_feature_cmd.py::test_subpackage_scaffold_ships_2_31_entry_points`
+  — asserts the four generated files exist, `pyproject.toml` contains
+  all four entry-points groups, and the smoke test checks entry-points
+  modules load cleanly.
+- Full regression: 10/10 `test_new_feature_cmd.py` + 158/158 plugin /
+  feature / skill coverage green.
+
+### Docs
+
+- `docs/how-to-ship-a-skills-package.md` — prepended a "Quick start"
+  section pointing at `concinno new-feature` as the canonical entry
+  point for third-party developers.
+- `docs/skills-ecosystem.md` — added an "Adding a new package" pointer
+  alongside the 19+ existing package inventory.
+
+### Context
+
+Closes the gap between 2.31.0 (shipped four entry-points groups) /
+2.32.0 (shipped inspection CLI) and the pre-2.15.0 scaffold that only
+knew about `concinno.guards`. A dev scaffolding a fresh
+`concinno-skills-*` package in 2.32.0 ended up needing to hand-edit
+`pyproject.toml` and create `features.py` / `skills/` / `tools.py`
+themselves — undocumented boilerplate. 2.33.0 closes that gap: the
+scaffold and the library's extension surface stay aligned.
+
+Low radius — pure template enhancement, backward-compat (pre-2.33.0
+scaffolded packages untouched), reversible via further minor
+versions. Red Opus attack skipped per `rules/L1/redteam.md`
+Low-radius policy.
+
+Spec: `_AI_BRAIN/05_Planning/concinno-2.33.0-scaffold-2.31-entry-points-spec.md`.
+
 ## [2.32.0] - 2026-04-24
 
 ### Added — `concinno plugins` CLI (list / allowlist)

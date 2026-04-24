@@ -34,6 +34,20 @@ python -c "from concinno.tools.registry import get_default_registry; \
 
 For vector-DB / media-gen / cloud storage — see the "Heavy extras" section below.
 
+## Adding a new package (2.33.0+)
+
+```bash
+concinno new-feature <name> --kind=subpackage
+```
+
+Scaffolds `concinno-skills-<name>/` with PEP 621 `pyproject.toml`,
+all four 2.31.0 entry-points groups declared (`concinno.tools` /
+`concinno.features` / `concinno.skills` / `concinno.guards`), and
+matching stub files (`features.py`, `tools.py`, `skills/example/SKILL.md`).
+`pip install -e .` + `concinno plugins list` verifies end-to-end
+discovery. See `docs/how-to-ship-a-skills-package.md` for the field
+reference.
+
 ## Package inventory
 
 | # | Package | Version | Tools | Top-25 slot |

@@ -76,8 +76,9 @@ def test_subpackage_kind_scaffolds_pep621_layout(tmp_path: Path) -> None:
     assert rc == 0
 
     pkg_root = tmp_path / "concinno-skills-demo"
+    src_pkg = pkg_root / "src" / "concinno_skills_demo"
     assert (pkg_root / "pyproject.toml").is_file()
-    assert (pkg_root / "src" / "concinno_skills_demo" / "__init__.py").is_file()
+    assert (src_pkg / "__init__.py").is_file()
     assert (pkg_root / "tests" / "__init__.py").is_file()
     assert (pkg_root / "tests" / "test_demo_smoke.py").is_file()
     assert (pkg_root / "README.md").is_file()
@@ -87,6 +88,53 @@ def test_subpackage_kind_scaffolds_pep621_layout(tmp_path: Path) -> None:
     pyproject_text = (pkg_root / "pyproject.toml").read_text(encoding="utf-8")
     assert 'name = "concinno-skills-demo"' in pyproject_text
     assert 'version = "0.1.0"' in pyproject_text
+
+
+def test_subpackage_scaffold_ships_2_31_entry_points(tmp_path: Path) -> None:
+    """2.33.0: scaffold writes features.py + tools.py + skills/ + example SKILL.md,
+    and pyproject declares all four entry-points groups with concinno>=2.33.0.
+    """
+    rc = _handle(_ns(name="demo", kind="subpackage", dir=str(tmp_path)))
+    assert rc == 0
+
+    pkg_root = tmp_path / "concinno-skills-demo"
+    src_pkg = pkg_root / "src" / "concinno_skills_demo"
+
+    # 2.33.0 new scaffold files
+    assert (src_pkg / "features.py").is_file()
+    assert (src_pkg / "tools.py").is_file()
+    assert (src_pkg / "skills" / "__init__.py").is_file()
+    assert (src_pkg / "skills" / "example" / "SKILL.md").is_file()
+
+    # pyproject declares all four entry-points groups
+    pyproject_text = (pkg_root / "pyproject.toml").read_text(encoding="utf-8")
+    for group in (
+        'concinno.tools',
+        'concinno.features',
+        'concinno.skills',
+        'concinno.guards',
+    ):
+        assert f'[project.entry-points."{group}"]' in pyproject_text, (
+            f'pyproject missing entry-points group: {group}'
+        )
+
+    # Dependencies pinned to 2.33.0+ so scaffold output works with the
+    # entry-points groups declared above.
+    assert 'concinno>=2.33.0' in pyproject_text
+
+    # features.py exports an empty-but-valid FEATURE_META dict.
+    features_text = (src_pkg / "features.py").read_text(encoding="utf-8")
+    assert 'FEATURE_META' in features_text
+    assert 'dict[str, dict]' in features_text
+
+    # Example SKILL.md has well-formed frontmatter.
+    skill_md = (src_pkg / "skills" / "example" / "SKILL.md").read_text(encoding="utf-8")
+    assert skill_md.startswith("---\nname: example\n")
+    assert "triggers:" in skill_md
+
+    # Smoke test also extended to check entry-points module imports.
+    smoke_text = (pkg_root / "tests" / "test_demo_smoke.py").read_text(encoding="utf-8")
+    assert "test_entry_points_modules_load" in smoke_text
 
 
 # ---------------------------------------------------------------------------

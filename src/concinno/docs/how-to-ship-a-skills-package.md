@@ -6,6 +6,29 @@ installable PyPI package. After `pip install concinno-skills-your-thing`,
 users' `concinno gui` will show your features and skills automatically,
 with no post-install CLI step.
 
+## Quick start (2.33.0+) — scaffold with one command
+
+The fastest path is the built-in scaffolder. It writes every file this
+guide describes, wired up correctly the first time:
+
+```bash
+pip install concinno>=2.33.0
+concinno new-feature your-thing --kind=subpackage
+cd concinno-skills-your-thing
+pip install -e .
+concinno plugins list    # your package should appear with OK status
+```
+
+The scaffold generates a package with all four entry-points groups
+declared (`concinno.tools` / `concinno.features` / `concinno.skills` /
+`concinno.guards`) plus matching stub files (`features.py`, `tools.py`,
+`skills/example/SKILL.md`). Fill in the stubs, remove the example skill,
+and ship.
+
+The rest of this document is a reference for the individual fields; if
+you use the scaffolder you can skim to the "Security model" and
+"Prior-art comparison" sections at the end.
+
 ## Minimum `pyproject.toml`
 
 ```toml

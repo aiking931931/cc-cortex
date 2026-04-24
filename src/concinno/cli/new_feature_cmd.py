@@ -220,12 +220,30 @@ def scaffold_skill(root: Path, name: str, radius: str) -> list[tuple[Path, str]]
 
 
 def scaffold_subpackage(root: Path, name: str, radius: str) -> list[tuple[Path, str]]:
-    """Sub-package scaffold: PEP 621 pyproject + src layout + tests."""
+    """Sub-package scaffold: PEP 621 pyproject + src layout + tests.
+
+    2.33.0 extended: ships ``features.py`` / ``tools.py`` /
+    ``skills/__init__.py`` / ``skills/example/SKILL.md`` so the
+    scaffold aligns with 2.31.0's four entry-points groups
+    (``concinno.tools`` / ``concinno.features`` / ``concinno.skills`` /
+    ``concinno.guards``). Every generated file is empty-but-valid so
+    the freshly-scaffolded package installs and passes its smoke test
+    without the author touching anything.
+    """
     pkg_root = root / f"concinno-skills-{name}"
     src_pkg = pkg_root / "src" / f"concinno_skills_{name.replace('-', '_')}"
     return [
         (pkg_root / "pyproject.toml", _subpkg_pyproject(name)),
         (src_pkg / "__init__.py", _subpkg_init(name)),
+        # 2.33.0: four new scaffold files wiring up the 2.31.0
+        # entry-points groups (features / skills / tools).
+        (src_pkg / "features.py", _subpkg_features_py(name)),
+        (src_pkg / "tools.py", _subpkg_tools_py(name)),
+        (src_pkg / "skills" / "__init__.py", _subpkg_skills_init_py(name)),
+        (
+            src_pkg / "skills" / "example" / "SKILL.md",
+            _subpkg_skills_example_md(name),
+        ),
         (pkg_root / "tests" / "__init__.py", ""),
         (
             pkg_root / "tests" / f"test_{name.replace('-', '_')}_smoke.py",
@@ -377,6 +395,7 @@ def _skill_dod_md(name: str) -> str:
 
 
 def _subpkg_pyproject(name: str) -> str:
+    pyname = name.replace("-", "_")
     return f"""[build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -389,20 +408,141 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
-    "concinno>=2.15.0",
+    # 2.33.0 ships scaffolds with all four entry-points groups declared,
+    # so consumers must be on 2.33.0+ to discover features/skills/tools.
+    "concinno>=2.33.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
 
+# ── Entry-points (pick the ones you need; leave others empty) ────────
+#
+# Concinno 2.31.0+ discovers third-party plugins through four groups.
+# Uncomment + fill each line for every name your package contributes.
+
+[project.entry-points."concinno.tools"]
+# Each key is the tool name surfaced via concinno.tools.registry.
+# Value points at a Tool subclass via "module:attr".
+# example_tool = "concinno_skills_{pyname}.tools:ExampleTool"
+
+[project.entry-points."concinno.features"]
+# Each key is a feature namespace. Value resolves to a dict[str, dict]
+# keyed by feature name (FEATURE_META-shaped, schema_version=1).
+# core = "concinno_skills_{pyname}.features:FEATURE_META"
+
+[project.entry-points."concinno.skills"]
+# Each value resolves to a directory containing SKILL.md subdirs.
+# root = "concinno_skills_{pyname}.skills:SKILLS_DIR"
+
 [project.entry-points."concinno.guards"]
-# TODO: register guards here
+# BaseGuard subclasses (pre-2.31.0 mechanism). Leave empty when the
+# package doesn't ship runtime guards.
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/concinno_skills_{name.replace('-', '_')}"]
+packages = ["src/concinno_skills_{pyname}"]
 
 [tool.ruff]
 line-length = 100
+"""
+
+
+def _subpkg_features_py(name: str) -> str:
+    pyname = name.replace("-", "_")
+    return f'''"""FEATURE_META for concinno_skills_{pyname}.
+
+Exported via the ``concinno.features`` entry-point so Concinno's
+:func:`concinno.feature_config.iter_all_features_with_origin` discovers
+these rows at process start.
+
+Each key is a switchable feature name. Each value is a dict matching
+the FEATURE_META schema used by :mod:`concinno.feature_config`::
+
+    FEATURE_META = {{
+        "my_gate": {{
+            "category": "plugin_gate",
+            "description": "one-line English description",
+            "enabled": True,
+            "schema_version": 1,
+            "ziq_autotunable": False,
+            "cosmetic": False,
+            "params": {{}},
+        }},
+    }}
+
+An empty dict is valid — the package will load without contributing
+feature rows. Wire ``features`` in ``pyproject.toml`` only once you
+have at least one entry here.
+"""
+from __future__ import annotations
+
+FEATURE_META: dict[str, dict] = {{
+    # Add feature entries here.
+}}
+'''
+
+
+def _subpkg_tools_py(name: str) -> str:
+    pyname = name.replace("-", "_")
+    return f'''"""Tools for concinno_skills_{pyname}.
+
+Exported via the ``concinno.tools`` entry-point. Each tool inherits
+from :class:`concinno.tools.base.Tool` and implements ``call(**kwargs)``.
+Delete this file (and the ``concinno.tools`` section in
+``pyproject.toml``) if the package contributes no tools.
+
+Example skeleton::
+
+    from concinno.tools.base import Tool
+
+
+    class ExampleTool(Tool):
+        name = "example_tool"
+        description = "TODO: one-line description surfaced in the registry."
+        is_concurrency_safe = True
+
+        def call(self, **kwargs: object) -> dict:
+            return {{"status": "todo"}}
+"""
+from __future__ import annotations
+'''
+
+
+def _subpkg_skills_init_py(name: str) -> str:
+    pyname = name.replace("-", "_")
+    return f'''"""Skill roots for concinno_skills_{pyname}.
+
+Exported via the ``concinno.skills`` entry-point. ``SKILLS_DIR``
+resolves to the directory containing one subdirectory per skill,
+each with its own ``SKILL.md`` frontmatter + body.
+
+Delete the ``concinno.skills`` line in ``pyproject.toml`` if this
+package ships no skills.
+"""
+from __future__ import annotations
+
+from importlib.resources import files
+
+SKILLS_DIR = str(files(__package__))
+'''
+
+
+def _subpkg_skills_example_md(name: str) -> str:
+    return f"""---
+name: example
+description: Example skill scaffolded by `concinno new-feature`. Rename or delete.
+triggers: [example, template, {name}]
+user-invocable: false
+---
+
+# example
+
+I am a placeholder skill. Rename my directory, rewrite my frontmatter,
+and replace this body with a real skill description before shipping.
+
+See `docs/how-to-ship-a-skills-package.md` in the Concinno repo for the
+full SKILL.md schema and how Concinno's `concinno plugins list` surfaces
+packaged skills in the GUI.
 """
 
 
@@ -432,6 +572,23 @@ def test_import_works() -> None:
     import concinno_skills_{pyname}
 
     assert concinno_skills_{pyname}.__version__
+
+
+def test_entry_points_modules_load() -> None:
+    """Each 2.31.0 entry-points group has a loadable module.
+
+    Scaffold ships empty-but-valid shapes so the freshly generated
+    package installs cleanly. Empty FEATURE_META dict + bare
+    ``SKILLS_DIR`` attribute + import-safe ``tools`` module all pass.
+    """
+    from pathlib import Path
+
+    from concinno_skills_{pyname} import features as _feat
+    from concinno_skills_{pyname} import skills as _skills
+    from concinno_skills_{pyname} import tools as _tools  # noqa: F401
+
+    assert isinstance(_feat.FEATURE_META, dict)
+    assert Path(_skills.SKILLS_DIR).is_dir()
 '''
 
 
