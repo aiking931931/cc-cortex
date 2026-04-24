@@ -1132,6 +1132,140 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Subparser registration helpers (2.33.1 refactor — extracted from main()
+# to drop the function below the 120-line func_length guard threshold and
+# group argparse wiring by command namespace).
+# ---------------------------------------------------------------------------
+
+
+def _register_autopilot(sub: argparse._SubParsersAction) -> None:
+    p_auto = sub.add_parser("autopilot", help="Manage autopilot maintenance tasks")
+    auto_sub = p_auto.add_subparsers(dest="autopilot_command")
+
+    auto_init = auto_sub.add_parser("init", help="Install autopilot (config + scheduler)")
+    auto_init.add_argument("--workspace", default="", help="Workspace path (default: cwd)")
+    auto_init.add_argument("--force", action="store_true", help="Overwrite existing files")
+    auto_init.set_defaults(func=cmd_autopilot_init)
+
+    auto_list = auto_sub.add_parser("list", help="List all autopilot tasks")
+    auto_list.set_defaults(func=cmd_autopilot_list)
+
+    auto_status = auto_sub.add_parser("status", help="Show autopilot status")
+    auto_status.set_defaults(func=cmd_autopilot_status)
+
+    auto_enable = auto_sub.add_parser("enable", help="Enable an autopilot task")
+    auto_enable.add_argument("name", help="Task name (e.g. reflect, scavenger)")
+    auto_enable.set_defaults(func=cmd_autopilot_enable)
+
+    auto_disable = auto_sub.add_parser("disable", help="Disable an autopilot task")
+    auto_disable.add_argument("name", help="Task name")
+    auto_disable.set_defaults(func=cmd_autopilot_disable)
+
+    auto_set = auto_sub.add_parser("set", help="Set task property (model/budget/timeout)")
+    auto_set.add_argument("name", help="Task name")
+    auto_set.add_argument("key", help="Property: model, budget, timeout, time, freq")
+    auto_set.add_argument("value", help="New value")
+    auto_set.set_defaults(func=cmd_autopilot_set)
+
+    auto_run = auto_sub.add_parser("run", help="Immediately run an autopilot task")
+    auto_run.add_argument("name", help="Task name")
+    auto_run.set_defaults(func=cmd_autopilot_run)
+
+    auto_uninstall = auto_sub.add_parser("uninstall", help="Remove autopilot scheduler entries")
+    auto_uninstall.set_defaults(func=cmd_autopilot_uninstall)
+
+    p_auto.set_defaults(
+        func=lambda a: cmd_autopilot_list(a) if not a.autopilot_command else None,
+    )
+
+
+def _register_cognitive(sub: argparse._SubParsersAction) -> None:
+    p_cog = sub.add_parser("cognitive", help="Cognitive layer inspection")
+    cog_sub = p_cog.add_subparsers(dest="cognitive_command")
+
+    cog_status = cog_sub.add_parser("status", help="Show cognitive summary")
+    cog_status.set_defaults(func=cmd_cognitive_status)
+
+    cog_thresh = cog_sub.add_parser(
+        "thresholds",
+        help="Show adaptive thresholds",
+    )
+    cog_thresh.set_defaults(func=cmd_cognitive_thresholds)
+
+    cog_journal = cog_sub.add_parser(
+        "journal",
+        help="Show decision journal",
+    )
+    cog_journal.add_argument(
+        "-n",
+        type=int,
+        default=10,
+        help="Number of entries",
+    )
+    cog_journal.set_defaults(func=cmd_cognitive_journal)
+
+    cog_profiles = cog_sub.add_parser(
+        "profiles",
+        help="Show session profiles",
+    )
+    cog_profiles.add_argument(
+        "-n",
+        type=int,
+        default=10,
+        help="Number of entries",
+    )
+    cog_profiles.set_defaults(func=cmd_cognitive_profiles)
+
+    cog_reset = cog_sub.add_parser(
+        "reset",
+        help="Reset adaptive thresholds to defaults",
+    )
+    cog_reset.set_defaults(func=cmd_cognitive_reset)
+
+    p_cog.set_defaults(
+        func=lambda a: cmd_cognitive_status(a) if not a.cognitive_command else None,
+    )
+
+
+def _register_rag(sub: argparse._SubParsersAction) -> None:
+    p_rag = sub.add_parser(
+        "rag",
+        help="Inspect RAG namespaces and ZIQ routing",
+    )
+    rag_sub = p_rag.add_subparsers(dest="rag_command")
+
+    rag_ns = rag_sub.add_parser(
+        "namespaces",
+        help="List RAG namespaces",
+    )
+    rag_ns.set_defaults(func=cmd_rag_namespaces)
+
+    rag_route = rag_sub.add_parser(
+        "route",
+        help="Show routed namespaces for a query",
+    )
+    rag_route.add_argument("query", help="Query text")
+    rag_route.add_argument(
+        "--confidence",
+        type=float,
+        default=0.5,
+        help="ZIQ alpha_t uncertainty (0=certain, 1=unknown)",
+    )
+    rag_route.set_defaults(func=cmd_rag_route)
+
+    rag_w = rag_sub.add_parser(
+        "weights",
+        help="Show current ZIQ FTRL source-type weights",
+    )
+    rag_w.set_defaults(func=cmd_rag_weights)
+
+    def _rag_default(_args: argparse.Namespace) -> None:
+        p_rag.print_help()
+
+    p_rag.set_defaults(func=_rag_default)
+
+
 def main() -> None:
     """CLI entry point."""
     # Fix Windows console encoding for Unicode output (⬜, ✅, etc.)
@@ -1200,92 +1334,9 @@ def main() -> None:
         func=lambda a: cmd_backup_list(a) if not a.backup_command else None,
     )
 
-    # autopilot
-    p_auto = sub.add_parser("autopilot", help="Manage autopilot maintenance tasks")
-    auto_sub = p_auto.add_subparsers(dest="autopilot_command")
-
-    auto_init = auto_sub.add_parser("init", help="Install autopilot (config + scheduler)")
-    auto_init.add_argument("--workspace", default="", help="Workspace path (default: cwd)")
-    auto_init.add_argument("--force", action="store_true", help="Overwrite existing files")
-    auto_init.set_defaults(func=cmd_autopilot_init)
-
-    auto_list = auto_sub.add_parser("list", help="List all autopilot tasks")
-    auto_list.set_defaults(func=cmd_autopilot_list)
-
-    auto_status = auto_sub.add_parser("status", help="Show autopilot status")
-    auto_status.set_defaults(func=cmd_autopilot_status)
-
-    auto_enable = auto_sub.add_parser("enable", help="Enable an autopilot task")
-    auto_enable.add_argument("name", help="Task name (e.g. reflect, scavenger)")
-    auto_enable.set_defaults(func=cmd_autopilot_enable)
-
-    auto_disable = auto_sub.add_parser("disable", help="Disable an autopilot task")
-    auto_disable.add_argument("name", help="Task name")
-    auto_disable.set_defaults(func=cmd_autopilot_disable)
-
-    auto_set = auto_sub.add_parser("set", help="Set task property (model/budget/timeout)")
-    auto_set.add_argument("name", help="Task name")
-    auto_set.add_argument("key", help="Property: model, budget, timeout, time, freq")
-    auto_set.add_argument("value", help="New value")
-    auto_set.set_defaults(func=cmd_autopilot_set)
-
-    auto_run = auto_sub.add_parser("run", help="Immediately run an autopilot task")
-    auto_run.add_argument("name", help="Task name")
-    auto_run.set_defaults(func=cmd_autopilot_run)
-
-    auto_uninstall = auto_sub.add_parser("uninstall", help="Remove autopilot scheduler entries")
-    auto_uninstall.set_defaults(func=cmd_autopilot_uninstall)
-
-    p_auto.set_defaults(
-        func=lambda a: cmd_autopilot_list(a) if not a.autopilot_command else None,
-    )
-
-    # cognitive
-    p_cog = sub.add_parser("cognitive", help="Cognitive layer inspection")
-    cog_sub = p_cog.add_subparsers(dest="cognitive_command")
-
-    cog_status = cog_sub.add_parser("status", help="Show cognitive summary")
-    cog_status.set_defaults(func=cmd_cognitive_status)
-
-    cog_thresh = cog_sub.add_parser(
-        "thresholds",
-        help="Show adaptive thresholds",
-    )
-    cog_thresh.set_defaults(func=cmd_cognitive_thresholds)
-
-    cog_journal = cog_sub.add_parser(
-        "journal",
-        help="Show decision journal",
-    )
-    cog_journal.add_argument(
-        "-n",
-        type=int,
-        default=10,
-        help="Number of entries",
-    )
-    cog_journal.set_defaults(func=cmd_cognitive_journal)
-
-    cog_profiles = cog_sub.add_parser(
-        "profiles",
-        help="Show session profiles",
-    )
-    cog_profiles.add_argument(
-        "-n",
-        type=int,
-        default=10,
-        help="Number of entries",
-    )
-    cog_profiles.set_defaults(func=cmd_cognitive_profiles)
-
-    cog_reset = cog_sub.add_parser(
-        "reset",
-        help="Reset adaptive thresholds to defaults",
-    )
-    cog_reset.set_defaults(func=cmd_cognitive_reset)
-
-    p_cog.set_defaults(
-        func=lambda a: cmd_cognitive_status(a) if not a.cognitive_command else None,
-    )
+    # autopilot / cognitive (2.33.1 — extracted to module-level register helpers)
+    _register_autopilot(sub)
+    _register_cognitive(sub)
 
     # audit
     p_audit = sub.add_parser("audit", help="Attention budget audit + strike scan")
@@ -1402,42 +1453,8 @@ def main() -> None:
 
     p_aegis.set_defaults(func=_aegis_default)
 
-    # rag — namespace routing inspection
-    p_rag = sub.add_parser(
-        "rag",
-        help="Inspect RAG namespaces and ZIQ routing",
-    )
-    rag_sub = p_rag.add_subparsers(dest="rag_command")
-
-    rag_ns = rag_sub.add_parser(
-        "namespaces",
-        help="List RAG namespaces",
-    )
-    rag_ns.set_defaults(func=cmd_rag_namespaces)
-
-    rag_route = rag_sub.add_parser(
-        "route",
-        help="Show routed namespaces for a query",
-    )
-    rag_route.add_argument("query", help="Query text")
-    rag_route.add_argument(
-        "--confidence",
-        type=float,
-        default=0.5,
-        help="ZIQ alpha_t uncertainty (0=certain, 1=unknown)",
-    )
-    rag_route.set_defaults(func=cmd_rag_route)
-
-    rag_w = rag_sub.add_parser(
-        "weights",
-        help="Show current ZIQ FTRL source-type weights",
-    )
-    rag_w.set_defaults(func=cmd_rag_weights)
-
-    def _rag_default(_args: argparse.Namespace) -> None:
-        p_rag.print_help()
-
-    p_rag.set_defaults(func=_rag_default)
+    # rag (2.33.1 — extracted to module-level register helper)
+    _register_rag(sub)
 
     # cleanup
     p_clean = sub.add_parser("cleanup", help="Run cleanup (stale files, logs, git gc)")
