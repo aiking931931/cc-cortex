@@ -532,7 +532,9 @@ def _validate_video(files: list[str], workspace: str) -> TypeReport:
 def _deep_video_responsive(files: list[str]) -> CheckResult:
     """Deep check: video codec/resolution/bitrate via ffprobe."""
     import shutil
-    import subprocess
+    import subprocess  # for TimeoutExpired exception type
+
+    from concinno.core import subprocess_safe
 
     if not shutil.which("ffprobe"):
         return CheckResult(WiredoDimension.RESPONSIVE, CheckState.SKIP,
@@ -541,7 +543,7 @@ def _deep_video_responsive(files: list[str]) -> CheckResult:
     issues = []
     for f in files:
         try:
-            result = subprocess.run(
+            result = subprocess_safe.run(
                 ["ffprobe", "-v", "quiet", "-print_format", "json",
                  "-show_format", "-show_streams", f],
                 capture_output=True, text=True, timeout=2,
@@ -621,7 +623,9 @@ def _validate_audio(files: list[str], workspace: str) -> TypeReport:
 def _deep_audio_responsive(files: list[str]) -> CheckResult:
     """Deep check: audio sample rate/codec via ffprobe."""
     import shutil
-    import subprocess
+    import subprocess  # for TimeoutExpired exception type
+
+    from concinno.core import subprocess_safe
 
     if not shutil.which("ffprobe"):
         return CheckResult(WiredoDimension.RESPONSIVE, CheckState.SKIP,
@@ -630,7 +634,7 @@ def _deep_audio_responsive(files: list[str]) -> CheckResult:
     issues = []
     for f in files:
         try:
-            result = subprocess.run(
+            result = subprocess_safe.run(
                 ["ffprobe", "-v", "quiet", "-print_format", "json",
                  "-show_streams", f],
                 capture_output=True, text=True, timeout=2,

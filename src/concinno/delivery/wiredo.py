@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+import subprocess  # noqa: F401 - kept for legacy callers re-exporting from this module
 from typing import Any, Optional
+
+from concinno.core import subprocess_safe
 
 from ._base import ExitCriteria, VerificationResult
 from .gate import DeliveryGate
@@ -57,7 +59,7 @@ def _is_wired_grep(combined: str, fpath: str, workspace: str) -> Optional[bool]:
                   "."]
         )
         try:
-            result = subprocess.run(
+            result = subprocess_safe.run(
                 args, capture_output=True, text=True, timeout=5,
                 cwd=workspace,
             )

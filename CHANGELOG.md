@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.35.1] - 2026-04-25
+
+### Fixed — Suppress transient Windows console flash on every Stop event
+
+User-reported "彈出 CMD / PowerShell 視窗一瞬間很煩" — on Windows, three
+hot-path subprocess call sites under `concinno.delivery` and
+`concinno.asset_validator` ran external binaries (`rg` / `grep` /
+`ffprobe`) without `creationflags=CREATE_NO_WINDOW`, so each Stop
+event painted a black console window for ~200 ms.
+
+Root cause: `concinno.hooks.on_stop._build_wiredo_block` fires on every
+Stop with `wiredo.enabled=True` (default), invoking
+`ArtifactPipeline` → `delivery.wiredo._self_imported_anywhere` →
+bare `subprocess.run(["rg", …])`. Same hidden-flag oversight in
+`artifact_pipeline._deep_video_responsive` /
+`artifact_pipeline._deep_audio_responsive` /
+`asset_validator._ffprobe` — only fires when the session has media
+artifacts but still flashes when it does.
+
+Fix: new `concinno.core.subprocess_safe` module exports `run` and
+`Popen` wrappers that auto-OR `CREATE_NO_WINDOW` on Windows and
+forward unchanged on other platforms. Caller-supplied
+`creationflags` are preserved (bitwise-or, not overwrite); explicit
+`startupinfo` skips the auto-flag (caller knows what they're doing).
+Hot-path call sites now route through the wrapper:
+
+- `concinno/delivery/wiredo.py:60` — workspace `rg` / `grep` scan
+- `concinno/delivery/artifact_pipeline.py:545` — video `ffprobe`
+- `concinno/delivery/artifact_pipeline.py:634` — audio `ffprobe`
+- `concinno/asset_validator.py:224` — generic `ffprobe`
+
+Tests in `tests/test_core_subprocess_safe.py` (13 tests, 11 passed +
+2 Windows-only skips on non-Windows CI) cover the
+`creationflags` injection (no-op on non-Windows, OR-merge on Windows,
+skip when `startupinfo` present), the constant value, and live
+`run` / `Popen` round-trips. Existing 199 tests across affected
+modules still green.
+
+Origin: 2026-04-25 part C user message — "最近又開始有東西 彈出 CMD 或
+powershell 視窗 一瞬間很煩 我剛看到其中一個是 git 檢查並修復 根治他".
+
+User-side hooks (`~/.claude/hooks/git_health_check.py`,
+`~/.claude/hooks/on-stop.py`, `~/.claude/hooks/auto_agent.py`,
+`~/.claude/hooks/auto_agent_v2.py`) had the same pattern; those are
+patched in-place since they live outside the concinno package.
+
 ## [2.35.0] - 2026-04-25
 
 ### Performance — PEP 562 lazy re-export in `concinno.cache.__init__`
