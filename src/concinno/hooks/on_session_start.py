@@ -65,6 +65,33 @@ def main(hook_data: dict | None = None) -> None:
     except (ImportError, Exception):
         pass
 
+    # --- Module: auto_update.tier1_registry (refresh plugin caches) ---
+    # Cheap registry refresh (entry-points re-scan) on SessionStart.
+    # Hard 300ms budget; fail-soft. Digest-hit fast path means 99% of
+    # session starts are sub-50ms once the cache is warm.
+    # See ``concinno.auto_update.tier1_registry`` for the full spec.
+    try:
+        from concinno.auto_update import refresh_tier1_registry
+
+        result = refresh_tier1_registry(timeout_ms=300)
+        if result.error:
+            sys.stderr.write(
+                f"concinno: tier1 refresh error (non-fatal): {result.error}\n"
+            )
+        elif result.timed_out and not result.digest_hit:
+            sys.stderr.write(
+                "concinno: tier1 refresh timed out at "
+                f"{result.elapsed_ms:.0f}ms (300ms budget)\n"
+            )
+        elif not result.digest_hit:
+            sys.stderr.write(
+                f"concinno: tier1 refreshed {result.skills_count} skills + "
+                f"{result.features_count} features in "
+                f"{result.elapsed_ms:.0f}ms\n"
+            )
+    except (ImportError, Exception):
+        pass
+
     # --- narrower-scope v4: inject active preset into agent context ---
     _emit_active_preset()
 

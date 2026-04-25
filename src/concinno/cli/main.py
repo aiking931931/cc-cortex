@@ -1656,6 +1656,10 @@ def main() -> None:
     _register_cfg_perms(sub)
     _register_publish(sub)
 
+    # 2.36.0 — self-update (Tier 2 auto-update, detached helper)
+    from .self_update_cmd import register as _register_self_update
+    _register_self_update(sub)
+
     # 2.17.0 — new-feature scaffold CLI
     from .new_feature_cmd import register as _register_new_feature
     _register_new_feature(sub)
