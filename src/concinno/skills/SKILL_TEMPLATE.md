@@ -3,6 +3,19 @@ name: <skill-name>
 description: <One sentence describing what this skill does and when it triggers. Triggers on "<keyword1>", "<keyword2>", "<中文觸發詞>".>
 user-invocable: true
 allowed-tools: Bash, Read, Edit
+
+# Optional (concinno 2.35.0+): declarative event bindings consumed by the
+# Sancio EventDispatcher. CC harness ignores unknown frontmatter keys, so
+# legacy SKILL.md files without this section keep working unchanged. See
+# concinno.skills.schema.EventBinding for the full field set.
+event_bindings:
+  - event: PostToolUse
+    when: 'tool_name == "Edit" and "test_" in file_path'
+    invoke: <skill-name>
+    priority: 80
+  - event: Stop
+    invoke: <skill-name>
+    cooldown_seconds: 30
 ---
 
 # /<skill-name> — <Short Title>

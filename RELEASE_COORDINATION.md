@@ -3,19 +3,20 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-24 — **2.21.0 ready-to-publish，GAIA skill switches + waiting toast**）
+## 現況 snapshot（2026-04-25 — **2.35.0 built, ready-to-publish; IntentAnchor 2.10 + EventBinding schema**）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | `2.20.0` (2026-04-23，commit 51a3e21d9 llm_runtime + LlamaCppBackend) |
-| `pyproject.toml` version | `2.21.0` |
-| `src/concinno/__init__.py __version__` | `2.21.0` |
-| CHANGELOG.md 最新 release heading | `## [Unreleased]` (待 promote `## [2.21.0] - 2026-04-24`) |
-| 三源對齊狀態 | ✅ 三源對齊 2.21.0（Unreleased heading 下次 ship 時 promote） |
-| 本地 commit | 待本 session 末尾 autocommit（gaia_agent + feature_config + preset_default + notify + release_authorization + 3 新 test 檔） |
-| 本地 tag | 待 publish 完後 `v2.21.0` |
-| Pending Publish Queue | **2.21.0 ready-to-publish**（release_auth.disabled=True → 自動通過，不需字串） |
+| Registry latest (PyPI) | `2.34.0` (2026-04-25, commit `2c715b3` wiki tool + anchor + UA fix) |
+| `pyproject.toml` version | `2.35.0` |
+| `src/concinno/__init__.py __version__` | `2.35.0` |
+| CHANGELOG.md 最新 release heading | `## [2.35.0] - 2026-04-25` (promoted) |
+| 三源對齊狀態 | ✅ 三源對齊 2.35.0 |
+| 本地 commit | 本 session 末尾 autocommit (intent_anchor + skills/schema + on_prompt_submit + SKILL_TEMPLATE + 3 new tests + version bump + CHANGELOG) |
+| 本地 tag | 待 publish 完後 `v2.35.0` |
+| Pending Publish Queue | **2.35.0 ready-to-publish**（release_auth.disabled=True → 自動通過，不需字串） |
 | release_auth 狀態 | `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` |
+| Build artifacts | `dist/concinno-2.35.0-py3-none-any.whl` + `dist/concinno-2.35.0.tar.gz` （twine check PASSED） |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship

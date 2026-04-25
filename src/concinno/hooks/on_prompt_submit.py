@@ -232,6 +232,71 @@ def _cbua_forced_classification(
         return None
 
 
+def _stage_minus_1_anchor(
+    user_prompt: str,
+    cache_dir: str = "",
+    session_id: str = "",
+) -> str | None:
+    """Inject a Stage -1 intent anchor on first turn for non-Simple tasks.
+
+    CBUA v3.2 minimal Stage -1 (concinno 2.35.0): extract ``done_spec`` +
+    ``constraints`` heuristically from the user's first prompt and persist
+    them on the ``intent_anchor`` namespace so the existing
+    :class:`concinno.intent_anchor_guard.IntentAnchorGuard` can fold them
+    into every periodic re-injection. Returns the rendered anchor block
+    as additionalContext so the model also sees it once at submit time.
+
+    Skipped:
+        * Simple complexity (ZIQ whitelist) — overhead exceeds the lift
+          on trivial prompts.
+        * Empty / trivially short prompts.
+        * Subsequent turns — anchor already present means a previous
+          first-turn submit captured it; further turns are handled by
+          :class:`concinno.intent_anchor_guard.IntentAnchorGuard`.
+    """
+    if not user_prompt or len(user_prompt.strip()) < 8:
+        return None
+    if not cache_dir or not session_id:
+        return None
+
+    try:
+        from concinno.core.state_store import StateStore
+        from concinno.intent_anchor import extract_anchor, render_anchor_block
+
+        store = StateStore(cache_dir)
+        existing = store.read("intent_anchor", session_id, default={})
+
+        # First-turn detection — back-compat with v2.9 'intent' key.
+        if existing.get("summary") or existing.get("intent"):
+            return None
+
+        # ZIQ Simple whitelist: respect classification set by Step 6
+        # earlier in the same submit handler. C0Router persists at
+        # `c0_route` namespace; missing → assume Complicated to be safe.
+        c0_state = store.read("c0_route", session_id, default=None)
+        complexity = (c0_state or {}).get("complexity", "complicated")
+        if complexity == "simple":
+            return None
+
+        anchor = extract_anchor(user_prompt)
+        if anchor.is_empty():
+            return None
+
+        merged = dict(existing)
+        merged.update(anchor.to_dict())
+        merged["intent"] = anchor.summary  # v2.9 back-compat alias
+        merged["intent_source"] = "stage_minus_1"
+        store.write("intent_anchor", session_id, merged)
+
+        return render_anchor_block(
+            anchor,
+            title="🎯 Stage -1 意圖錨定（首輪）",
+        )
+    except Exception:
+        # Stage -1 anchor must never break submit flow.
+        return None
+
+
 def handle_prompt_submit(
     user_prompt: str,
     *,
@@ -301,7 +366,14 @@ def handle_prompt_submit(
     if b1_ctx:
         contexts.append(b1_ctx)
 
-    # 7. Auto-capture session goal from first prompt (side-effect only)
+    # 7. CBUA Stage -1 intent anchor (concinno 2.35.0 — minimal v3.2 ship)
+    #    First-turn only, ZIQ Simple whitelist skip, additive on top of
+    #    the existing intent_anchor namespace so v2.9 readers stay happy.
+    stage_neg1_ctx = _stage_minus_1_anchor(user_prompt, cache_dir, session_id)
+    if stage_neg1_ctx:
+        contexts.append(stage_neg1_ctx)
+
+    # 8. Auto-capture session goal from first prompt (side-effect only)
     _auto_capture_goal(user_prompt, cache_dir, session_id)
 
     return {"contexts": contexts}

@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-04-25
+
+### Added — `IntentAnchor` v2.10 minimal Stage -1 anchoring
+
+The existing `intent_anchor_guard` (CBUA B4 metacognition guard) gets a
+structured wrapper. New module `concinno.intent_anchor` exposes an
+`IntentAnchor` dataclass with two fields beyond the v2.9 bare summary:
+
+- `done_spec` — "what done looks like" (output form / type / scope)
+- `constraints` — "boundaries / exclusions / disambiguators"
+
+A new prompt-submit step (`_stage_minus_1_anchor` in
+`concinno.hooks.on_prompt_submit`) extracts both fields heuristically
+from the user's first prompt, persists them on the `intent_anchor`
+namespace, and emits a Stage -1 anchor block as `additionalContext`.
+Subsequent re-injection by `IntentAnchorGuard.check` now folds the
+extra fields into the message via the new `render_anchor_block` helper.
+
+Skipped on Simple complexity (ZIQ whitelist) and on second-and-later
+turns (anchor already captured). State is fully back-compatible with
+v2.9: the legacy `intent` key is honoured on read; a new `summary`
+key is written alongside on capture.
+
+Origin: 2026-04-25 paper-pass ablation on 12 GAIA `baseline_v1` FAIL
+items showed full Stage -1 (RaR + DoneFramework + Step-Back) yielded
+3-4 hard flips. Per ship-gate (`<3 = KILL / 3-4 = minimal / >=5 =
+full`) this minimal version ships only `done_spec` + `constraints`;
+`.interpretation` (RaR rephrase), `.inputs_needed` (DoneFramework Q2),
+and `.principle` (Step-Back) were dropped. Heuristics never call an
+LLM judge — empty fields stay empty rather than fabricating.
+
+Tests in `tests/test_intent_anchor.py` (27 tests covering dataclass,
+serialisation, heuristic extraction, render block) and
+`tests/test_on_prompt_submit_stage_neg1.py` (11 tests covering first-
+turn capture, Simple whitelist skip, second-turn idempotency, legacy
+`intent` key respect, no-op guards, render contents). Existing
+`tests/test_intent_anchor_guard.py` (13 tests) keeps passing
+unchanged.
+
+### Added — `EventBinding` skill-frontmatter schema
+
+New `concinno.skills.schema` module ships an `EventBinding` Pydantic
+model so a SKILL.md author can declare *when* a skill should run
+without typing a slash-command. Sample frontmatter:
+
+```yaml
+event_bindings:
+  - event: PostToolUse
+    when: 'tool_name == "Edit" and "test_" in file_path'
+    invoke: triage_failed_test
+    priority: 80
+  - event: Stop
+    invoke: handoff_check
+    cooldown_seconds: 30
+```
+
+Concinno owns the schema (validates on parse, refuses unknown event
+names, caps cooldown at 24h, forbids extra fields to catch typos);
+the runtime that consumes these bindings lives downstream in Sancio
+0.6's `event_dispatcher` (next ship). `parse_event_bindings` skips
+malformed entries instead of failing the whole skill, so one typo
+doesn't break the rest of a SKILL.md. CC harness ignores unknown
+frontmatter keys, so legacy SKILL.md files keep working without
+edits. `SKILL_TEMPLATE.md` gets a commented `event_bindings:` example
+section.
+
+Tests in `tests/test_skills_schema.py` (18 tests covering field
+defaults, range validation, extra-field rejection, list parsing,
+malformed-entry skip behaviour).
+
 ## [2.34.0] - 2026-04-25
 
 ### Added — `fetch_wikipedia_section` builtin tool

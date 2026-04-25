@@ -4,12 +4,20 @@
 @responsibility CBUA B4 意圖錨定: periodically re-inject the user's original
     intent to prevent drift from red team critiques, scope creep, or
     tangential exploration.
-@dependencies concinno.guards.base, concinno.core.state_store
+@dependencies concinno.guards.base, concinno.core.state_store,
+    concinno.intent_anchor (v2.10+ dataclass)
 @exports IntentAnchorGuard
 
 Cognitive injection guard (ALLOW only, never deny). Captures the user's
 first prompt as the "intent anchor" and re-injects it every N write-tools
 to keep execution aligned with the original goal.
+
+v2.10 (2026-04-25): re-injection now uses the structured
+:class:`concinno.intent_anchor.IntentAnchor` dataclass so the message
+includes ``done_spec`` and ``constraints`` when populated (set by the
+prompt-submit Stage -1 hook). State is fully back-compatible with v2.9
+— missing keys render as blank lines, the legacy ``intent`` key is still
+read on the way in.
 """
 
 from __future__ import annotations
@@ -96,8 +104,11 @@ class IntentAnchorGuard(BaseGuard):
         store = StateStore(ctx.cache_dir)
         state = store.read(_NS, ctx.session_id, default={})
 
-        intent = state.get("intent", "")
-        if not intent:
+        # v2.10: load structured anchor (back-compat with v2.9 'intent' key)
+        from concinno.intent_anchor import IntentAnchor, render_anchor_block
+
+        anchor = IntentAnchor.from_dict(state)
+        if anchor.is_empty():
             return None
 
         # Increment write counter
@@ -123,10 +134,9 @@ class IntentAnchorGuard(BaseGuard):
             return None
 
         return GuardResult.allow(
-            context=(
-                f"🎯 意圖錨定（{reason}）\n"
-                f"原始意圖：{intent}\n"
-                "當前動作是否對齊原始目標？偏離→拉回。"
+            context=render_anchor_block(
+                anchor,
+                title=f"🎯 意圖錨定（{reason}）",
             ),
         )
 
@@ -139,13 +149,19 @@ class IntentAnchorGuard(BaseGuard):
         state = store.read(_NS, ctx.session_id, default={})
 
         # Capture intent from user_prompt namespace (written by prompt_submit hook)
-        if not state.get("intent"):
+        if not state.get("intent") and not state.get("summary"):
             prompt_state = store.read("user_prompt", ctx.session_id, default={})
             user_text = prompt_state.get("last_prompt", "")
             if user_text:
-                intent = _extract_intent(user_text)
-                if intent:
-                    state["intent"] = intent
+                # v2.10: use structured extractor — populates done_spec /
+                # constraints heuristically when the prompt-submit Stage -1
+                # hook didn't run (e.g. older harness, downgrade path).
+                from concinno.intent_anchor import extract_anchor
+
+                anchor = extract_anchor(user_text)
+                if not anchor.is_empty():
+                    state.update(anchor.to_dict())
+                    state["intent"] = anchor.summary  # v2.9 back-compat alias
                     state["intent_source"] = "user_prompt"
 
         # Track tool count
@@ -155,9 +171,18 @@ class IntentAnchorGuard(BaseGuard):
         prompt_state = store.read("user_prompt", ctx.session_id, default={})
         latest_prompt = prompt_state.get("last_prompt", "")
         if latest_prompt and _DIRECTION_CHANGE.search(latest_prompt[:500]):
-            new_intent = _extract_intent(latest_prompt)
-            if new_intent and new_intent != state.get("intent", ""):
-                state["intent"] = new_intent
+            from concinno.intent_anchor import extract_anchor
+
+            new_anchor = extract_anchor(latest_prompt)
+            if (
+                not new_anchor.is_empty()
+                and new_anchor.summary != state.get("intent", "")
+            ):
+                # v2.10: refresh all structured fields, not just the summary,
+                # so a direction change also reshapes done_spec / constraints
+                # rather than carrying stale ones from the original prompt.
+                state.update(new_anchor.to_dict())
+                state["intent"] = new_anchor.summary  # v2.9 alias
                 state["write_count"] = 0
                 state["recaptured"] = True
 
