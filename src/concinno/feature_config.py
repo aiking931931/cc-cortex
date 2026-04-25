@@ -5,7 +5,23 @@
     changes with min/max/recommended bounds, and provide safe get/set API
     with risk warnings.
 @dependencies (none — self-contained metadata)
-@exports list_features, get_feature, set_feature, validate_value, FEATURE_META
+@exports list_features, get_feature, set_feature, validate_value, FEATURE_META,
+    get_severity_tier
+
+Schema additions (2.36.0a1 — all optional, backward-compatible):
+
+* ``recommended`` (bool, default ``False``) — surfaced as a "Recommended ON"
+  badge in the GUI; advisory, never overrides explicit user state.
+* ``severity_if_off`` (Literal[``"none","minor","major","critical"]``,
+  default ``"none"``) — drives 4-tier confirm UX in the GUI and gates
+  whether ``set_feature`` writes to ``~/.concinno/critical_changes.log``.
+  Invariant: every ``category == "hard_gate"`` entry MUST declare
+  ``severity_if_off >= "major"``. Enforced by
+  ``tests/test_feature_meta_schema_v2_36.py``.
+* ``consequences_if_off`` (str, ≤120 chars zh-TW; default ``""``) — one-line
+  plain-language consequence shown next to the toggle.
+* ``consequences_if_off_en`` — English mirror; falls back to
+  ``consequences_if_off`` when absent.
 
 Wiring status (2.7.0 — every feature in this table is now live):
 
@@ -1093,7 +1109,105 @@ FEATURE_META: dict[str, dict] = {
         "cosmetic": False,
         "params": {},
     },
+    # 2.36.0a1 — register intent_anchor as a first-class FEATURE_META row.
+    # Was previously only a guard (concinno.intent_anchor_guard.IntentAnchorGuard)
+    # picked up by the GuardPipeline dispatch via cfg.feature("intent_anchor",
+    # "enabled"); never had a metadata row, so the GUI showed no severity /
+    # consequences hint and the redteam (R#8) flagged it self-contradictory
+    # ("severity none" while task_execution.md Stage 0 calls it Hard).
+    "intent_anchor": {
+        "category": "behavioral",
+        "description": (
+            "CBUA Stage 0 / B4 anchoring: re-inject the user's original "
+            "intent every N write-tools to prevent scope drift, redteam "
+            "tangents, and direction-loss in long sessions."
+        ),
+        "description_zh": (
+            "CBUA 第 0 / B4 階段意圖錨定：每 N 個寫工具重新注入用戶原始意圖，"
+            "防止 scope 漂移 / 紅隊岔題 / 長 session 方向丟失。"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "原始意圖不再被定期重新注入，長 session / 紅隊壓測後容易飄離主線"
+        ),
+        "consequences_if_off_en": (
+            "Original intent stops being re-injected; long sessions and "
+            "post-redteam loops drift from the user's first ask."
+        ),
+        "params": {},
+    },
 }
+
+
+# ── 2.36.0a1 schema-extension constants ────────────────────────
+
+#: Severity tiers, ordered low->high. Index used for invariant comparisons.
+_SEVERITY_ORDER: tuple[str, ...] = ("none", "minor", "major", "critical")
+
+
+def get_severity_tier(name: str) -> str:
+    """Return the ``severity_if_off`` tier for ``name``.
+
+    Falls back to ``"none"`` for unknown features or entries that did
+    not migrate to the 2.36.0a1 schema. Drives the GUI 4-tier confirm
+    UX (none -> direct toggle / minor -> info banner / major -> 2-click
+    warn / critical -> typed-feature-name confirm + audit log).
+    """
+    meta = FEATURE_META.get(name) or {}
+    sev = meta.get("severity_if_off", "none")
+    return sev if sev in _SEVERITY_ORDER else "none"
+
+
+def _severity_at_or_above(name: str, threshold: str) -> bool:
+    """True iff ``name`` has ``severity_if_off >= threshold``."""
+    sev = get_severity_tier(name)
+    try:
+        return _SEVERITY_ORDER.index(sev) >= _SEVERITY_ORDER.index(threshold)
+    except ValueError:
+        return False
+
+
+def _audit_log_path():
+    """Where high-severity feature mutations are recorded.
+
+    Append-only, line-delimited; one record per mutation. Path is
+    stable across versions so external tooling can tail it. Returns
+    a :class:`pathlib.Path` (lazily imported to keep the module's
+    zero-dep top-level namespace).
+    """
+    from pathlib import Path
+
+    return Path.home() / ".concinno" / "critical_changes.log"
+
+
+def _record_critical_change(
+    name: str, key: str, value: Any, *, origin: tuple[str, ...],
+) -> None:
+    """Append a record to the critical-changes audit log.
+
+    Fail-soft — observability only, never blocks ``set_feature`` if the
+    audit log can't be written (filesystem read-only / disk full /
+    permission denied). Format::
+
+        <ISO-8601 UTC>  <severity>  <feature>.<key> -> <value>  origin=<...>
+    """
+    import datetime as _dt
+
+    path = _audit_log_path()
+    sev = get_severity_tier(name)
+    timestamp = _dt.datetime.now(tz=_dt.timezone.utc).isoformat(timespec="seconds")
+    origin_str = ":".join(origin) if origin else "manual"
+    line = f"{timestamp}  {sev}  {name}.{key} -> {value!r}  origin={origin_str}\n"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except OSError:
+        # Observability must never break set_feature.
+        pass
 
 
 # ── Public API ────────────────────────────────────────────
@@ -1483,6 +1597,13 @@ def set_feature(
         _record_origin(name, key, origin)
     except Exception:  # pragma: no cover — optional sidecar
         pass
+
+    # 2.36.0a1: append to ~/.concinno/critical_changes.log when the
+    # feature carries severity_if_off >= "major". Drives the redteam-
+    # mandated audit trail for GUI-initiated config mutations of
+    # high-impact gates (R#6 acceptance per commander verdict).
+    if _severity_at_or_above(name, "major"):
+        _record_critical_change(name, key, value, origin=origin)
 
     return warnings
 

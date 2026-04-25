@@ -13,11 +13,28 @@ testclient = pytest.importorskip("fastapi.testclient")
 
 
 @pytest.fixture
-def client():
-    from concinno.gui.server import create_app
+def client(tmp_path, monkeypatch):
+    """TestClient pre-authenticated with the per-process bearer token.
+
+    Concinno 2.36.0a1 added :class:`BearerTokenMiddleware`; legacy tests
+    were written before auth existed. Rather than rewrite every test,
+    we (a) point the token file at a tmp dir so the real
+    ``~/.concinno/gui_token`` is not stomped, and (b) inject the token
+    as a default header on the TestClient.
+    """
     from fastapi.testclient import TestClient
 
-    return TestClient(create_app())
+    from concinno.gui.server import create_app
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+
+    token = "TEST-FIXTURE-TOKEN"
+    app = create_app(token=token, token_path=tmp_path / "gui_token")
+    tc = TestClient(app)
+    tc.headers.update({"Authorization": f"Bearer {token}"})
+    return tc
 
 
 def test_list_features_shape(client):

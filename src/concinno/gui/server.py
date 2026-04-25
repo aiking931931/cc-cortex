@@ -25,19 +25,29 @@ Design notes:
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import JSONResponse
     from fastapi.staticfiles import StaticFiles
+    from starlette.middleware.base import BaseHTTPMiddleware
 except ImportError as _err:  # pragma: no cover — optional dep
     raise ImportError(
         "concinno.gui requires FastAPI. Install with "
         "`pip install 'concinno[gui]'`."
     ) from _err
+
+from concinno.gui import auth as _auth
+
+_logger = logging.getLogger(__name__)
+
+# Routes that may be hit without auth (used by client-side health probes
+# / liveness pings before the token is read off disk).
+_AUTH_BYPASS_PATHS = frozenset({"/api/health"})
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -146,6 +156,13 @@ def _feature_entry(
         # user-registered entries from ``~/.concinno/user_features.json``
         # are "user". Set via ``origin`` kwarg (2.30.1+).
         "source": origin,
+        # 2.36.0a1 schema additions (all optional, default-empty so
+        # un-migrated entries render as "not recommended, severity none,
+        # no consequence text" — pre-2.36 GUI behaviour).
+        "recommended": bool(meta.get("recommended", False)),
+        "severity_if_off": meta.get("severity_if_off", "none"),
+        "consequences_if_off": meta.get("consequences_if_off", ""),
+        "consequences_if_off_en": meta.get("consequences_if_off_en", ""),
         "params": {},
     }
     try:
@@ -708,7 +725,67 @@ def _register_state_routes(app: "FastAPI") -> None:
         return JSONResponse(state)
 
 
-def create_app() -> "FastAPI":
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Reject any request whose ``Authorization: Bearer …`` header does
+    not match the in-process expected token.
+
+    Bypass paths (kept narrow) live in :data:`_AUTH_BYPASS_PATHS` -- only
+    ``/api/health`` is exempt so loopback liveness probes can run before
+    a client has read the token from disk.
+
+    Token comparison uses :func:`hmac.compare_digest` via
+    :func:`concinno.gui.auth.verify_token_header`.
+    """
+
+    def __init__(self, app, expected_token: str) -> None:
+        super().__init__(app)
+        self._expected = expected_token
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in _AUTH_BYPASS_PATHS:
+            return await call_next(request)
+        header = request.headers.get("authorization")
+        if not _auth.verify_token_header(header, self._expected):
+            return JSONResponse(
+                {"detail": "missing or invalid bearer token"},
+                status_code=401,
+            )
+        return await call_next(request)
+
+
+def _register_health_route(app: "FastAPI") -> None:
+    @app.get("/api/health")
+    def health() -> JSONResponse:
+        return JSONResponse({"status": "ok"})
+
+
+def create_app(*, token: str | None = None,
+               token_path: Path | None = None) -> "FastAPI":
+    """Build the FastAPI app and persist a per-process bearer token.
+
+    Args:
+        token: Override the auto-generated token (mostly for tests).
+            When omitted, a fresh :func:`auth.generate_token` is created.
+        token_path: Override the token file location (mostly for tests).
+            When omitted, :func:`auth.get_token_path` is used.
+
+    The token is written atomically to disk before the app object is
+    returned so any client (VS Code extension, federated switcher) can
+    read it the moment ``concinno gui`` reports the bind address.
+
+    Raises:
+        TokenAuthError: When the token file cannot be written
+            (fail-fast — better to refuse to start than to silently
+            run unauthenticated).
+    """
+    chosen_token = token or _auth.generate_token()
+    written_path = _auth.write_token(chosen_token, path=token_path)
+    _logger.info(
+        "concinno.gui: token written to %s; clients must send "
+        "Authorization: Bearer <token>",
+        written_path,
+    )
+
     app = FastAPI(
         title="Concinno Config GUI",
         description=(
@@ -717,6 +794,8 @@ def create_app() -> "FastAPI":
         ),
         version="0.1.0",
     )
+    app.add_middleware(BearerTokenMiddleware, expected_token=chosen_token)
+    _register_health_route(app)
     _register_feature_routes(app)
     _register_harness_routes(app)
     _register_ziq_routes(app)
@@ -725,6 +804,9 @@ def create_app() -> "FastAPI":
     _register_state_routes(app)
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+    # Stash for test introspection only — not part of the public API.
+    app.state.gui_token = chosen_token
+    app.state.gui_token_path = written_path
     return app
 
 

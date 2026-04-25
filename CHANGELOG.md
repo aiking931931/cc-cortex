@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.36.0a1] - 2026-04-25
+
+Phase-3 critical-path prep release for the Sancio GUI Extension /
+auto-update / FEATURE_META schema bump design (see
+``_AI_BRAIN/05_Planning/sancio-gui-extension-commander-verdict-2026-04-25.md``).
+**Alpha** so PyPI does not auto-resolve a non-final into stable
+installs while the rest of Phase 3 (#4-#10) lands.
+
+### Added
+
+- ``concinno.gui.auth`` — token-file infrastructure for the localhost
+  GUI: cross-OS path (``%LOCALAPPDATA%\concinno\gui_token`` on
+  Windows, ``~/.concinno/gui_token`` mode 0600 on POSIX), atomic
+  write (`<path>.tmp` → chmod 0600 → ``os.replace``), and
+  constant-time bearer-header verification. Closes redteam R#3
+  (token-file vapor) + blue W3 (Win32 ACL gap).
+- ``BearerTokenMiddleware`` in ``concinno.gui.server`` rejects every
+  request without a valid ``Authorization: Bearer <token>`` header.
+  ``/api/health`` is the single bypass path so loopback liveness
+  probes still work pre-handshake.
+- ``concinno gui --print-token-path`` CLI flag — prints the OS-
+  appropriate token path so the VS Code extension / federated
+  switcher can discover where to read it. Token value is never
+  printed.
+- ``concinno features audit`` CLI subcommand — lists every
+  ``severity_if_off >= "major"`` feature with its current
+  enabled state. Helps spot "I disabled X but forgot it was a
+  hard-gate" mistakes.
+- ``FEATURE_META`` schema additions (all optional, backward-
+  compatible defaults make pre-2.36 entries render unchanged):
+  - ``recommended: bool`` — surfaced as a "Recommended ON" badge.
+  - ``severity_if_off: Literal["none","minor","major","critical"]``
+    — drives the GUI 4-tier confirm UX and the audit log.
+  - ``consequences_if_off: str`` (≤120 chars zh-TW) +
+    ``consequences_if_off_en``.
+- ``concinno.feature_config.get_severity_tier(name)`` helper.
+- Audit log at ``~/.concinno/critical_changes.log`` — ``set_feature``
+  appends one line per mutation when the touched feature has
+  ``severity_if_off >= "major"``. Append-only, fail-soft.
+- New ``intent_anchor`` ``FEATURE_META`` row, classified
+  ``recommended=True, severity_if_off="major"`` per redteam R#8
+  (was previously a guard-only entry referenced via ``cfg.feature``
+  but had no metadata row, hence the "severity none self-
+  contradictory" finding).
+
+### Changed
+
+- ``concinno.gui.server.create_app(token=None, token_path=None)`` —
+  signature kept backward-compatible (no positional change) so the
+  uvicorn ``factory=True`` path keeps working; both kwargs default
+  to "auto-generate / OS-default", overrides exist for tests.
+- GUI ``/api/features`` rows now include ``recommended``,
+  ``severity_if_off``, ``consequences_if_off``,
+  ``consequences_if_off_en`` keys. Existing keys unchanged.
+
+### Notes
+
+- This is an alpha pre-release. Stable ``2.36.0`` will ship after
+  Phase-3 tasks #4-#10 (Sancio GUI mirror, switcher, VS Code
+  extension wiring, auto-update tiers) complete.
+- No public API removed; no behavioural change for users who do
+  not opt into the GUI (server startup still requires
+  ``pip install 'concinno[gui]'`` extras).
+
 ## [2.35.1] - 2026-04-25
 
 ### Fixed — Suppress transient Windows console flash on every Stop event

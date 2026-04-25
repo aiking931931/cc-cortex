@@ -1078,7 +1078,16 @@ def cmd_rules(args: argparse.Namespace) -> None:
 
 
 def cmd_gui(args: argparse.Namespace) -> None:
-    """Launch the localhost config GUI (requires ``concinno[gui]`` extras)."""
+    """Launch the localhost config GUI (requires ``concinno[gui]`` extras).
+
+    Supports a ``--print-token-path`` short-circuit so external clients
+    (VS Code extension, federated switcher) can discover where to read
+    the bearer token without booting uvicorn.
+    """
+    if getattr(args, "print_token_path", False):
+        from concinno.gui.auth import get_token_path
+        print(get_token_path())
+        return
     try:
         from concinno.gui import run as _run
     except ImportError as err:
@@ -1087,6 +1096,44 @@ def cmd_gui(args: argparse.Namespace) -> None:
         sys.exit(1)
     print(f"[gui] serving on http://{args.host}:{args.port}  (Ctrl+C to stop)")
     _run(host=args.host, port=args.port, reload=args.reload)
+
+
+def cmd_features_audit(args: argparse.Namespace) -> None:
+    """Print current critical / major feature state for the operator.
+
+    Used to answer "what is currently disabled that REALLY should be on?"
+    without diving into ``cc_config.json`` by hand. Reads severity from
+    :data:`concinno.feature_config.FEATURE_META` and current ``enabled``
+    state from the live config.
+    """
+    from concinno.feature_config import FEATURE_META, get_severity_tier
+    try:
+        from concinno.core.config import get_config
+        cfg = get_config()
+    except Exception:
+        cfg = None
+
+    rows: list[tuple[str, str, str, bool]] = []
+    for name, meta in sorted(FEATURE_META.items()):
+        sev = get_severity_tier(name)
+        if sev not in ("major", "critical"):
+            continue
+        try:
+            enabled = bool(cfg.feature(name, "enabled")) if cfg else True
+        except Exception:
+            enabled = True
+        consequences = meta.get("consequences_if_off", "") or ""
+        rows.append((name, sev, consequences, enabled))
+
+    if not rows:
+        print("(no critical/major features registered)")
+        return
+    rows.sort(key=lambda r: (0 if r[1] == "critical" else 1, r[0]))
+    for name, sev, conseq, enabled in rows:
+        flag = "✅ on" if enabled else "❌ OFF"
+        print(f"  [{sev:8s}] {flag}  {name}")
+        if conseq:
+            print(f"             ↳ {conseq}")
 
 
 def cmd_uninstall(args: argparse.Namespace) -> None:
@@ -1491,6 +1538,14 @@ def _register_features(sub: argparse._SubParsersAction) -> None:
                            help="Target README path (default: repo README.md)")
     feat_sync.set_defaults(func=cmd_features)
 
+    # 2.36.0a1 — audit currently-OFF critical/major features
+    feat_audit = feat_sub.add_parser(
+        "audit",
+        help=("Print critical/major features and whether they are enabled. "
+              "Helps spot 'I disabled X but forgot it was a hard-gate'."),
+    )
+    feat_audit.set_defaults(func=cmd_features_audit)
+
     # 2.30.1 — user-feature registry commands (attach to same `features` namespace)
     from .features_register_cmd import register_features_subcommands
     register_features_subcommands(feat_sub)
@@ -1507,6 +1562,12 @@ def _register_gui(sub: argparse._SubParsersAction) -> None:
                        help="Bind port (default: 8400)")
     p_gui.add_argument("--reload", action="store_true",
                        help="Enable uvicorn auto-reload (dev only)")
+    p_gui.add_argument(
+        "--print-token-path", action="store_true",
+        help=("Print the OS-appropriate path where the bearer token "
+              "is/will be stored, then exit. The token value itself is "
+              "NEVER printed — clients should read it from this path."),
+    )
     p_gui.set_defaults(func=cmd_gui)
 
 
