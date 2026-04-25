@@ -74,6 +74,8 @@ FEATURE_META: dict[str, dict] = {
     # ── Hard Gates ──
     "token_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "Token 防護完全失效，agent spawn 無上限可能 ctx 爆量",
         "description": "Block Agent spawn when context tokens exceed threshold",
         "description_zh": "Token 超過閾值時阻擋 Agent spawn",
         "ziq_autotunable": True,  # agent_threshold / critical_threshold are outcome-learnable
@@ -116,6 +118,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "read_first_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "未讀全檔就改檔，蝴蝶效應未防",
         "description": "Block Edit/Write on existing files not yet Read this session",
         "description_zh": "阻擋未讀就改的操作（防止盲改）",
         "ziq_autotunable": False,
@@ -144,6 +148,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "agent_cap": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "Agent spawn 無次數限制，遞迴爆炸風險",
         "description": (
             "Block execution-type Agent spawn after N times per session. "
             "Research agents (Explore/Plan/read-only) are uncapped."
@@ -180,6 +186,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "sentinel_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "同檔反覆改不被擋，循環編輯潛在風險",
         "description": "Block repeated Edit on same file N+ times (with lint exception)",
         "description_zh": "同檔案連續 Edit N+ 次時阻擋（lint 修復例外）",
         "ziq_autotunable": True,
@@ -272,6 +280,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "prompt_guard": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "模糊 prompt + 多問題不被擋，意圖漂移風險",
         "description": "Clarity gate + multi-question detection for UserPromptSubmit",
         "description_zh": "清晰度 gate + 多問題偵測（UserPromptSubmit 階段）",
         "ziq_autotunable": True,
@@ -301,6 +311,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "handoff_required_guard": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "工作做完無交接強制，跨 session 遺失",
         "description": "Block session stop when work was done but no handoff file updated",
         "description_zh": "Session 有工作但無交接更新時阻擋停止",
         "routing_policy": "always_on",
@@ -429,6 +441,8 @@ FEATURE_META: dict[str, dict] = {
     # ── Boundary Guard (was soft, now hard gate via BoundaryGuard) ──
     "boundary_guard": {
         "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": "Hook/library boundary 違反不擋，可能破壞 concinno OSS layer 純粹度",
         "description": "Hook/library boundary violation detection (PreToolUse DENY)",
         "description_zh": "偵測 Hook/庫邊界違規（PreToolUse 硬擋）",
         "ziq_autotunable": False,
@@ -437,6 +451,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "publish_scan": {
         "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": "publish 前 secrets/key/personal path 不掃，可能外洩 API key 到 OSS PyPI",
         "description": "Pre-publish artifact scan for secrets, keys, and personal paths",
         "description_zh": "發布前掃描打包物是否夾帶私鑰/密碼/個人路徑",
         "ziq_autotunable": False,
@@ -454,6 +470,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "identity_guard": {
         "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": "CLAUDE.md / 規則檔被改不擋，系統身份可被劫持",
         "description": (
             "Block Agent from modifying identity configs "
             "(CLAUDE.md, .claude/rules/, settings.json, hook configs)"
@@ -476,6 +494,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "bash_background_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "長命令不 background 警告失效，可能 hang 主進程",
         "description": "Block long-running Bash commands without run_in_background",
         "description_zh": "阻擋未設 background 的長時間 Bash 指令",
         "ziq_autotunable": False,
@@ -493,6 +513,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "python_c_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "python -c 多行命令警告失效，noisy 環境風險",
         "description": "Block complex python -c one-liners (>5 lines)",
         "description_zh": "阻擋過長的 python -c 指令（>5 行）",
         "ziq_autotunable": False,
@@ -510,6 +532,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "whitepaper_guard": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "白皮書 IP 關鍵字外洩到外部路徑風險",
         "description": "Block whitepaper IP keywords from leaking to external paths",
         "description_zh": "阻擋白皮書核心 IP 關鍵字外流到外部路徑",
         "ziq_autotunable": False,
@@ -527,6 +551,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "clarity_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "模糊 prompt + 不可逆操作組合警告失效",
         "description": "Block ambiguous prompts combined with irreversible operations",
         "description_zh": "阻擋模糊意圖 + 不可逆操作的組合",
         "ziq_autotunable": True,
@@ -555,6 +581,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "hijack_gate": {
         "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": "TADS 4 層 circuit breaker 失效，注意力挾持無防禦",
         "description": "TADS four-level circuit breaker based on hijack_score (L0→L2→L3→L4)",
         "description_zh": "TADS 四級斷路器：挾持分數分級 deny（L0→L2→L3→L4）",
         "ziq_autotunable": True,
@@ -605,6 +633,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "proposal_guard": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "Planning 新 proposal 無副作用分析警告失效",
         "description": "Block new proposals in planning files without side-effect analysis",
         "description_zh": "規劃檔新提案缺少副作用分析時阻擋（動序 Poka-Yoke）",
         "ziq_autotunable": False,
@@ -622,6 +652,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "ui_verify": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "UI 改後 deploy 不要求截圖，假驗收風險",
         "description": "Lock after deploy with UI changes until screenshot verification",
         "description_zh": "deploy + UI 改動後鎖定，直到截圖驗證完成才釋放",
         "ziq_autotunable": False,
@@ -639,6 +671,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "delivery_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "企業交付驗證失效，未驗 submission 可過",
         "description": (
             "Enterprise delivery verification — "
             "block submission of unverified work"
@@ -680,6 +714,8 @@ FEATURE_META: dict[str, dict] = {
     },
     "consecutive_fail_gate": {
         "category": "hard_gate",
+        "severity_if_off": "major",
+        "consequences_if_off": "N 連續失敗不擋，sentinel ConsecutiveFailGuard 失效",
         "description": "Block after N consecutive tool failures (stuck detection)",
         "description_zh": "連續 N 次工具失敗後阻擋（卡住偵測）",
         "ziq_autotunable": True,
@@ -770,6 +806,8 @@ FEATURE_META: dict[str, dict] = {
     # ── Butterfly Effect Guard ──
     "butterfly_guard": {
         "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": "蝴蝶效應發現問題不擋繼續做，L0 鐵律 #1 失效",
         "description": (
             "Butterfly Effect: discover issue → must fix before continuing. "
             "Tracks issues in a session-scoped ledger, denies non-fix operations"
