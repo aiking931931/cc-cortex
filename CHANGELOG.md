@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.35.0] - 2026-04-25
 
+### Performance — PEP 562 lazy re-export in `concinno.cache.__init__`
+
+`concinno.cache.__init__` switches to PEP 562 ``__getattr__`` lazy
+re-export. The eager top-level import chain that previously dragged
+``session_memory`` → ``agent.fork_context`` → ``agent/__init__`` into
+*every* hook process is now deferred to first attribute access. Public
+API and ``dir(concinno.cache)`` are unchanged (``__all__`` lists every
+symbol; ``TYPE_CHECKING`` block keeps mypy / IDE completion intact).
+
+Effect on the Claude Code PreToolUse hook fresh-process cold start
+(measured 5-run median, 2026-04-25):
+
+- pre-patch (with dirty markers): 2.1-3.1 s
+- after marker cleanup only: 1.2-1.6 s
+- **after PEP 562 (this patch): 0.7-1.0 s** — 65-75 % drop overall
+
+`python -X importtime` on `concinno.cache` package init: ~600 ms →
+~1 ms (99.8 % drop). Zero call-site changes — every existing
+`from concinno.cache.ux_gate import …` and
+`from concinno.cache import …` keeps working unchanged. Tests: full
+cache suite 441 passed, cross-suite (guard / hook / cognitive /
+prompt / inject / anchor / wiredo / microcompact) 2104 passed, 0
+regression.
+
+Origin: cProfile traced `cache/__init__.py:6-113` as the dominant
+cold-start cost on every `on-pre-tool.py` invocation. Red+Blue Opus
+4.7 review picked PEP 562 over (a) moving `is_ux_enabled` to
+`feature_config.py` (would collide with this release's IntentAnchor
+/ EventBinding additions) and (b) extracting a new
+`core/ux_gate.py` (10 caller-site changes, scope creep). See
+`feedback_on_pre_tool_hot_path.md` and MEMORY #110.
+
 ### Added — `IntentAnchor` v2.10 minimal Stage -1 anchoring
 
 The existing `intent_anchor_guard` (CBUA B4 metacognition guard) gets a

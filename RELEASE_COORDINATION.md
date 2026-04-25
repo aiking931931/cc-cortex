@@ -26,6 +26,49 @@
 ## Pending Publish Queue (current)
 
 ```yaml
+- version: "2.35.0"
+  state: published
+  result: ok
+  pypi_url: https://pypi.org/project/concinno/2.35.0/
+  git_tag: v2.35.0 (pushed to github.com/aiking931931/concinno)
+  published_at: 2026-04-25T10:30+08:00
+  session: cc_5110b9e2 (2026-04-25 part C)
+  queued_by:
+    session: cc_5110b9e2
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-04-25T10:24+08:00
+  artifacts:
+    wheel: dist/concinno-2.35.0-py3-none-any.whl
+    sdist: dist/concinno-2.35.0.tar.gz
+    twine_check: PASSED
+    built_from: fdd4a2f (atop 62b3775 PEP 562 cache lazy)
+  verification:
+    tests_full: "6850 passed / 2 skipped / 3 xfailed (1 perf test flaky, isolated PASS)"
+    tests_targeted: |
+      test_intent_anchor.py 27/27 (new)
+      test_on_prompt_submit_stage_neg1.py 11/11 (new)
+      test_skills_schema.py 18/18 (new)
+      test_intent_anchor_guard.py 13/13 unchanged
+    ruff: clean on new+modified files
+    triple_source_aligned: true (pyproject 2.35.0 / __init__.py 2.35.0 /
+                                  CHANGELOG `## [2.35.0] - 2026-04-25`)
+    redteam_review: PRIOR (part B 紅藍 Opus 4.7 ablation gate verdict
+                          drove minimal Stage -1 ship; this session is
+                          impl of approved spec)
+  blocking_on: []  # user authorized this session via "要PIP 新版"
+  notes: |
+    Bundle:
+    - IntentAnchor v2.10 — done_spec + constraints additive fields,
+      Stage -1 prompt-submit injection, ZIQ Simple whitelist skip,
+      back-compat with v2.9 'intent' state key.
+    - EventBinding pydantic schema for SKILL.md event_bindings:
+      frontmatter (concinno owns schema, Sancio 0.6 owns runtime).
+    - SKILL_TEMPLATE.md commented event_bindings: example block.
+    - perf(cache): PEP 562 lazy re-export from companion session
+      (2.1-3.1s → 0.7-1.0s on PreToolUse hook cold-start).
+    Companion: projects/persona-api/docs/event-dispatcher-spec.md
+    (Sancio 0.6 design spec, runtime impl scheduled next session).
+
 - version: "2.21.0"
   state: published
   result: ok
