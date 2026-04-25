@@ -1080,22 +1080,67 @@ def cmd_rules(args: argparse.Namespace) -> None:
 def cmd_gui(args: argparse.Namespace) -> None:
     """Launch the localhost config GUI (requires ``concinno[gui]`` extras).
 
-    Supports a ``--print-token-path`` short-circuit so external clients
-    (VS Code extension, federated switcher) can discover where to read
-    the bearer token without booting uvicorn.
+    Two modes:
+
+    * **Default** — full FEATURE_META + skills + harness GUI on
+      ``--port`` (defaults to 8400).
+    * **``--switcher``** — federation switcher reverse-proxy on
+      ``--port`` (defaults to 8399). Proxies traffic to the Concinno
+      GUI (``--concinno-port``, default 8400) and the Sancio GUI
+      (``--sancio-port``, default 8401), reading each backend's bearer
+      token off disk so the operator authenticates once to the
+      switcher rather than once per backend.
+
+    ``--print-token-path`` short-circuits before any uvicorn import so
+    a deploy that has not yet installed ``[gui]`` extras can still
+    discover the token path. In switcher mode this prints the
+    *switcher's* token path, not the main GUI token path.
     """
+    switcher_mode = bool(getattr(args, "switcher", False))
+
     if getattr(args, "print_token_path", False):
-        from concinno.gui.auth import get_token_path
-        print(get_token_path())
+        if switcher_mode:
+            from concinno.gui.switcher import get_switcher_token_path
+            print(get_switcher_token_path())
+        else:
+            from concinno.gui.auth import get_token_path
+            print(get_token_path())
         return
+
+    # Resolve port default by mode (8399 switcher / 8400 main).
+    port = args.port
+    if port is None:
+        port = 8399 if switcher_mode else 8400
+
+    if switcher_mode:
+        try:
+            from concinno.gui.switcher import run_switcher as _run_switcher
+        except ImportError as err:
+            print(f"[gui] missing dependency: {err}")
+            print("Install with: pip install 'concinno[gui]'")
+            sys.exit(1)
+        print(
+            f"[gui --switcher] serving on http://{args.host}:{port}  "
+            f"(proxying concinno=:{args.concinno_port} "
+            f"sancio=:{args.sancio_port}; Ctrl+C to stop)"
+        )
+        _run_switcher(
+            host=args.host,
+            port=port,
+            reload=args.reload,
+            concinno_port=args.concinno_port,
+            sancio_port=args.sancio_port,
+        )
+        return
+
     try:
         from concinno.gui import run as _run
     except ImportError as err:
         print(f"[gui] missing dependency: {err}")
         print("Install with: pip install 'concinno[gui]'")
         sys.exit(1)
-    print(f"[gui] serving on http://{args.host}:{args.port}  (Ctrl+C to stop)")
-    _run(host=args.host, port=args.port, reload=args.reload)
+    print(f"[gui] serving on http://{args.host}:{port}  (Ctrl+C to stop)")
+    _run(host=args.host, port=port, reload=args.reload)
 
 
 def cmd_features_audit(args: argparse.Namespace) -> None:
@@ -1558,8 +1603,9 @@ def _register_gui(sub: argparse._SubParsersAction) -> None:
     )
     p_gui.add_argument("--host", default="127.0.0.1",
                        help="Bind host (default: 127.0.0.1 loopback)")
-    p_gui.add_argument("--port", type=int, default=8400,
-                       help="Bind port (default: 8400)")
+    p_gui.add_argument("--port", type=int, default=None,
+                       help=("Bind port. Default 8400 for the main GUI; "
+                             "default 8399 when --switcher is set."))
     p_gui.add_argument("--reload", action="store_true",
                        help="Enable uvicorn auto-reload (dev only)")
     p_gui.add_argument(
@@ -1567,6 +1613,23 @@ def _register_gui(sub: argparse._SubParsersAction) -> None:
         help=("Print the OS-appropriate path where the bearer token "
               "is/will be stored, then exit. The token value itself is "
               "NEVER printed — clients should read it from this path."),
+    )
+    p_gui.add_argument(
+        "--switcher", action="store_true",
+        help=("Run as a federation switcher (reverse-proxy) on port 8399 "
+              "instead of the main GUI. Proxies traffic to the Concinno "
+              "GUI (8400) and the Sancio GUI (8401), reading each "
+              "backend's bearer token off disk."),
+    )
+    p_gui.add_argument(
+        "--concinno-port", type=int, default=8400,
+        help=("Backend port for the Concinno GUI (switcher mode only; "
+              "default: 8400)."),
+    )
+    p_gui.add_argument(
+        "--sancio-port", type=int, default=8401,
+        help=("Backend port for the Sancio GUI (switcher mode only; "
+              "default: 8401)."),
     )
     p_gui.set_defaults(func=cmd_gui)
 
