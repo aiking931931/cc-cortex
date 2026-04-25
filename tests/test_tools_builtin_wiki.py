@@ -18,7 +18,6 @@ from typing import Any
 
 from concinno.tools.builtin.wiki import FetchWikipediaSectionTool
 
-
 # ──────────────────────── Test fixtures ──────────────────────────
 
 

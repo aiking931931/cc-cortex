@@ -21,11 +21,20 @@
     status.className = `status ${kind}`;
   }
 
+  // Bearer token from URL ?bearer=<token> (set by switcher / VS Code
+  // extension when embedding this SPA in iframe webview). Loopback-only
+  // surface; URL param is acceptable per spec for personal CLI tooling.
+  // Empty token = direct browser access (also loopback-only); /api/*
+  // BearerTokenMiddleware will 401 unless user adds the token manually.
+  const _BEARER = new URLSearchParams(window.location.search).get("bearer") || "";
+
   async function fetchJSON(url, opts = {}) {
-    const r = await fetch(url, {
-      headers: { "content-type": "application/json" },
-      ...opts,
-    });
+    const headers = {
+      "content-type": "application/json",
+      ...(opts.headers || {}),
+    };
+    if (_BEARER) headers["Authorization"] = `Bearer ${_BEARER}`;
+    const r = await fetch(url, { ...opts, headers });
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${url}`);
     return r.json();
   }

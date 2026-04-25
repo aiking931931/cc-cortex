@@ -7,15 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.36.0a1] - 2026-04-25
+## [2.36.0] - 2026-04-25
 
-Phase-3 critical-path prep release for the Sancio GUI Extension /
-auto-update / FEATURE_META schema bump design (see
+Phase-3 ship of the Sancio GUI Extension / auto-update / FEATURE_META
+schema bump design (see
 ``_AI_BRAIN/05_Planning/sancio-gui-extension-commander-verdict-2026-04-25.md``).
-**Alpha** so PyPI does not auto-resolve a non-final into stable
-installs while the rest of Phase 3 (#4-#10) lands.
+Promotes ``2.36.0a1`` (token-file infra + schema additions) to stable
+and adds the post-alpha Phase-3 tasks Y / V / T (hard_gate severity
+sweep, auto-update tiers 1+2, ``concinno gui --switcher`` federation
+mode).
 
-### Added
+### Added — token-file + schema (was 2.36.0a1)
 
 - ``concinno.gui.auth`` — token-file infrastructure for the localhost
   GUI: cross-OS path (``%LOCALAPPDATA%\concinno\gui_token`` on
@@ -32,9 +34,9 @@ installs while the rest of Phase 3 (#4-#10) lands.
   switcher can discover where to read it. Token value is never
   printed.
 - ``concinno features audit`` CLI subcommand — lists every
-  ``severity_if_off >= "major"`` feature with its current
-  enabled state. Helps spot "I disabled X but forgot it was a
-  hard-gate" mistakes.
+  ``severity_if_off >= "major"`` feature with its current enabled
+  state. Helps spot "I disabled X but forgot it was a hard-gate"
+  mistakes.
 - ``FEATURE_META`` schema additions (all optional, backward-
   compatible defaults make pre-2.36 entries render unchanged):
   - ``recommended: bool`` — surfaced as a "Recommended ON" badge.
@@ -47,10 +49,71 @@ installs while the rest of Phase 3 (#4-#10) lands.
   appends one line per mutation when the touched feature has
   ``severity_if_off >= "major"``. Append-only, fail-soft.
 - New ``intent_anchor`` ``FEATURE_META`` row, classified
-  ``recommended=True, severity_if_off="major"`` per redteam R#8
-  (was previously a guard-only entry referenced via ``cfg.feature``
-  but had no metadata row, hence the "severity none self-
-  contradictory" finding).
+  ``recommended=True, severity_if_off="major"`` per redteam R#8.
+
+### Added — Phase-3 task Y (hard_gate severity sweep)
+
+- 19 ``category="hard_gate"`` feature entries now declare
+  ``severity_if_off`` ≥ ``major`` so the GUI cannot one-click disable
+  a critical guard without a confirm modal (per commander verdict
+  R#6 + R#8). 5 critical (``boundary_guard``, ``publish_scan``,
+  ``identity_guard``, ``hijack_gate``, ``butterfly_guard``) + 14
+  major. Each row gets a ``consequences_if_off`` zh-TW one-liner.
+- Test ``test_hard_gate_features_must_be_severity_major_or_higher``
+  flips from xfail tracker to green; xfail self-healing kept so any
+  future hard-gate entry missing severity re-trips the tracker.
+
+### Added — Phase-3 task V (auto-update tiers 1+2)
+
+- New ``concinno.auto_update`` package:
+  - ``tier1_registry.RegistryDigest`` + ``RegistryCache`` +
+    ``refresh_tier1_registry()`` — SessionStart-hook auto-refresh of
+    the entry-points registry. Hashes ``[(ep.name, ep.dist.version)]``
+    per entry-points group, read-modify-writes the cache preserving
+    user ``enabled`` flags (per R#10), portalocker race lock, atomic
+    tempfile + ``os.rename``, 300 ms latency budget with fail-soft
+    fallback (per R#5).
+  - ``tier2_self_update`` — ``concinno self-update`` CLI plus
+    detached helper subprocess so ``pip install --upgrade`` does not
+    crash the running interpreter (per R#7). Windows uses
+    ``DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW``
+    with DEVNULL stdio; POSIX uses ``start_new_session=True``. Fail-soft
+    contracts: editable install / PyPI fetch failure / target already
+    matched / Windows in-use detection all return without spawning a
+    helper. ``--dry-run`` and ``--skip-in-use-check`` flags exist.
+- ``concinno.hooks.on_session_start`` calls
+  ``refresh_tier1_registry(timeout_ms=300)`` once per session.
+- 27 new tests (10 tier1 + 17 tier2) covering digest stability, state
+  preservation, race lock, 300 ms fail-soft, 500-skill stress, cross-
+  OS spawn modes, in-use detection, and pre-release version filter.
+
+### Added — Phase-3 task T (`gui --switcher` federation mode)
+
+- ``concinno.gui.switcher`` — new FastAPI app on loopback port 8399
+  acting as a federation reverse-proxy in front of two backends
+  (Concinno GUI 8400 + Sancio GUI 8401 when present). Six routes:
+  - ``GET /`` — inline HTML tab UI iframing both backends, no auth.
+  - ``GET /api/health`` — no auth.
+  - ``GET /api/backends`` — Bearer-protected; reads disk token files
+    and reports a ``{concinno, sancio}`` 3-state (absent / present).
+  - ``{GET,POST} /proxy/concinno/{path}`` — Bearer-protected;
+    forwards with the *concinno* token. Switcher's own token never
+    leaks upstream.
+  - ``{GET,POST} /proxy/sancio/{path}`` — same for Sancio.
+- Switcher token written to ``~/.concinno/switcher_token`` (or
+  ``%LOCALAPPDATA%\concinno\switcher_token`` on Windows), independent
+  from the 8400 GUI token.
+- Sancio token path mirror is computed by an in-module helper that
+  *never* imports ``persona.*`` — AST check enforces this at test
+  time. Loose coupling via the disk token-path contract only.
+- CLI: ``concinno gui --switcher`` flag (with optional
+  ``--concinno-port`` / ``--sancio-port`` overrides) dispatches to the
+  switcher app on 8399; ``--port`` default is now ``None`` so the
+  selected mode (regular GUI vs switcher) picks its own canonical
+  port. ``concinno gui --print-token-path`` honours the active mode.
+- 5 s upstream timeout, 502/503 fail-fast. 503 if a backend's token
+  file is absent at request time.
+- 18 new switcher tests + 64 existing GUI regression all pass.
 
 ### Changed
 
@@ -64,12 +127,23 @@ installs while the rest of Phase 3 (#4-#10) lands.
 
 ### Notes
 
-- This is an alpha pre-release. Stable ``2.36.0`` will ship after
-  Phase-3 tasks #4-#10 (Sancio GUI mirror, switcher, VS Code
-  extension wiring, auto-update tiers) complete.
-- No public API removed; no behavioural change for users who do
-  not opt into the GUI (server startup still requires
+- No public API removed; no behavioural change for users who do not
+  opt into the GUI (server startup still requires
   ``pip install 'concinno[gui]'`` extras).
+- Tasks ``L`` and ``M`` from the original Phase-3 board (SSH-blocked
+  remote checks) remain ⏸ on the user web console; they are not ship
+  blockers for stable ``2.36.0``.
+- Cross-stack: ``persona-api 0.4.0`` ships in lockstep — sancio
+  GUI mirror (port 8401), event-dispatcher wiring, and Tier-2 mirror
+  ``sancio self-update``. See
+  ``projects/persona-api/RELEASE_COORDINATION.md``.
+
+## [2.36.0a1] - 2026-04-25 — superseded by 2.36.0
+
+Internal alpha that shipped only the token-file infra + FEATURE_META
+schema additions (now subsumed under ``[2.36.0]``). Listed for audit
+trail; do not depend on this version directly — install ``2.36.0`` or
+later.
 
 ## [2.35.1] - 2026-04-25
 

@@ -3,20 +3,21 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-25 — **2.35.0 built, ready-to-publish; IntentAnchor 2.10 + EventBinding schema**）
+## 現況 snapshot（2026-04-25 part-G — **2.36.0 stable prep, cross-stack lockstep with persona-api 0.4.0**）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | `2.34.0` (2026-04-25, commit `2c715b3` wiki tool + anchor + UA fix) |
-| `pyproject.toml` version | `2.35.0` |
-| `src/concinno/__init__.py __version__` | `2.35.0` |
-| CHANGELOG.md 最新 release heading | `## [2.35.0] - 2026-04-25` (promoted) |
-| 三源對齊狀態 | ✅ 三源對齊 2.35.0 |
-| 本地 commit | 本 session 末尾 autocommit (intent_anchor + skills/schema + on_prompt_submit + SKILL_TEMPLATE + 3 new tests + version bump + CHANGELOG) |
-| 本地 tag | 待 publish 完後 `v2.35.0` |
-| Pending Publish Queue | **2.35.0 ready-to-publish**（release_auth.disabled=True → 自動通過，不需字串） |
+| Registry latest (PyPI) | `2.35.1` (2026-04-25, commit `33ef2d5` subprocess CREATE_NO_WINDOW hot-paths) |
+| `pyproject.toml` version | `2.36.0` |
+| `src/concinno/__init__.py __version__` | `2.36.0` |
+| CHANGELOG.md 最新 release heading | `## [2.36.0] - 2026-04-25` (promoted from 2.36.0a1 alpha; alpha kept as audit-trail entry) |
+| 三源對齊狀態 | ✅ 三源對齊 2.36.0 (`pyproject.toml` + `__init__.py` + CHANGELOG heading) |
+| 本地 commit | Phase 3 part-E/F/G shipped: `2a5aaa7` (Q 2.36.0a1 token-file infra) → `909c209` (Y hard_gate severity sweep) → `4911499` (V auto_update tier 1+2) → `92266d5` (T `gui --switcher` flag). Bump-to-stable commit pending (main agent owns post-prepare commit). |
+| 本地 tag | 待 publish 完後 `v2.36.0` |
+| Pending Publish Queue | **2.36.0 ready-to-publish** (release_auth.disabled=True → harness 層 bash sandbox 仍須一次 allow / 字串 / UI permit per `~/.claude/rules/L1/release_coord.md` 兩層 gate rule) |
 | release_auth 狀態 | `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` |
-| Build artifacts | `dist/concinno-2.35.0-py3-none-any.whl` + `dist/concinno-2.35.0.tar.gz` （twine check PASSED） |
+| Build artifacts | ✅ `dist/concinno-2.36.0-py3-none-any.whl` + `dist/concinno-2.36.0.tar.gz` (twine check PASSED) — built this prepare session at HEAD `92266d5` + uncommitted bump-to-stable + ruff E501 wrap. Main agent re-builds after committing the bump if commit hash matters for `built_from` accounting. |
+| Cross-stack pair | `persona-api 0.4.0` (sancio gui mirror + event_dispatcher + auto_update tier-2 mirror) — see `projects/persona-api/RELEASE_COORDINATION.md`. Persona-api `concinno>=2.36.0` dep floor lifted in lockstep. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
@@ -26,6 +27,85 @@
 ## Pending Publish Queue (current)
 
 ```yaml
+- version: "2.36.0"
+  state: ready-to-publish
+  queued_by:
+    session: cc_2026-04-25-part-G-task10-cross-stack-prep
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-04-25T16:35+08:00
+  artifacts:
+    wheel: TBD (run `python -m build` after main agent commits the bump-to-stable)
+    sdist: TBD
+    twine_check: PENDING (build first)
+    built_from: TBD (commit hash of HEAD after triple-source bump 2.36.0a1 → 2.36.0)
+  verification:
+    tests_full: PENDING (concinno full pytest started 15:53 in this prepare session,
+                run continued in background; expected ~6850+ passed / 0 failed at
+                target HEAD per 2.35.0 baseline + Phase-3 deltas Y/V/T/Q)
+    tests_targeted: |
+      Phase-3 Q (token-file infra): 18 new tests in test_gui_auth.py + 3 new in
+      test_gui_server.py + 12 cross-OS path tests
+      Phase-3 Y (hard_gate severity sweep): test_hard_gate_features_must_be_severity_major_or_higher 13/13
+      Phase-3 V (auto_update Tier 1+2): 27 new tests
+        (10 tier1 + 17 tier2; 83 passed 1 skipped at task-V completion time)
+      Phase-3 T (gui --switcher): 18 new switcher tests + 64 GUI regression
+    ruff: clean (4 I001 auto-fixed + 1 E501 wrapped at feature_config.py:455 in
+          this session; src/ tests/ All checks passed!)
+    triple_source_aligned: true (pyproject 2.36.0 / __init__.py 2.36.0 /
+                                  CHANGELOG `## [2.36.0] - 2026-04-25`)
+    redteam_review: |
+      Done in part-E (commander verdict
+      `_AI_BRAIN/05_Planning/sancio-gui-extension-commander-verdict-2026-04-25.md`).
+      11 red attacks → 5 accept-full / 4 accept-narrow / 1 accept-modified / 1
+      reframed (R#11 placeholder version handled by reading this file at impl
+      time — done now). All 13 hard conditions discharged across Phase-3 tasks
+      Q + Y + V + T (plus persona-api R/X). Main commander裁決 5-stance pending
+      on the final review of this prepare session's work; main agent runs
+      framing 4-step + 5-stance before authorizing publish.
+  blocking_on:
+    - main_commander_verdict_after_this_prepare_session
+    - harness_bash_sandbox_allow (concinno release_auth.disabled=True 已 opt-out
+      但 Claude Code harness 層 bash sandbox 須 user 在 prompt UI allow `python -m
+      twine upload` / `git push origin v2.36.0` 一次，或加 .claude/settings 的
+      permissions.allow per `~/.claude/rules/L1/release_coord.md` 兩層 gate rule)
+  suggested_command: |
+    # DO NOT auto-run. After commander verdict + harness allow:
+    cd projects/concinno
+    rm -rf dist/ build/
+    PYTHONIOENCODING=utf-8 python -m build
+    PYTHONIOENCODING=utf-8 python -m twine check dist/concinno-2.36.0*
+    PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-2.36.0*
+    git tag v2.36.0 && git push origin v2.36.0
+    # Cross-stack lockstep: persona-api 0.4.0 follows in same session.
+    # See projects/persona-api/RELEASE_COORDINATION.md.
+  expires_at: 2026-05-02T16:35+08:00  # +7d, rebuild artifacts past this
+  notes: |
+    Cross-stack release pair with persona-api 0.4.0 (Phase 3 task #10
+    "Cross-stack release coordination" per commander verdict). Phase-3
+    bundle:
+    - Q part-E (2a5aaa7): token-file infra `concinno.gui.auth` +
+      `BearerTokenMiddleware` + `concinno gui --print-token-path` +
+      `concinno features audit` + FEATURE_META schema additions (recommended
+      / severity_if_off / consequences_if_off + intent_anchor row) +
+      ~/.concinno/critical_changes.log audit.
+    - Y part-F (909c209): 19 hard_gate entries → 5 critical + 14 major
+      severity_if_off classification. xfail tracker self-heal kept.
+    - V part-F (4911499): `concinno.auto_update` package — Tier 1
+      RegistryDigest + RegistryCache + refresh_tier1_registry (300ms
+      budget, race lock, state preservation) + Tier 2 self_update CLI
+      (detached helper, cross-OS spawn flags, fail-soft contracts).
+    - T part-G (92266d5): `concinno.gui.switcher` — port 8399
+      federation reverse-proxy with disk-token-path mirror to Sancio (no
+      python coupling), 6 routes, 5s upstream timeout, AST check enforces
+      zero `import persona`.
+    Tasks L (web console SSH-reachable check) and M (cross-stack pod sync)
+    remain ⏸ on the user web console — not ship blockers for stable
+    2.36.0 per part-G verdict.
+    persona-api 0.4.0 ships as cross-stack pair (sancio gui mirror port
+    8401 + event_dispatcher runtime wire-up + auto_update tier-2 mirror).
+    persona-api `concinno>=2.36.0` dep floor lifted in lockstep so
+    `pip install --upgrade persona-api` cannot resolve a stale concinno.
+
 - version: "2.35.0"
   state: published
   result: ok

@@ -1164,8 +1164,7 @@ def _get_local_vision_llm():
     n_gpu_layers = int(os.environ.get("GAIA_VISION_N_GPU_LAYERS", "0"))
     n_ctx = int(os.environ.get("GAIA_VISION_CTX", "4096"))
 
-    from llama_cpp import Llama
-    from llama_cpp import llama_chat_format
+    from llama_cpp import Llama, llama_chat_format
     # Prefer Concinno-shipped custom handlers (e.g. Gemma4) first,
     # fall back to llama-cpp-python built-ins (Llava / Qwen / MiniCPM).
     if handler_name == "Gemma4VisionChatHandler":

@@ -9,7 +9,6 @@ import pytest
 
 from concinno.core import subprocess_safe
 
-
 # ── Constants ──────────────────────────────────────────────────────────────
 
 

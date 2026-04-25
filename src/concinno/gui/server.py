@@ -45,9 +45,12 @@ from concinno.gui import auth as _auth
 
 _logger = logging.getLogger(__name__)
 
-# Routes that may be hit without auth (used by client-side health probes
-# / liveness pings before the token is read off disk).
-_AUTH_BYPASS_PATHS = frozenset({"/api/health"})
+# Routes that may be hit without auth: loopback-only frontend assets
+# (so iframe-embed / VS Code webview can render the SPA shell anonymously)
+# + liveness probes before the client reads token off disk.
+# Frontend SPA injects Authorization header from URL ?bearer= for every
+# /api/* fetch. /api/* (except /api/health) still require Bearer.
+_AUTH_BYPASS_PATHS = frozenset({"/api/health", "/", "/style.css", "/app.js"})
 
 
 STATIC_DIR = Path(__file__).parent / "static"

@@ -28,7 +28,6 @@ from concinno.llm_runtime.tool_parsers import (
     register_parser,
 )
 
-
 # ── Fixtures ────────────────────────────────────────────────────────
 
 SINGLE_CALL = (

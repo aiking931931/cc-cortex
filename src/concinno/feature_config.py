@@ -452,7 +452,9 @@ FEATURE_META: dict[str, dict] = {
     "publish_scan": {
         "category": "hard_gate",
         "severity_if_off": "critical",
-        "consequences_if_off": "publish 前 secrets/key/personal path 不掃，可能外洩 API key 到 OSS PyPI",
+        "consequences_if_off": (
+            "publish 前 secrets/key/personal path 不掃，可能外洩 API key 到 OSS PyPI"
+        ),
         "description": "Pre-publish artifact scan for secrets, keys, and personal paths",
         "description_zh": "發布前掃描打包物是否夾帶私鑰/密碼/個人路徑",
         "ziq_autotunable": False,

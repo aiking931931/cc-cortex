@@ -161,6 +161,14 @@ def _register_landing(app: "FastAPI") -> None:
         # (stashed on app.state by the factory below).
         cport = getattr(app.state, "concinno_port", DEFAULT_CONCINNO_PORT)
         sport = getattr(app.state, "sancio_port", DEFAULT_SANCIO_PORT)
+        # Read backend tokens from disk (fail-soft: empty string if absent
+        # → frame loads HTML stub but /api/* fetches will 401; the operator
+        # is told via /api/backends status badge that backend is "no token").
+        concinno_token = _auth.read_token(path=_auth.get_token_path()) or ""
+        sancio_token = _auth.read_token(path=get_sancio_token_path_via_disk()) or ""
+        # Tokens are inlined into the HTML JS as URL ?bearer= params on the
+        # iframe src so the backend SPA's app.js can authenticate every
+        # /api/* fetch. Loopback-only acceptable per spec for personal CLI.
         body = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -185,9 +193,14 @@ def _register_landing(app: "FastAPI") -> None:
 </nav>
 <iframe id="frame" src="about:blank"></iframe>
 <script>
+  // Backend tokens are inlined here from disk reads at switcher startup.
+  // Each iframe load passes the matching token as ?bearer= so backend
+  // SPA's app.js can attach Authorization: Bearer for /api/* fetches.
+  const _TOK = {{ concinno: {concinno_token!r}, sancio: {sancio_token!r} }};
   function show(name, btn) {{
     const port = name === 'concinno' ? {cport} : {sport};
-    document.getElementById('frame').src = `http://127.0.0.1:${{port}}/`;
+    const tok = encodeURIComponent(_TOK[name] || '');
+    document.getElementById('frame').src = `http://127.0.0.1:${{port}}/?bearer=${{tok}}`;
     document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }}
