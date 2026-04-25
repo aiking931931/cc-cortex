@@ -1727,6 +1727,10 @@ def main() -> None:
     from .new_feature_cmd import register as _register_new_feature
     _register_new_feature(sub)
 
+    # 2.37.0 — persona module CLI (Track 1)
+    from .persona_cmd import register as _register_persona
+    _register_persona(sub)
+
     # 2.30.1 — `concinno skills {new, list, enable, disable, delete}`
     from .skills_cmd import register as _register_skills
     _register_skills(sub)

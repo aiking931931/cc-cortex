@@ -4,7 +4,8 @@
 
 **A hook-based governance toolkit compatible with Anthropic's Claude Code CLI**
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-red.svg)](LICENSE)
+[![Commercial License Available](https://img.shields.io/badge/Commercial_License-Available-green.svg)](COMMERCIAL_LICENSE.md)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/concinno.svg)](https://pypi.org/project/concinno/)
 [![Tests](https://github.com/aiking931931/concinno/actions/workflows/ci.yml/badge.svg)](https://github.com/aiking931931/concinno/actions/workflows/ci.yml)
@@ -521,10 +522,26 @@ Crimea region of Ukraine).
 
 ## License & Trademarks
 
-Apache-2.0 License. See [LICENSE](LICENSE) for details, including the
-AI Ethics addendum that prohibits use in EU AI Act Annex III "high
-risk" contexts (social scoring, biometric surveillance, real-time
-law enforcement).
+**Concinno is dual-licensed** under:
+
+1. **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** —
+   the default. Use, modify, and redistribute freely, including over a
+   network, **provided** you comply with §13 (network-use disclosure of
+   complete corresponding source). See [LICENSE](LICENSE).
+2. **Commercial License** — for organizations that cannot or will not
+   comply with AGPL §13 (most commercial SaaS deployments) or whose
+   internal policy bans AGPL-licensed dependencies. See
+   [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) for tiers, pricing,
+   and contact.
+
+**Trademarks.** "Concinno", "Sancio", "Cerno", "ZIQ", "FieldRead",
+"PSYCHE", and "TACB" are trademarks of Chen Syuan Wang (王晨宣 /
+AI King). The AGPL grant does not include trademark rights —
+forks must rename before public distribution under a different mark.
+
+**Sole copyright.** All Concinno copyright is held by Chen Syuan
+Wang as sole author. For acquisition or strategic partnership
+discussions: <me@ai-king.dev>.
 
 Claude Code is a trademark of Anthropic PBC. Concinno is an
 independent open-source project and is **not affiliated with,

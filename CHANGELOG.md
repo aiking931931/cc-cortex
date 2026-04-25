@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-04-25
+
+License relicense from Apache-2.0 to AGPL-3.0-or-later (see
+``LICENSE`` + ``COMMERCIAL_LICENSE.md``) and Track 1 ship of the
+``concinno.persona`` module (see
+``_AI_BRAIN/05_Planning/persona-module-3track-decision-2026-04-25.md``
+for the parent decision and
+``_AI_BRAIN/05_Planning/concinno-persona-module-track1-spec-2026-04-25.md``
+for the Track 1 spec).
+
+### Added — `concinno.persona` (Track 1)
+
+- New ``concinno.persona`` module — generic agent-persona harness.
+  Public API (``Persona`` / ``PersonaSchema`` / ``PinnedMemory`` /
+  ``EmotionalState`` / ``PersonaState`` / ``PinnedMemoryStore`` /
+  ``PersonaRAG`` / ``InProcessBackend`` / ``HTTPBackend`` /
+  ``LocalModelBackend`` / ``PersonaBackend``).
+- ``Persona.load(path, state=None, backend=None)`` loads a persona
+  from a Markdown file with YAML frontmatter (PyYAML used when
+  available, naive parser as fallback — no new hard dep) and
+  optionally attaches a JSONL state log.
+- ``Persona.chat / consolidate / pin_memory / unpin_memory /
+  pinned / recall / save`` — full chat-loop surface.
+- ``PinnedMemoryStore`` — explicit-pin anti-drift primitive. Pinned
+  facts are skipped on consolidation and returned with priority
+  by ``recall``. Pure rule-based (explicit pin + skip + priority);
+  no automatic peak detection.
+- ``PersonaRAG`` — self-contained BM25-ish retriever over chat
+  history. Zero new dependencies.
+- ``InProcessBackend`` (Track 1) — Anthropic / OpenAI / Ollama /
+  echo providers. ``echo`` is a deterministic offline backend used
+  for tests + smoke runs.
+- ``HTTPBackend`` and ``LocalModelBackend`` — public-API stubs
+  that raise ``NotImplementedError`` so consumer code can already
+  reference them; bodies land in Track 2 / Track 3 releases.
+- ``PersonaSchema`` uses ``ConfigDict(extra="forbid")`` so unknown
+  frontmatter fields raise at validation time.
+
+### Added — ``concinno persona`` CLI
+
+- ``concinno persona run --persona <md> [--state <jsonl>]
+  [--provider {echo,anthropic,openai,ollama}] [--model <id>]
+  [--message <text>]`` — one-shot chat (echo backend default for
+  offline use).
+- ``concinno persona pin --state <jsonl> --content <text>
+  [--reason <text>]`` — append a pinned-memory record.
+- ``concinno persona pinned --state <jsonl> [--format text|json]``
+  — list pinned memories.
+- ``concinno persona recall --state <jsonl> --query <text>
+  [--top-k N] [--format text|json]`` — query the persona's
+  pinned + chat history.
+
+### Added — Track 1 docs
+
+- ``src/concinno/docs/persona-module.md`` — user-facing docs
+  covering quickstart, schema, API surface, state log format,
+  backend upgrade path, CLI usage, limitations.
+
+### Added — IP-safe naming gate
+
+- ``tests/persona/test_ip_safe_naming.py`` — CI gate that fails
+  the build if forbidden marketing strings appear anywhere in
+  the persona module surface (code, tests, docs, CLI). Hard-coded
+  forbidden list; cannot be weakened by config.
+
+### Changed — license
+
+- License changed from Apache-2.0 to AGPL-3.0-or-later (see
+  ``LICENSE``) with commercial dual-license available
+  (see ``COMMERCIAL_LICENSE.md``). All source files retain
+  the same authorship; the licence change applies to the
+  3.0.0 release artefacts and all future releases.
+
 ## [2.36.0] - 2026-04-25
 
 Phase-3 ship of the Sancio GUI Extension / auto-update / FEATURE_META
