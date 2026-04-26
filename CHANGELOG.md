@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-04-27 — GAIA hybrid solvers + structured-plan compute Skill
+
+### Added — `concinno.tools.builtin.compute` module
+
+Structured-plan DSL for agent arithmetic / statistics. Where
+`python_exec` evaluates whitelisted Python expressions, `compute`
+takes a JSON plan describing the computation and Python executes
+it deterministically. Eliminates the LLM-arithmetic-drift class of
+errors observed in GAIA cont'd¹⁰-¹³ pattern.
+
+* `execute_arithmetic_plan(plan)` — sum / multiply / aggregate over a
+  structured operand list with optional bonus / per-position scoring.
+* `execute_statistics_plan(plan)` — pstdev / stdev / mean / median /
+  composite aggregate (e.g. "average of pstdev(red) and stdev(green)").
+* `format_number(n, places=...)` — deterministic decimal formatting
+  for GAIA expected-answer string match.
+* `ComputeTool` — LLM-facing wrapper that registers the two executors
+  as ToolRegistry entries with JSON-schema arg validation.
+* Feature `compute_structured_plan` — default on, routes via
+  `feature_config.FEATURE_META`.
+
+### Added — three GAIA hybrid solvers (deterministic structure plus narrow LLM OCR plus Python arithmetic)
+
+* `gaia_polygon_opencv_hybrid` (origin: GAIA 6359a0b1 polygon area)
+  — `cv2.findContours` extracts vertex pixel coords; Sonnet narrow
+  OCR labels per edge (no decomposition, no arithmetic); Python
+  shoelace plus closure repair on the unit-space label_pool. The
+  "PREFER null over guessing" prompt rule fixes the correlated-
+  error-across-passes failure mode that plain multipass voting
+  cannot rescue. Default on, `passes_count=3`, Sonnet 4.6.
+* `gaia_colour_coded_numeric_hybrid` (origin: GAIA df6561b2 — red
+  vs green-coded numbers) — OpenCV colour-mask isolates each colour;
+  Sonnet narrow OCR per isolated channel; Python statistics-plan
+  computes the requested aggregate. Beats free-form LLM arithmetic
+  drift (3/3 STABLE PASS '17.056' vs 3/3 wrong on free-form).
+* `gaia_quiz_scoring_hybrid` (origin: GAIA cca70ce6 — image-quiz
+  fractions scoring) — first cross-feature dogfood: routes through
+  the new `compute` Skill for the `execute_arithmetic_plan` step.
+  Sonnet judges student-correct, Python `fractions.Fraction`
+  computes the canonical answer plus deterministic compare. Fixes the
+  closure-valid-but-not-structural-truth failure mode. 3/3 STABLE
+  PASS '85'.
+
+### Pattern crystallisation
+
+Any "extract data from image plus compute statistics / aggregation /
+constraint" GAIA task auto-routes through the same shape:
+deterministic library (OpenCV / Fraction / colour-mask) does the
+structure / segmentation step, narrow LLM (Sonnet 4.6, single task
+per call) does OCR / parse / spatial-match, Python computes
+arithmetic / aggregation / closure / constraint validation.
+
+### Three-class binding-constraint taxonomy
+
+GAIA failure modes split into:
+
+1. Engineering / anchor — fixable in pipeline (cont'd⁸ polygon hybrid,
+   cont'd⁹ slug-guess Wayback URL).
+2. Image-quality / dataset physical limit — not fixable (cont'd⁹
+   624cbf11 DoF blur class-2b).
+3. Annotator-interpretation ambiguity — not fixable even with prompt
+   engineering, does not generalise (cont'd¹¹ 9318445f).
+
+Decision rule: detect class-3, mark per-task loss, move on. Do not
+prompt-engineer toward annotator's subjective question scope.
+
 ## [4.1.0] - 2026-04-26 — polling watcher (real timer + ScheduleWakeup self-wake)
 
 ### Added — `concinno.polling` module

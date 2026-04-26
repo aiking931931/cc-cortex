@@ -1606,6 +1606,252 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    "compute_structured_plan": {
+        "category": "context",
+        "description": (
+            "Structured-plan compute tool: agents emit a JSON plan "
+            "describing a statistics or arithmetic computation, and "
+            "Python executes it deterministically against named data "
+            "lists. Complements ``python_exec`` (arbitrary Python "
+            "expressions) with a narrower DSL that prevents arithmetic-"
+            "in-head drift on multi-step computations. Plan kinds: "
+            "``statistics`` (allowed fn: pstdev, stdev, pvariance, "
+            "variance, mean, median, mode, geometric_mean, "
+            "harmonic_mean, fmean) and ``arithmetic`` (allowed ops: "
+            "add, sub, mul, div, neg, abs, pow, sum_list, mean_list, "
+            "max_list, min_list). Both support ``round_decimals``. "
+            "Generic — exposed via ``concinno.tools.builtin.compute`` "
+            "Python API and via ``ComputeTool`` LLM-facing wrapper."
+        ),
+        "description_zh": (
+            "結構化 plan compute tool：agent 出 JSON plan 描述 statistics "
+            "或 arithmetic 計算，Python deterministic 執行。比 python_exec "
+            "(任意 Python expression) 更窄，DSL 防多步算術 mid-precision "
+            "drift。兩種 plan kind：statistics (fn whitelist 11 個 reduction) "
+            "和 arithmetic (op whitelist 11 個運算)。都支援 round_decimals。"
+            "通用 — Python API 與 ComputeTool LLM tool 兩個入口"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gaia_quiz_scoring_hybrid": {
+        "category": "context",
+        "description": (
+            "Hybrid Sonnet OCR + Python deterministic correctness + "
+            "structured arithmetic_plan compute for image-quiz scoring "
+            "questions of the form 'scored as follows: <type-A>: N₁ "
+            "points / <type-B>: N₂ points … + M bonus points. "
+            "How many points would the student have earned?'. Sonnet is "
+            "narrowed to per-problem OCR + classification (operands, "
+            "operator, student-answer string, one of 4 type tags). "
+            "Python computes correctness via fractions.Fraction "
+            "(deterministic equality, sign-aware, equivalent-fraction-"
+            "tolerant) — avoids the v1-prototype anti-pattern of "
+            "Sonnet visually accepting a wrong student answer without "
+            "re-doing the math. The final score sum runs through "
+            "concinno.tools.builtin.compute.execute_arithmetic_plan, "
+            "dogfooding the structured-compute Skill shipped in "
+            "cont'd¹². Generic for any rule-based image quiz "
+            "matching the scoring-rule pattern; falls through on parse "
+            "failure to the legacy single-vision multipass."
+        ),
+        "description_zh": (
+            "Image-quiz scoring (例「scored as follows: <type-A>:"
+            "N₁ points / <type-B>: N₂ points + M bonus」) "
+            "的 hybrid pipeline。Sonnet 窯到 per-problem "
+            "OCR + classification（operands / operator / "
+            "student-answer / 4 type tag）；Python 用 "
+            "fractions.Fraction 算正確答案 + 比 "
+            "student answer（sign-aware、equivalent-fraction "
+            "OK），避免 v1 prototype 裡 Sonnet 視"
+            "覺接受 student answer 不重算的 "
+            "anti-pattern。最後 sum 走 "
+            "concinno.tools.builtin.compute.execute_arithmetic_plan， "
+            "dogfood cont'd¹² ship 的 structured-compute "
+            "Skill。通用適用任何符"
+            "合計分規則的圖像 quiz；"
+            "解析失敗走舊 single-vision multipass "
+            "fallback"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "passes_count": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 7,
+                "recommended": 3,
+                "risk_low": (
+                    "passes_count<2 forfeits per-problem majority vote; "
+                    "one OCR mistake on a single field (operand digit / "
+                    "operator symbol / student-answer character) can flip "
+                    "an entire row's correctness verdict and skew the "
+                    "final score"
+                ),
+                "risk_high": (
+                    "passes_count>5 multiplies API cost without marginal "
+                    "accuracy gain; majority on full row tuples saturates "
+                    "around N=3 on observed quiz layouts"
+                ),
+            },
+            "model": {
+                "type": "str",
+                "default": "claude-sonnet-4-6",
+                "recommended": "claude-sonnet-4-6",
+                "risk_low": (
+                    "older sonnet checkpoints may mis-OCR small fraction "
+                    "boxes; haiku tier insufficient for the per-problem "
+                    "field schema"
+                ),
+                "risk_high": (
+                    "opus tier is more expensive without measured lift on "
+                    "the narrow OCR sub-spec; reserve for true Chaotic "
+                    "radius"
+                ),
+            },
+        },
+    },
+    "gaia_colour_coded_numeric_hybrid": {
+        "category": "context",
+        "description": (
+            "Hybrid OpenCV colour-mask + narrow Sonnet OCR + Sonnet "
+            "text-only arithmetic for image questions where the agent "
+            "must compute a statistic over numbers tagged by colour "
+            "(e.g. 'average of pstdev of red numbers and stdev of "
+            "green numbers'). For each colour mentioned in the "
+            "question, OpenCV masks the image to that hue band only "
+            "(other content blacked out) so OCR is done on a single-"
+            "colour-only image — Sonnet's vision is reliable at "
+            "single-colour OCR but unreliable at colour discrimination "
+            "on dense grids. Per-colour N-pass OCR + per-position "
+            "majority vote produces the clean number list, then a "
+            "text-only Sonnet call performs the arithmetic specified "
+            "by the original question (no vision burden in the "
+            "compute step). Generic for any axis-aligned colour-coded "
+            "numeric image; soft dependency on opencv-python; absent "
+            "→ falls through to the legacy single-vision multipass."
+        ),
+        "description_zh": (
+            "Image colour-coded numeric data (例：「red 數字 pstdev "
+            "和 green 數字 stdev 的 average」) 的 hybrid pipeline。"
+            "對 question 提到的每個 colour 用 OpenCV mask 對應 hue band "
+            "(其他 blacked out)，narrow OCR 在單色圖做（Sonnet 對單色 "
+            "OCR 可靠，dense grid 多色 discrimination 不可靠）。N-pass "
+            "OCR + per-position majority vote 出乾淨數字 list，再用 "
+            "text-only Sonnet call 做問題指定的算術（compute step 沒 "
+            "vision 負擔）。通用適用任何 axis-aligned colour-coded "
+            "numeric image；soft dep cv2，缺則 fall through 到舊 "
+            "single-vision multipass"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "passes_count": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 7,
+                "recommended": 3,
+                "risk_low": (
+                    "passes_count<2 forfeits per-position majority "
+                    "vote; one OCR mistake on a single number can "
+                    "skew the entire downstream statistic"
+                ),
+                "risk_high": (
+                    "passes_count>5 multiplies API cost without "
+                    "marginal accuracy gain; per-position mode "
+                    "saturates around N=3 on observed image classes"
+                ),
+            },
+            "model": {
+                "type": "str",
+                "default": "claude-sonnet-4-6",
+                "recommended": "claude-sonnet-4-6",
+                "risk_low": (
+                    "older sonnet checkpoints may misread small or "
+                    "stylised digits; haiku tier insufficient for "
+                    "dense-grid OCR"
+                ),
+                "risk_high": (
+                    "opus tier is more expensive without measured lift "
+                    "on the narrow OCR sub-spec; reserve for true "
+                    "Chaotic radius"
+                ),
+            },
+        },
+    },
+    "gaia_polygon_opencv_hybrid": {
+        "category": "context",
+        "description": (
+            "Hybrid OpenCV + narrow Sonnet OCR + Python shoelace solver "
+            "for orthogonal polygon area image questions. cv2.findContours "
+            "extracts polygon vertices in pixel coords (ground truth the "
+            "LLM cannot fabricate); a narrow Anthropic vision call asks "
+            "the model to label each edge by index with the visible "
+            "numeric value nearest to the edge midpoint (OCR + spatial "
+            "matching only — no decomposition, no arithmetic). Python "
+            "walks the polygon in unit space using (label, direction) "
+            "pairs, verifies closure against the OpenCV-anchored vertex "
+            "structure, and computes signed area via shoelace formula. "
+            "Generic for any axis-aligned polygon area question with "
+            "labelled side lengths — schematic non-uniformity (image "
+            "not drawn-to-scale) is tolerated because the algorithm "
+            "uses LABEL values for shoelace, not pixel distances. "
+            "Soft dependency on opencv-python; absent → fall through "
+            "to the structured-JSON multipass below."
+        ),
+        "description_zh": (
+            "Orthogonal polygon area 圖題的 hybrid pipeline。OpenCV "
+            "cv2.findContours 抽 polygon 頂點 pixel 座標（LLM 無法偽造的"
+            "ground truth）；narrow Anthropic vision call 要 model 對每"
+            "edge 配最近 label（純 OCR + spatial matching，不 decomp 不"
+            "算術）；Python 在 unit space 走 polygon 用 shoelace 算面積，"
+            "closure 用 OpenCV vertex structure 錨定，跳脫 free-form "
+            "structured multipass 的「closure-valid != structural-truth」"
+            "失敗模式。schematic 圖非按比例也能算對，因為用 LABEL（非 "
+            "pixel）做 shoelace。soft dep cv2，缺則 fall through 到下面 "
+            "structured multipass。通用適用任何 axis-aligned polygon area "
+            "+ numeric label 題型"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "passes_count": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 7,
+                "recommended": 3,
+                "risk_low": (
+                    "passes_count<2 forfeits the retry-on-closure-fail "
+                    "buffer; one wrong OCR (e.g. confusing 1 with 1.5) "
+                    "kills the whole pipeline"
+                ),
+                "risk_high": (
+                    "passes_count>5 multiplies API cost without marginal "
+                    "lift; closure check filters wrong OCR within 2-3 "
+                    "tries on observed image classes"
+                ),
+            },
+            "model": {
+                "type": "str",
+                "default": "claude-sonnet-4-6",
+                "recommended": "claude-sonnet-4-6",
+                "risk_low": (
+                    "older sonnet checkpoints have weaker JSON "
+                    "instruction-following on the narrow per-edge label "
+                    "schema"
+                ),
+                "risk_high": (
+                    "opus tier is more expensive without measured lift "
+                    "on the narrow OCR sub-spec; reserve for true "
+                    "Chaotic radius"
+                ),
+            },
+        },
+    },
     "gaia_polygon_structured_multipass": {
         "category": "context",
         "description": (

@@ -1509,9 +1509,20 @@ _WEB_ONLY_PROCEDURE = (
     "(a) web_search for a more SPECIFIC URL — a sub-page / "
     "deeper resource within the same site (e.g. a per-item page "
     "rather than a list page); "
-    "(b) web_search for the answer-bearing entity directly by its "
+    "(b) **GUESS the sub-page URL by slugifying the entity name** "
+    "and appending it to the parent listing path. Many CMS-driven "
+    "sites use this convention: a list page at "
+    "`example.com/section/list` typically has each item at "
+    "`example.com/section/list/<entity-slug>` where the slug is the "
+    "entity name lowercased, ASCII-only, spaces replaced with "
+    "hyphens, apostrophes/punctuation removed. For Wayback Machine, "
+    "prefix with `https://web.archive.org/web/<year>/`. This "
+    "pattern often succeeds when CDX API and `site:` search both "
+    "miss the URL because the search engine never indexed the deep "
+    "page; "
+    "(c) web_search for the answer-bearing entity directly by its "
     "name once you have identified what it is; "
-    "(c) try a different source / snapshot date / mirror URL. "
+    "(d) try a different source / snapshot date / mirror URL. "
     "Repeating the same fetch is wasted budget after 2 attempts.\n"
     "  5. When the answer depends on what is VISIBLE on a page "
     "(small text in an image, label on an object in a photo, "
@@ -1545,6 +1556,51 @@ _POLYGON_AREA_RE = re.compile(
     r"\b(polygon|shape|figure|region)\b.{0,80}\b(area|surface)\b",
     re.I | re.S,
 )
+
+
+# Colour-coded numeric data extraction detection.
+#
+# Triggers when an image-attached question asks the agent to compute a
+# statistic / arithmetic operation over numbers that are colour-coded in
+# the image (e.g. "average of the standard deviation of the RED numbers
+# and the standard deviation of the GREEN numbers"). Generic over any
+# pair of common figure colours — red / green / blue / yellow / cyan /
+# orange / purple / black — and any common Python statistics operation.
+# No task-specific entity tokens.
+_COLOUR_NAME_RE = re.compile(
+    r"\b(red|green|blue|yellow|orange|purple|cyan|magenta|"
+    r"pink|black)\b",
+    re.I,
+)
+_NUMERIC_OP_RE = re.compile(
+    r"\b(average|mean|median|sum|product|standard\s+deviation|"
+    r"deviation|variance|range|max(?:imum)?|min(?:imum)?|"
+    r"percentage|percent|ratio|count)\b",
+    re.I,
+)
+_NUMBER_NOUN_RE = re.compile(r"\bnumbers?\b", re.I)
+
+
+def _is_colour_coded_numeric_data_question(question: str) -> bool:
+    """Return True when the question asks for an arithmetic operation
+    over colour-tagged numbers in an image.
+
+    Two signals are required:
+      1. At least 2 distinct colour names mentioned (so we know which
+         colour mask to extract per data subset).
+      2. At least one numeric operation keyword AND the word "number(s)".
+
+    Anti-leakage: detector reads only structural tokens (colour names,
+    operation keywords, "numbers"), no task-specific entities.
+    """
+    if not question:
+        return False
+    if not _NUMBER_NOUN_RE.search(question):
+        return False
+    if not _NUMERIC_OP_RE.search(question):
+        return False
+    found_colours = {m.lower() for m in _COLOUR_NAME_RE.findall(question)}
+    return len(found_colours) >= 2
 
 
 def _is_orthogonal_polygon_area_question(question: str) -> bool:
@@ -2179,6 +2235,1543 @@ def _solve_polygon_structured_multipass(
     return _format_polygon_area(median), pass_records
 
 
+# ─────────────── OpenCV + narrow-OCR + shoelace hybrid ──────────────────
+#
+# Universal pipeline for axis-aligned (orthogonal) polygon area image
+# questions with labelled side lengths. Decouples vision-perception
+# (good at OCR + spatial matching) from arithmetic (good at deterministic
+# shoelace) by:
+#   1. OpenCV ``cv2.findContours`` extracts polygon vertices in pixel
+#      coords (ground truth from the image, not LLM-supplied).
+#   2. Anthropic vision call asks the model to label each edge by index
+#      with the visible numeric value nearest to that edge's midpoint —
+#      narrow OCR + spatial matching, no decomposition, no arithmetic.
+#   3. Python walks the polygon in unit-space using (label, direction)
+#      pairs, verifies closure (sum_right == sum_left,
+#      sum_down == sum_up), and computes signed area via shoelace.
+#
+# This addresses the "closure-valid != structural-truth" failure mode
+# of :func:`_solve_polygon_structured_multipass` — closure now anchors
+# against OpenCV-extracted vertex coordinates the LLM cannot fabricate.
+#
+# Generic for any axis-aligned polygon area question; not 6359a0b1-
+# specific. Schematic non-uniformity (image not drawn to scale) is
+# tolerated because the algorithm uses LABEL values for shoelace, not
+# pixel distances.
+#
+# Soft dependency on ``opencv-python`` and ``numpy``; missing → return
+# ``None`` so the caller can fall through to the structured-JSON
+# multipass and ultimately the legacy free-form multipass.
+
+
+_POLYGON_HUE_RANGES: tuple[tuple[str, tuple[int, int, int], tuple[int, int, int]], ...] = (
+    ("green",  (35, 60, 60),  (85, 255, 255)),
+    ("blue",   (100, 60, 60), (130, 255, 255)),
+    ("red_lo", (0, 60, 60),   (10, 255, 255)),
+    ("red_hi", (170, 60, 60), (180, 255, 255)),
+    ("yellow", (20, 60, 60),  (35, 255, 255)),
+    ("cyan",   (85, 60, 60),  (100, 255, 255)),
+)
+
+
+def _detect_polygon_mask(img):
+    """Return ``(area_px, mask, hue_name)`` for the most prominent
+    saturated colour. Tries common geometry-figure colours and picks
+    the largest single contour. Returns ``(0, None, None)`` if no
+    candidate exceeds the noise floor.
+    """
+    import cv2
+    import numpy as np
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    best = (0.0, None, None)
+    for name, lo, hi in _POLYGON_HUE_RANGES:
+        m = cv2.inRange(hsv, np.array(lo), np.array(hi))
+        cnts, _ = cv2.findContours(
+            m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not cnts:
+            continue
+        biggest = max(cnts, key=cv2.contourArea)
+        area = float(cv2.contourArea(biggest))
+        if area > best[0]:
+            best = (area, m, name)
+    return best
+
+
+def _extract_orthogonal_polygon_structure(
+    image_path: str, *, eps_factor: float = 0.005, min_edge_px: int = 3,
+) -> tuple[float, str, list[dict]] | None:
+    """Extract polygon vertices and edges from the image via OpenCV.
+
+    Returns ``(pixel_area, hue_name, edges)`` or ``None`` on failure.
+
+    Each edge dict has keys ``idx`` (0-based), ``axis`` (``'h'`` or
+    ``'v'``), ``direction`` (+1 right/down, -1 left/up), ``length_px``,
+    ``midpoint_xy`` (tuple of float), ``v1`` and ``v2`` (int tuples).
+    """
+    try:
+        import cv2  # noqa: F401
+        import numpy as np  # noqa: F401
+    except ImportError:
+        return None
+    try:
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+        pixel_area, mask, hue_name = _detect_polygon_mask(img)
+        if mask is None or pixel_area < 100:
+            return None
+        cnts, _ = cv2.findContours(
+            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not cnts:
+            return None
+        polygon = max(cnts, key=cv2.contourArea)
+        eps = eps_factor * cv2.arcLength(polygon, True)
+        approx = cv2.approxPolyDP(polygon, eps, True).reshape(-1, 2)
+        if len(approx) < 4:
+            return None
+        edges: list[dict] = []
+        for i in range(len(approx)):
+            v1 = approx[i]
+            v2 = approx[(i + 1) % len(approx)]
+            dx = float(v2[0] - v1[0])
+            dy = float(v2[1] - v1[1])
+            if abs(dx) > abs(dy):
+                length = abs(dx)
+                axis = "h"
+                direction = 1 if dx > 0 else -1
+            else:
+                length = abs(dy)
+                axis = "v"
+                direction = 1 if dy > 0 else -1
+            if length < min_edge_px:
+                continue
+            mid = (
+                float((v1[0] + v2[0]) / 2.0),
+                float((v1[1] + v2[1]) / 2.0),
+            )
+            edges.append({
+                "idx": len(edges),
+                "axis": axis,
+                "direction": direction,
+                "length_px": float(length),
+                "midpoint_xy": mid,
+                "v1": (int(v1[0]), int(v1[1])),
+                "v2": (int(v2[0]), int(v2[1])),
+            })
+        if len(edges) < 4:
+            return None
+        return pixel_area, hue_name, edges
+    except Exception:
+        return None
+
+
+_POLYGON_EDGE_OCR_PROMPT_TEMPLATE = (
+    "[Polygon edge OCR — narrow task]\n\n"
+    "I have already extracted the polygon outline from this image "
+    "using OpenCV. The polygon has {n} edges, each with a fixed "
+    "pixel midpoint location. For EACH edge, look at the image and "
+    "output the numeric label visible nearest to that edge.\n\n"
+    "Edges (1-based pixel coordinates, top-left origin, y increasing "
+    "downward):\n{edges_block}\n\n"
+    "Output EXACTLY this JSON, no prose, no markdown fence, JSON "
+    "only:\n"
+    "{{\n"
+    "  \"edges\": [\n"
+    "    {{\"idx\": 0, \"label\": <number>}},\n"
+    "    ...\n"
+    "  ]\n"
+    "}}\n\n"
+    "Rules:\n"
+    "  - Output ONE entry per edge (idx 0..{n_minus_1}).\n"
+    "  - Label is the numeric value (integer or decimal) shown "
+    "nearest to that edge midpoint on the image.\n"
+    "  - Ignore decoration: dataset year watermark, scale bars, "
+    "logos, any text not adjacent to a polygon side.\n"
+    "  - **PREFER null over guessing.** If the nearest label is "
+    "ambiguous (could plausibly belong to one of two edges, or you "
+    "cannot tell which numeric value is associated with this "
+    "specific edge), output null. Python will solve for the missing "
+    "value via closure constraints (sum of right edges == sum of "
+    "left edges; sum of down == sum of up). Closure-derived labels "
+    "are reliable; mis-assigned labels break the whole pipeline.\n"
+    "  - **One-label-per-edge rule.** Each numeric label on the "
+    "image belongs to exactly ONE edge. If you've already used a "
+    "label for one edge, do NOT reuse it for another edge unless "
+    "the image clearly shows the same value labelled twice on "
+    "different edges.\n"
+    "  - **Spatial proximity matters more than visual scanning "
+    "order.** Match each edge to the label whose pixel position is "
+    "closest to that edge's midpoint, NOT the next label your eye "
+    "would land on.\n"
+)
+
+
+def _build_polygon_edges_block(edges: list[dict]) -> str:
+    lines = []
+    for e in edges:
+        mx, my = e["midpoint_xy"]
+        if e["axis"] == "h":
+            d = "right" if e["direction"] == 1 else "left"
+        else:
+            d = "down" if e["direction"] == 1 else "up"
+        lines.append(
+            f"  edge {e['idx']:>2d}: axis={e['axis']} direction={d} "
+            f"midpoint_pixel=({mx:.0f}, {my:.0f}) length_px="
+            f"{e['length_px']:.0f}"
+        )
+    return "\n".join(lines)
+
+
+def _call_sonnet_polygon_edge_ocr(
+    image_path: str, edges: list[dict], *, model: str = "claude-sonnet-4-6",
+) -> dict | None:
+    """One narrow Anthropic vision call asking the model to label each
+    polygon edge by index with the nearest visible numeric label.
+
+    Returns the parsed JSON dict on success, ``None`` on parse failure
+    or API failure (callers fall through to other paths).
+    """
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = MIME_MAP.get(ext, "image/png")
+    try:
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+    edges_block = _build_polygon_edges_block(edges)
+    prompt_text = _POLYGON_EDGE_OCR_PROMPT_TEMPLATE.format(
+        n=len(edges),
+        n_minus_1=len(edges) - 1,
+        edges_block=edges_block,
+    )
+    try:
+        client = _get_anthropic()
+    except Exception:
+        return None
+    request_kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": 2000,
+        "timeout": 120.0,
+    }
+    if not _model_drops_temperature(model):
+        request_kwargs["temperature"] = 0.0
+    try:
+        resp = client.messages.create(
+            **request_kwargs,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": mime,
+                        "data": b64,
+                    }},
+                    {"type": "text", "text": prompt_text},
+                ],
+            }],
+        )
+    except Exception:
+        return None
+    raw = resp.content[0].text if resp.content else ""
+    obj_str = _extract_json_object(raw)
+    if obj_str is None:
+        return None
+    try:
+        return json.loads(obj_str)
+    except json.JSONDecodeError:
+        return None
+
+
+def _assign_labels_to_polygon_edges(
+    edges: list[dict], ocr_dict: dict,
+) -> int:
+    """Mutate edges in-place adding a ``label`` field. Returns count
+    of edges that received a non-null label."""
+    if not isinstance(ocr_dict, dict):
+        for e in edges:
+            e["label"] = None
+        return 0
+    raw_edges = ocr_dict.get("edges")
+    by_idx: dict[int, float | None] = {}
+    if isinstance(raw_edges, list):
+        for entry in raw_edges:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                idx = int(entry["idx"])
+                label = entry.get("label")
+                if label is None:
+                    by_idx[idx] = None
+                else:
+                    by_idx[idx] = float(label)
+            except (KeyError, TypeError, ValueError):
+                continue
+    assigned = 0
+    for e in edges:
+        e["label"] = by_idx.get(e["idx"])
+        if e["label"] is not None:
+            assigned += 1
+    return assigned
+
+
+def _closure_solve_polygon_missing(edges: list[dict]) -> int:
+    """Fill missing labels via closure constraints. For each axis,
+    if exactly one edge in either direction is missing, solve for it
+    using the remaining sums. Returns count of solutions performed.
+    """
+    solved = 0
+    for axis in ("h", "v"):
+        pos_total = 0.0
+        neg_total = 0.0
+        pos_missing: list[dict] = []
+        neg_missing: list[dict] = []
+        for e in edges:
+            if e["axis"] != axis:
+                continue
+            if e["label"] is None:
+                if e["direction"] == 1:
+                    pos_missing.append(e)
+                else:
+                    neg_missing.append(e)
+            else:
+                if e["direction"] == 1:
+                    pos_total += e["label"]
+                else:
+                    neg_total += e["label"]
+        if len(pos_missing) == 1 and len(neg_missing) == 0:
+            pos_missing[0]["label"] = neg_total - pos_total
+            solved += 1
+        elif len(neg_missing) == 1 and len(pos_missing) == 0:
+            neg_missing[0]["label"] = pos_total - neg_total
+            solved += 1
+    return solved
+
+
+def _polygon_closure_repair(
+    edges: list[dict],
+    label_pool: set[float] | None = None,
+    tol: float = 0.6,
+    pool_match_tol: float = 0.1,
+) -> bool:
+    """Repair closure when it breaks by trying to drop each edge's
+    label one-at-a-time and solve for it via closure constraints.
+
+    Sonnet OCR may consistently mislabel a single edge across passes
+    (e.g. confidently assigning a wrong neighbour label to a small
+    edge). Closure repair: if either axis fails closure, try setting
+    each edge of that axis to None in turn, run the closure solver,
+    and accept the first repair that leaves both axes within ``tol``.
+
+    When ``label_pool`` is provided (set of values OCR'd anywhere on
+    the image across all passes), repaired values are required to be
+    within ``pool_match_tol`` of a pool value — this filters out
+    numerically-valid but structurally-wrong repairs that drift the
+    solved label outside the actual labels visible on the image.
+
+    Returns ``True`` when a successful repair was applied (mutating
+    ``edges`` in place), ``False`` otherwise (edges left unchanged).
+    """
+    h_diff, v_diff, ok = _polygon_closure_check(edges, tol)
+    if ok:
+        return True
+
+    def _solved_value_in_pool(value: float | None) -> bool:
+        if value is None or value <= 0 or value >= 1000:
+            return False
+        if not label_pool:
+            return True
+        return any(abs(value - p) <= pool_match_tol for p in label_pool)
+
+    repairs: list[tuple[float, dict, float | None]] = []
+    for repair_axis, axis_diff in (("h", h_diff), ("v", v_diff)):
+        if axis_diff <= tol:
+            continue
+        candidates = [e for e in edges if e["axis"] == repair_axis]
+        for candidate in candidates:
+            saved = candidate["label"]
+            candidate["label"] = None
+            _closure_solve_polygon_missing(edges)
+            _, _, ok2 = _polygon_closure_check(edges, tol)
+            solved = candidate["label"]
+            in_pool = _solved_value_in_pool(solved)
+            # Restore original immediately so iteration is independent.
+            candidate["label"] = saved
+            if ok2 and in_pool and solved is not None:
+                # Score = |saved - solved| (smaller = preferred); 0 if
+                # ``saved`` was None to begin with (free repair).
+                score = (
+                    abs(saved - solved) if saved is not None else 0.0
+                )
+                repairs.append((score, candidate, solved))
+    if not repairs:
+        return False
+    # Apply the lowest-score repair (closest swap to a pool label).
+    repairs.sort(key=lambda r: r[0])
+    _, best_candidate, best_solved = repairs[0]
+    best_candidate["label"] = best_solved
+    return True
+
+
+def _collect_polygon_label_pool(
+    ocr_dicts: list[dict],
+) -> set[float]:
+    """Aggregate every numeric label value the model emitted across
+    ``ocr_dicts``. Used as the candidate pool for closure repair.
+    """
+    pool: set[float] = set()
+    for od in ocr_dicts:
+        if not isinstance(od, dict):
+            continue
+        raw = od.get("edges")
+        if not isinstance(raw, list):
+            continue
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            label = entry.get("label")
+            if label is None:
+                continue
+            try:
+                pool.add(float(label))
+            except (TypeError, ValueError):
+                continue
+    return pool
+
+
+def _polygon_closure_check(
+    edges: list[dict], tol: float = 0.6,
+) -> tuple[float, float, bool]:
+    """Return ``(h_diff, v_diff, ok)``. ``ok`` requires both diffs
+    within tolerance (default 0.6 unit, suitable for half-integer
+    labels with rounding)."""
+    h_pos = sum(
+        e["label"] for e in edges
+        if e["axis"] == "h" and e["direction"] == 1 and e["label"] is not None
+    )
+    h_neg = sum(
+        e["label"] for e in edges
+        if e["axis"] == "h" and e["direction"] == -1 and e["label"] is not None
+    )
+    v_pos = sum(
+        e["label"] for e in edges
+        if e["axis"] == "v" and e["direction"] == 1 and e["label"] is not None
+    )
+    v_neg = sum(
+        e["label"] for e in edges
+        if e["axis"] == "v" and e["direction"] == -1 and e["label"] is not None
+    )
+    h_diff = abs(h_pos - h_neg)
+    v_diff = abs(v_pos - v_neg)
+    return h_diff, v_diff, h_diff <= tol and v_diff <= tol
+
+
+def _polygon_shoelace_area_unit_space(
+    edges: list[dict], tol: float = 0.6,
+) -> float | None:
+    """Walk the polygon in unit space (start at origin, step ±label
+    along each edge's axis). If the walk closes within ``tol``, return
+    abs(signed shoelace area). Otherwise ``None``.
+    """
+    if any(e["label"] is None for e in edges):
+        return None
+    x = 0.0
+    y = 0.0
+    vertices: list[tuple[float, float]] = [(x, y)]
+    for e in edges:
+        step = e["direction"] * e["label"]
+        if e["axis"] == "h":
+            x += step
+        else:
+            y += step
+        vertices.append((x, y))
+    final_x, final_y = vertices[-1]
+    if abs(final_x) > tol or abs(final_y) > tol:
+        return None
+    vertices = vertices[:-1]
+    n = len(vertices)
+    area2 = 0.0
+    for i in range(n):
+        x1, y1 = vertices[i]
+        x2, y2 = vertices[(i + 1) % n]
+        area2 += (x1 * y2) - (x2 * y1)
+    return abs(area2) / 2.0
+
+
+def _per_edge_majority_label(
+    edges_template: list[dict], ocr_dicts: list[dict],
+) -> list[dict]:
+    """Build one merged edge list whose ``label`` is the per-edge mode
+    across ``ocr_dicts``. Ties broken by lowest value. Empty / null
+    labels are not counted as votes; only edges with at least one
+    non-null OCR vote get a merged label, others stay None for the
+    closure solver.
+    """
+    edges = [{**e, "label": None} for e in edges_template]
+    if not ocr_dicts:
+        return edges
+    per_edge_votes: dict[int, list[float]] = {
+        e["idx"]: [] for e in edges_template
+    }
+    for od in ocr_dicts:
+        if not isinstance(od, dict):
+            continue
+        raw = od.get("edges")
+        if not isinstance(raw, list):
+            continue
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                idx = int(entry["idx"])
+                label = entry.get("label")
+                if label is None:
+                    continue
+                value = float(label)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if idx not in per_edge_votes:
+                continue
+            per_edge_votes[idx].append(value)
+    for e in edges:
+        votes = per_edge_votes.get(e["idx"], [])
+        if not votes:
+            e["label"] = None
+            continue
+        # Mode with stable tiebreak: count occurrences (rounded to 2
+        # decimals to fold tiny float drift), pick the most-voted; on
+        # tie keep the smallest value.
+        counts: dict[float, int] = {}
+        for v in votes:
+            key = round(v, 2)
+            counts[key] = counts.get(key, 0) + 1
+        max_count = max(counts.values())
+        candidates = sorted(
+            v for v, c in counts.items() if c == max_count
+        )
+        e["label"] = candidates[0]
+    return edges
+
+
+def _solve_orthogonal_polygon_via_opencv_hybrid(
+    question: str,
+    image_path: str,
+    *,
+    model: str = "claude-sonnet-4-6",
+    passes_count: int = 3,
+) -> tuple[str, dict]:
+    """Hybrid OpenCV + narrow Sonnet OCR + Python shoelace solver.
+
+    Generic for any orthogonal polygon area question with labelled
+    side lengths. OpenCV vertex extraction is run once (deterministic).
+    The narrow Sonnet OCR call is invoked ``passes_count`` times; per
+    edge the modal label across passes is taken (ties go to the
+    smallest value), so single-pass OCR mistakes are voted out by the
+    majority. Closure constraints fill any remaining missing labels.
+    The shoelace area is then computed deterministically in unit
+    space.
+
+    Falls back: on any pipeline failure (OpenCV missing, total OCR
+    failure, closure broken even after majority vote) returns "" so
+    the caller can fall through to the structured-JSON multipass.
+
+    Returns ``(answer, info)``; ``info`` carries audit fields for
+    evidence smoke output (stage, n_edges, per-pass OCR records,
+    final closure status, winning area).
+    """
+    info: dict = {"stage": "init"}
+    structure = _extract_orthogonal_polygon_structure(image_path)
+    if structure is None:
+        return "", {**info, "error": "opencv structure extraction fail"}
+    pixel_area, hue_name, edges_template = structure
+    info.update({
+        "stage": "ocr",
+        "polygon_pixel_area": pixel_area,
+        "polygon_hue": hue_name,
+        "n_edges": len(edges_template),
+    })
+    pass_records: list[dict] = []
+    ocr_dicts: list[dict] = []
+    for pass_idx in range(max(1, passes_count)):
+        ocr_dict = _call_sonnet_polygon_edge_ocr(
+            image_path, edges_template, model=model,
+        )
+        rec: dict = {"pass": pass_idx, "ok": ocr_dict is not None}
+        if ocr_dict is None:
+            rec["error"] = "sonnet ocr fail"
+        else:
+            ocr_dicts.append(ocr_dict)
+            # Tally per-edge OCR for audit only; merging happens after.
+            non_null = sum(
+                1 for entry in (ocr_dict.get("edges") or [])
+                if isinstance(entry, dict) and entry.get("label") is not None
+            )
+            rec["non_null_labels"] = non_null
+        pass_records.append(rec)
+    info["passes"] = pass_records
+    if not ocr_dicts:
+        info["stage"] = "exhausted"
+        info["error"] = "all OCR passes failed"
+        return "", info
+    # Per-edge majority vote
+    edges = _per_edge_majority_label(edges_template, ocr_dicts)
+    assigned = sum(1 for e in edges if e["label"] is not None)
+    info["labels_assigned"] = assigned
+    info["stage"] = "closure"
+    _closure_solve_polygon_missing(edges)
+    h_diff, v_diff, ok = _polygon_closure_check(edges)
+    if not ok:
+        # Try outlier-repair: drop each edge label one-at-a-time and
+        # closure-solve. Catches consistent OCR mistakes (e.g. Sonnet
+        # confidently mislabelling a small edge with a neighbour's
+        # value) that majority vote can't fix because the error is
+        # correlated across passes. Solved value must match a label
+        # actually OCR'd on the image (label_pool) to filter out
+        # numerically-valid but structurally-wrong repairs.
+        label_pool = _collect_polygon_label_pool(ocr_dicts)
+        info["label_pool"] = sorted(label_pool)
+        repaired = _polygon_closure_repair(edges, label_pool=label_pool)
+        info["closure_repaired"] = repaired
+        h_diff, v_diff, ok = _polygon_closure_check(edges)
+    info["closure_h_diff"] = h_diff
+    info["closure_v_diff"] = v_diff
+    info["closure_ok"] = ok
+    info["edges_with_labels"] = [
+        {"idx": e["idx"], "axis": e["axis"], "dir": e["direction"],
+         "len_px": e["length_px"], "label": e.get("label")}
+        for e in edges
+    ]
+    if not ok:
+        info["error"] = "closure broken after majority vote + repair"
+        return "", info
+    info["stage"] = "shoelace"
+    area_units = _polygon_shoelace_area_unit_space(edges)
+    if area_units is None:
+        info["error"] = "shoelace closure fail in walk"
+        return "", info
+    info["area_units"] = area_units
+    info["stage"] = "done"
+    return _format_polygon_area(area_units), info
+
+
+# ─────────────── Colour-coded numeric data hybrid solver ────────────────
+#
+# Same hybrid recipe as the orthogonal-polygon solver: deterministic
+# library (OpenCV) does the part the LLM is unreliable at (colour
+# segmentation in dense grids); narrow LLM call does only OCR on
+# already-segmented foreground; Python does deterministic arithmetic.
+# Generic for any "image with colour-tagged number lists, compute X"
+# question.
+#
+# The colour mask is parameterised by hue band, with auto-detection
+# from the question text (red / green / blue / yellow / cyan / orange /
+# purple). Multipass per-position majority vote within each colour
+# stabilises OCR; cross-colour ordering is not relied on (each colour's
+# list is extracted from its own isolated image).
+
+
+_COLOUR_HSV_RANGES: dict[
+    str, tuple[tuple[int, int, int], tuple[int, int, int]]
+    | tuple[
+        tuple[tuple[int, int, int], tuple[int, int, int]],
+        tuple[tuple[int, int, int], tuple[int, int, int]],
+    ],
+] = {
+    "red": (
+        ((0, 80, 80), (10, 255, 255)),
+        ((170, 80, 80), (180, 255, 255)),
+    ),
+    "green":   ((35, 80, 80), (85, 255, 255)),
+    "blue":    ((100, 80, 80), (130, 255, 255)),
+    "yellow":  ((20, 80, 80), (35, 255, 255)),
+    "cyan":    ((85, 80, 80), (100, 255, 255)),
+    "orange":  ((10, 80, 80), (20, 255, 255)),
+    "purple":  ((130, 80, 80), (165, 255, 255)),
+    "magenta": ((140, 80, 80), (170, 255, 255)),
+    "pink":    ((160, 50, 80), (180, 200, 255)),
+}
+
+
+def _isolate_image_colour(
+    image_path: str, colour: str,
+) -> bytes | None:
+    """Return PNG bytes of the image with only the named colour visible
+    (other pixels masked to black). ``None`` on failure (cv2/numpy
+    missing, image read fail, unknown colour)."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+    rng = _COLOUR_HSV_RANGES.get(colour.lower())
+    if rng is None:
+        return None
+    try:
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        if isinstance(rng[0], tuple) and isinstance(rng[0][0], int):
+            mask = cv2.inRange(
+                hsv, np.array(rng[0]), np.array(rng[1]),
+            )
+        else:
+            m1 = cv2.inRange(
+                hsv, np.array(rng[0][0]), np.array(rng[0][1]),
+            )
+            m2 = cv2.inRange(
+                hsv, np.array(rng[1][0]), np.array(rng[1][1]),
+            )
+            mask = cv2.bitwise_or(m1, m2)
+        out = np.zeros_like(img)
+        out[mask > 0] = img[mask > 0]
+        ok, buf = cv2.imencode(".png", out)
+        if not ok:
+            return None
+        return buf.tobytes()
+    except Exception:
+        return None
+
+
+_COLOUR_OCR_PROMPT = (
+    "[Number OCR — narrow task]\n\n"
+    "This image shows a number grid where ONLY one colour of numbers "
+    "is visible (the other content has been masked out to black). "
+    "Read every visible number in row-major order (left to right, "
+    "top to bottom).\n\n"
+    "Output EXACTLY this JSON, no prose, no markdown fence, JSON "
+    "only:\n"
+    "{\n"
+    "  \"numbers\": [<integer or decimal>, ...]\n"
+    "}\n\n"
+    "Rules:\n"
+    "  - Every visible number appears in the list, in row-major order.\n"
+    "  - Numbers that have been blacked out are NOT in the list.\n"
+    "  - Two adjacent numbers separated by a black gap are TWO "
+    "numbers (do NOT concatenate).\n"
+    "  - Output is consumed by deterministic Python; precision matters.\n"
+)
+
+
+def _call_sonnet_single_colour_list_ocr(
+    image_bytes: bytes, *, model: str = "claude-sonnet-4-6",
+) -> list[float] | None:
+    """One narrow Anthropic vision call on a colour-isolated image
+    asking for a JSON list of numbers in row-major order. Returns the
+    list (numbers as floats, integer-valued where possible) or None
+    on parse / API failure."""
+    try:
+        client = _get_anthropic()
+    except Exception:
+        return None
+    b64 = base64.b64encode(image_bytes).decode()
+    request_kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": 2000,
+        "timeout": 120.0,
+    }
+    if not _model_drops_temperature(model):
+        request_kwargs["temperature"] = 0.0
+    try:
+        resp = client.messages.create(
+            **request_kwargs,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/png",
+                        "data": b64,
+                    }},
+                    {"type": "text", "text": _COLOUR_OCR_PROMPT},
+                ],
+            }],
+        )
+    except Exception:
+        return None
+    raw = resp.content[0].text if resp.content else ""
+    obj_str = _extract_json_object(raw)
+    if obj_str is None:
+        return None
+    try:
+        d = json.loads(obj_str)
+    except json.JSONDecodeError:
+        return None
+    nums = d.get("numbers")
+    if not isinstance(nums, list):
+        return None
+    out: list[float] = []
+    for v in nums:
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            return None
+    return out
+
+
+def _per_position_majority_numbers(
+    passes: list[list[float]],
+) -> list[float] | None:
+    """Combine N passes of OCR'd number lists into one list via modal
+    length + per-position mode (tiebreak smallest). Returns None when
+    no modal length found.
+    """
+    if not passes:
+        return None
+    len_counts: dict[int, int] = {}
+    for p in passes:
+        len_counts[len(p)] = len_counts.get(len(p), 0) + 1
+    modal_len = max(
+        len_counts.items(), key=lambda kv: (kv[1], kv[0]),
+    )[0]
+    eligible = [p for p in passes if len(p) == modal_len]
+    if not eligible:
+        return None
+    merged: list[float] = []
+    for i in range(modal_len):
+        votes: dict[float, int] = {}
+        for p in eligible:
+            v = p[i]
+            votes[v] = votes.get(v, 0) + 1
+        if not votes:
+            return None
+        best = max(votes.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+        merged.append(best)
+    return merged
+
+
+def _detect_colours_in_question(question: str) -> list[str]:
+    """Return the list of colour names mentioned in the question, in
+    order of first occurrence, deduplicated."""
+    seen: list[str] = []
+    for m in _COLOUR_NAME_RE.findall(question):
+        c = m.lower()
+        if c in _COLOUR_HSV_RANGES and c not in seen:
+            seen.append(c)
+    return seen
+
+
+def _solve_colour_coded_numeric_via_hybrid(
+    question: str,
+    image_path: str,
+    *,
+    model: str = "claude-sonnet-4-6",
+    passes_count: int = 3,
+) -> tuple[str, dict]:
+    """Hybrid OpenCV colour-isolation + narrow Sonnet OCR + Sonnet
+    arithmetic-from-clean-data solver.
+
+    Steps:
+      1. Detect colour names in the question (≥2 required).
+      2. For each colour, mask the image with HSV → black-out everything
+         else → run N narrow-OCR passes → per-position majority.
+      3. Build a clean text-only follow-up prompt: original question +
+         the extracted lists labelled by colour. Ask Sonnet for
+         FINAL ANSWER on this text-only payload (no vision burden,
+         arithmetic-only). Sonnet uses its own internal calculator /
+         python understanding to compute the answer specified by the
+         question (mean / pstdev / stdev / sum / etc.).
+
+    Returns ``(answer, info)`` where ``answer`` is "" on any pipeline
+    failure (caller can fall through to legacy multipass / local Gemma).
+    """
+    info: dict = {"stage": "init"}
+    colours = _detect_colours_in_question(question)
+    if len(colours) < 2:
+        return "", {**info, "error": "fewer than 2 colour names detected"}
+    info["colours"] = colours
+    info["stage"] = "ocr"
+    extracted: dict[str, list[float]] = {}
+    per_colour_records: dict[str, dict] = {}
+    for colour in colours:
+        img_bytes = _isolate_image_colour(image_path, colour)
+        rec: dict = {"colour": colour}
+        if img_bytes is None:
+            rec["error"] = "isolate fail (cv2/numpy missing or read fail)"
+            per_colour_records[colour] = rec
+            return "", {
+                **info, "per_colour": per_colour_records,
+                "error": f"isolate fail for {colour}",
+            }
+        passes: list[list[float]] = []
+        for _ in range(max(1, passes_count)):
+            nums = _call_sonnet_single_colour_list_ocr(
+                img_bytes, model=model,
+            )
+            if nums is not None:
+                passes.append(nums)
+        rec["passes_n"] = len(passes)
+        if not passes:
+            rec["error"] = "all OCR passes failed"
+            per_colour_records[colour] = rec
+            return "", {
+                **info, "per_colour": per_colour_records,
+                "error": f"all OCR fail for {colour}",
+            }
+        merged = _per_position_majority_numbers(passes)
+        if merged is None:
+            rec["error"] = "per-position merge fail"
+            per_colour_records[colour] = rec
+            return "", {
+                **info, "per_colour": per_colour_records,
+                "error": f"merge fail for {colour}",
+            }
+        extracted[colour] = merged
+        rec["count"] = len(merged)
+        per_colour_records[colour] = rec
+    info["per_colour"] = per_colour_records
+    info["extracted"] = {k: list(v) for k, v in extracted.items()}
+    info["stage"] = "compute"
+    # Hybrid compute: Sonnet outputs a STRUCTURED OPERATION PLAN
+    # (parse-from-question is Sonnet's strength); Python executes the
+    # plan via the statistics module (deterministic-arithmetic is
+    # Python's strength). This split avoids Sonnet's mid-precision
+    # arithmetic drift on tasks like pstdev / stdev which compound
+    # rounding errors across N inputs.
+    answer, plan_info = _compute_via_statistics_plan(
+        question, extracted, model=model,
+    )
+    info.update(plan_info)
+    if not answer:
+        return "", info
+    info["stage"] = "done"
+    return answer, info
+
+
+_STATS_PLAN_PROMPT = (
+    "[Statistics operation planner — narrow task]\n\n"
+    "Given the question below and clean numeric data lists already "
+    "extracted from the image, output a JSON operation plan that "
+    "Python will execute against the data using the ``statistics`` "
+    "module (Python 3.11+).\n\n"
+    "Output EXACTLY this JSON, no prose, no markdown fence, JSON "
+    "only:\n"
+    "{\n"
+    "  \"intermediate\": [\n"
+    "    {\"name\": \"<id>\", \"fn\": \"<statistics fn name>\", "
+    "\"input\": \"<colour list name>\"}\n"
+    "  ],\n"
+    "  \"final\": {\"fn\": \"<statistics fn name>\", "
+    "\"input\": [\"<intermediate id>\", ...]},\n"
+    "  \"round_decimals\": <int N or null>\n"
+    "}\n\n"
+    "Rules:\n"
+    "  - ``fn`` must be one of: ``pstdev``, ``stdev``, ``pvariance``, "
+    "``variance``, ``mean``, ``median``, ``mode``, ``geometric_mean``, "
+    "``harmonic_mean``, ``fmean``.\n"
+    "  - The keyword \"standard population deviation\" → ``pstdev``; "
+    "\"standard sample deviation\" or just \"standard deviation\" → "
+    "``stdev``.\n"
+    "  - The keyword \"average\" / \"mean\" → ``mean``.\n"
+    "  - ``intermediate`` may be empty if the final operation is "
+    "computed directly on a colour list.\n"
+    "  - ``round_decimals`` is the number from the question's "
+    "rounding instruction (e.g. \"rounded to the nearest three "
+    "decimal points\" → 3); ``null`` if no rounding requested.\n"
+    "  - The output is consumed by deterministic Python; precision "
+    "matters.\n"
+)
+
+
+_STATS_FN_WHITELIST = {
+    "pstdev", "stdev", "pvariance", "variance",
+    "mean", "median", "mode",
+    "geometric_mean", "harmonic_mean", "fmean",
+}
+
+
+def _execute_statistics_plan(
+    plan: dict, data: dict[str, list[float]],
+) -> tuple[str, dict]:
+    """Run a parsed operation plan against the extracted data lists.
+
+    Returns ``(formatted_answer, info)``. ``info`` carries intermediate
+    values for audit. Empty answer string on validation failure or
+    statistics module error.
+    """
+    import statistics as _stats
+    info: dict = {"plan": plan}
+    if not isinstance(plan, dict):
+        return "", {**info, "error": "plan not a dict"}
+    intermediate = plan.get("intermediate") or []
+    if not isinstance(intermediate, list):
+        return "", {**info, "error": "intermediate not a list"}
+    intermediates: dict[str, float] = {}
+    for entry in intermediate:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        fn = entry.get("fn")
+        inp = entry.get("input")
+        if not name or fn not in _STATS_FN_WHITELIST:
+            return "", {
+                **info, "error": f"invalid intermediate entry: {entry}",
+            }
+        if inp not in data:
+            return "", {
+                **info,
+                "error": f"intermediate input {inp!r} not in extracted data",
+            }
+        fn_obj = getattr(_stats, fn, None)
+        if fn_obj is None:
+            return "", {**info, "error": f"unknown fn {fn}"}
+        try:
+            intermediates[name] = float(fn_obj(data[inp]))
+        except Exception as err:
+            return "", {**info, "error": f"intermediate {name} {fn}: {err}"}
+    final = plan.get("final")
+    if not isinstance(final, dict):
+        return "", {**info, "error": "final not a dict"}
+    final_fn = final.get("fn")
+    final_inp = final.get("input")
+    if final_fn not in _STATS_FN_WHITELIST:
+        return "", {**info, "error": f"invalid final fn {final_fn}"}
+    fn_obj = getattr(_stats, final_fn, None)
+    if fn_obj is None:
+        return "", {**info, "error": f"unknown final fn {final_fn}"}
+    if isinstance(final_inp, str):
+        # Final operates on a colour list directly OR on a single intermediate
+        if final_inp in data:
+            final_input = data[final_inp]
+        elif final_inp in intermediates:
+            final_input = [intermediates[final_inp]]
+        else:
+            return "", {
+                **info, "error": f"final input {final_inp!r} not found",
+            }
+    elif isinstance(final_inp, list):
+        # Final operates on list of intermediate ids OR colour names
+        final_input = []
+        for ref in final_inp:
+            if ref in intermediates:
+                final_input.append(intermediates[ref])
+            elif ref in data:
+                # Take all of data[ref]? Ambiguous — assume scalar
+                # already computed. Skip ambiguous input.
+                return "", {
+                    **info,
+                    "error": f"final input list contains raw colour {ref}",
+                }
+            else:
+                return "", {**info, "error": f"final input id {ref!r}"}
+    else:
+        return "", {**info, "error": "final input neither str nor list"}
+    try:
+        result = float(fn_obj(final_input))
+    except Exception as err:
+        return "", {**info, "error": f"final {final_fn}: {err}"}
+    info["intermediates"] = intermediates
+    info["raw_result"] = result
+    decimals = plan.get("round_decimals")
+    if isinstance(decimals, int) and 0 <= decimals <= 12:
+        rounded = round(result, decimals)
+        # Format with explicit decimal count
+        formatted = f"{rounded:.{decimals}f}"
+    else:
+        # Default: integer if whole, else 3-decimal default
+        if result == int(result):
+            formatted = str(int(result))
+        else:
+            formatted = f"{result:.3f}"
+    info["formatted"] = formatted
+    return formatted, info
+
+
+def _compute_via_statistics_plan(
+    question: str, data: dict[str, list[float]],
+    *, model: str = "claude-sonnet-4-6",
+) -> tuple[str, dict]:
+    """Ask Sonnet for an operation plan JSON, then execute via Python
+    ``statistics`` module deterministically. Returns
+    ``(answer, info)``. Empty answer on plan parse / execute failure.
+    """
+    info: dict = {"compute_step": "plan_request"}
+    try:
+        client = _get_anthropic()
+    except Exception:
+        return "", {**info, "error": "anthropic client init fail"}
+    data_lines = []
+    for colour, lst in data.items():
+        rendered = [int(x) if x == int(x) else x for x in lst]
+        data_lines.append(f"  {colour} = {rendered}")
+    plan_prompt = (
+        f"{_STATS_PLAN_PROMPT}\n"
+        f"Question: {question}\n\n"
+        "Extracted data lists:\n"
+        + "\n".join(data_lines)
+    )
+    request_kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": 1500,
+        "timeout": 120.0,
+    }
+    if not _model_drops_temperature(model):
+        request_kwargs["temperature"] = 0.0
+    try:
+        resp = client.messages.create(
+            **request_kwargs,
+            messages=[{
+                "role": "user",
+                "content": [{"type": "text", "text": plan_prompt}],
+            }],
+        )
+    except Exception as err:
+        return "", {**info, "error": f"plan call: {err}"}
+    raw = resp.content[0].text if resp.content else ""
+    info["plan_raw_excerpt"] = raw[:600]
+    obj_str = _extract_json_object(raw)
+    if obj_str is None:
+        return "", {**info, "error": "plan json parse fail"}
+    try:
+        plan = json.loads(obj_str)
+    except json.JSONDecodeError as je:
+        return "", {**info, "error": f"plan json decode: {je}"}
+    info["compute_step"] = "plan_executed"
+    answer, exec_info = _execute_statistics_plan(plan, data)
+    info.update(exec_info)
+    return answer, info
+
+
+# ── Image-quiz scoring (cont'd¹³) ──────────────────────────────────────
+# Hybrid pipeline for image questions of the form "scored as follows: …
+# Problems that ask the student to <type-A>: N₁ points / <type-B>: N₂
+# points … +M bonus points. How many points would the student have
+# earned?". Sonnet narrowed to OCR + classification (its strong sub-
+# spec — read fractions, copy student answer string, classify problem
+# type by keywords). Python computes correctness deterministically
+# via ``fractions.Fraction`` (avoids the v1-prototype anti-pattern of
+# Sonnet visually accepting the student's answer without re-doing the
+# math, which masked sign errors and arithmetic slips at problems 3
+# and 6 of cca70ce6). Final scoring sum runs through the new
+# ``concinno.tools.builtin.compute.execute_arithmetic_plan`` shipped
+# in cont'd¹² so the agent dogfoods its own structured-compute Skill.
+#
+# Anti-leakage: detector reads only structural tokens ("scored as
+# follows" + ≥2 ``N points`` clauses), and the prompt names only the
+# four fraction-quiz problem categories, no answer literals.
+
+_QUIZ_SCORE_RULE_RE = re.compile(
+    r"([Pp]roblem[^:\n]*?):\s*(\d+)\s+points?",
+)
+_QUIZ_BONUS_RE = re.compile(r"(\d+)\s+bonus\s+points?", re.I)
+_QUIZ_SCORED_AS_FOLLOWS_RE = re.compile(r"scored\s+as\s+follows", re.I)
+
+
+_QUIZ_TYPE_TAGS = (
+    "add_subtract_fractions",
+    "multiply_divide_fractions",
+    "form_improper_fraction",
+    "form_mixed_number",
+)
+
+
+def _classify_quiz_rule_phrase(phrase: str) -> str | None:
+    """Map a scoring-rule phrase ("Problems that ask the student to
+    multiply or divide fractions") to one of :data:`_QUIZ_TYPE_TAGS`,
+    or ``None`` if nothing matches.
+
+    Anti-leakage: keyword-based classifier reads only the rule text
+    fragments the user already supplied in the question — no answer
+    literal, no entity-specific token.
+    """
+    p = phrase.lower()
+    if "improper" in p:
+        return "form_improper_fraction"
+    if "mixed" in p:
+        return "form_mixed_number"
+    if any(k in p for k in ("multipl", "divid")):
+        return "multiply_divide_fractions"
+    if any(k in p for k in ("add", "subtract", "sum", "differ")):
+        return "add_subtract_fractions"
+    return None
+
+
+def _parse_quiz_scoring_rules(question: str) -> tuple[dict[str, int], int]:
+    """Extract the per-type point map + bonus from the question.
+
+    Returns ``(type_points, bonus)``. Empty dict + 0 bonus when no
+    parseable rules are found.
+    """
+    type_points: dict[str, int] = {}
+    for phrase, pts in _QUIZ_SCORE_RULE_RE.findall(question):
+        try:
+            n = int(pts)
+        except ValueError:
+            continue
+        tag = _classify_quiz_rule_phrase(phrase)
+        if tag and tag not in type_points:
+            type_points[tag] = n
+    bonus = 0
+    bm = _QUIZ_BONUS_RE.search(question)
+    if bm:
+        try:
+            bonus = int(bm.group(1))
+        except ValueError:
+            bonus = 0
+    return type_points, bonus
+
+
+def _is_image_quiz_scoring_question(
+    question: str, file_path: str | None,
+) -> bool:
+    """Return True when the question asks the agent to grade a quiz
+    in an attached image given a per-type scoring rule.
+
+    Conditions:
+      1. ``file_path`` is a non-empty string ending in an image
+         extension (caller already routed via vision path; this guards
+         against text-only questions).
+      2. Question text either explicitly says ``scored as follows`` OR
+         contains ≥2 ``N points`` rule clauses with at least one
+         classifiable problem-type phrase.
+
+    Anti-leakage: detector reads only structural tokens, no answer
+    literals or task-specific entity names.
+    """
+    if not question:
+        return False
+    if not file_path:
+        return False
+    if not str(file_path).lower().endswith(
+        (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"),
+    ):
+        return False
+    rules, _ = _parse_quiz_scoring_rules(question)
+    if _QUIZ_SCORED_AS_FOLLOWS_RE.search(question) and rules:
+        return True
+    return len(rules) >= 2
+
+
+_QUIZ_OCR_PROMPT = (
+    "[Image-quiz OCR — narrow extraction]\n\n"
+    "This image is a graded quiz with numbered problems. For EACH "
+    "numbered problem visible in the image, output one entry in a JSON "
+    "array. You are the OCR + classifier layer ONLY — Python "
+    "downstream computes correctness, do NOT judge correctness.\n\n"
+    "For each problem, output:\n"
+    "  - idx: 1-based problem number visible in image\n"
+    "  - problem_type: pick exactly one of:\n"
+    "    * \"add_subtract_fractions\"  — two fractions joined by + or - "
+    "(e.g. a/b + c/d  or  a/b - c/d)\n"
+    "    * \"multiply_divide_fractions\"  — two fractions joined by × or ÷ "
+    "(e.g. a/b × c/d  or  a/b ÷ c/d)\n"
+    "    * \"form_improper_fraction\"  — phrasing 'turn X y/z into an "
+    "improper fraction' (input is a MIXED number, output should be "
+    "improper)\n"
+    "    * \"form_mixed_number\"  — phrasing 'turn p/q into a mixed "
+    "number' (input is an IMPROPER fraction, output should be mixed)\n"
+    "  - For ARITHMETIC types (add_subtract / multiply_divide) "
+    "additionally output:\n"
+    "    * operands: list of TWO strings, each a fraction in 'a/b' form, "
+    "exactly as written in the image (preserve sign)\n"
+    "    * operator: one of \"+\", \"-\", \"*\", \"/\"  (use * for ×, / for ÷)\n"
+    "  - For CONVERSION types (form_improper / form_mixed) additionally "
+    "output:\n"
+    "    * input_value: the value being converted, exactly as written in "
+    "the image. Mixed-number form is 'W n/d' (whole space "
+    "numerator-slash-denominator). Improper form is 'a/b'.\n"
+    "  - student_answer: a string copied EXACTLY from the answer field "
+    "as shown in the image. Preserve sign, spaces, and slash. Mixed-"
+    "number form 'W n/d' or improper 'a/b'.\n\n"
+    "Output EXACTLY this JSON shape, no prose, no markdown fence:\n"
+    "{\n"
+    "  \"problems\": [\n"
+    "    {\"idx\": <int>, \"problem_type\": \"<...>\", "
+    "\"operands\": [\"a/b\", \"c/d\"], \"operator\": \"+\", "
+    "\"input_value\": null, \"student_answer\": \"<string>\"}\n"
+    "  ]\n"
+    "}\n\n"
+    "For fields not applicable to a problem type, use null.\n"
+    "Output is consumed by deterministic Python; OCR precision matters."
+)
+
+
+def _call_sonnet_quiz_extract(
+    image_bytes: bytes, model: str = "claude-sonnet-4-6",
+) -> list[dict] | None:
+    """Send the quiz image to Sonnet, parse JSON, return the per-
+    problem OCR rows or ``None`` on parse failure."""
+    try:
+        client = _get_anthropic()
+    except Exception:
+        return None
+    b64 = base64.b64encode(image_bytes).decode()
+    request_kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": 2000,
+        "timeout": 120.0,
+    }
+    if not _model_drops_temperature(model):
+        request_kwargs["temperature"] = 0.0
+    try:
+        resp = client.messages.create(
+            **request_kwargs,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64", "media_type": "image/png",
+                        "data": b64,
+                    }},
+                    {"type": "text", "text": _QUIZ_OCR_PROMPT},
+                ],
+            }],
+        )
+    except Exception:
+        return None
+    raw = resp.content[0].text if resp.content else ""
+    obj_str = _extract_json_object(raw)
+    if not obj_str:
+        return None
+    try:
+        d = json.loads(obj_str)
+    except json.JSONDecodeError:
+        return None
+    probs = d.get("problems")
+    if not isinstance(probs, list):
+        return None
+    out: list[dict] = []
+    for p in probs:
+        if not isinstance(p, dict):
+            continue
+        idx = p.get("idx")
+        ptype = p.get("problem_type")
+        if not isinstance(idx, int) or not isinstance(ptype, str):
+            continue
+        out.append({
+            "idx": idx,
+            "problem_type": ptype,
+            "operands": p.get("operands"),
+            "operator": p.get("operator"),
+            "input_value": p.get("input_value"),
+            "student_answer": p.get("student_answer"),
+        })
+    return out or None
+
+
+def _per_problem_majority_vote_quiz(
+    passes: list[list[dict]],
+) -> list[dict]:
+    """Aggregate N OCR passes by problem ``idx`` → modal full-row tuple.
+    Robust to one or two passes hallucinating a wrong field; majority
+    over (type, operands, operator, input_value, student_answer)."""
+    from collections import Counter as _Counter
+    by_idx: dict[int, list[tuple]] = {}
+    for p in passes:
+        for entry in p:
+            key = (
+                entry["problem_type"],
+                tuple(entry.get("operands") or ()),
+                entry.get("operator"),
+                entry.get("input_value"),
+                entry.get("student_answer"),
+            )
+            by_idx.setdefault(entry["idx"], []).append(key)
+    voted: list[dict] = []
+    for idx in sorted(by_idx):
+        c = _Counter(by_idx[idx])
+        key, _ = c.most_common(1)[0]
+        ptype, ops, oper, inp, sans = key
+        voted.append({
+            "idx": idx,
+            "problem_type": ptype,
+            "operands": list(ops) if ops else None,
+            "operator": oper,
+            "input_value": inp,
+            "student_answer": sans,
+        })
+    return voted
+
+
+_QUIZ_MIXED_RE = re.compile(r"^\s*(-?\d+)\s+(\d+)\s*/\s*(\d+)\s*$")
+
+
+def _parse_simple_fraction_str(s: str | None):
+    """Parse 'a/b' or '-a/b' or pure integer string → ``Fraction``.
+    Raises :class:`ValueError` on unparseable input."""
+    from fractions import Fraction as _F
+    s = (s or "").strip().replace(" ", "")
+    if not s:
+        raise ValueError("empty fraction")
+    if "/" in s:
+        a, b = s.split("/", 1)
+        return _F(int(a), int(b))
+    return _F(int(s))
+
+
+def _parse_mixed_or_improper_str(s: str | None):
+    """Parse mixed 'W n/d' OR improper 'a/b' OR integer → ``Fraction``."""
+    from fractions import Fraction as _F
+    s = (s or "").strip()
+    if not s:
+        raise ValueError("empty")
+    m = _QUIZ_MIXED_RE.match(s)
+    if m:
+        whole = int(m.group(1))
+        num = int(m.group(2))
+        den = int(m.group(3))
+        sign = -1 if whole < 0 else 1
+        mag = abs(whole) + _F(num, den)
+        return sign * mag
+    return _parse_simple_fraction_str(s)
+
+
+def _judge_quiz_problem_correct(entry: dict) -> bool | None:
+    """Determine whether the student's answer is correct given the
+    OCR-extracted problem fields. Deterministic via ``fractions``.
+    Returns ``True``/``False``/``None`` (None = unparseable; caller
+    treats as wrong for safety)."""
+    ptype = entry.get("problem_type")
+    student = entry.get("student_answer")
+    if not student:
+        return None
+    try:
+        if ptype == "add_subtract_fractions":
+            ops = entry.get("operands") or []
+            oper = entry.get("operator")
+            if len(ops) != 2 or oper not in ("+", "-"):
+                return None
+            a = _parse_simple_fraction_str(ops[0])
+            b = _parse_simple_fraction_str(ops[1])
+            correct = a + b if oper == "+" else a - b
+            return correct == _parse_simple_fraction_str(student)
+        if ptype == "multiply_divide_fractions":
+            ops = entry.get("operands") or []
+            oper = entry.get("operator")
+            if len(ops) != 2 or oper not in ("*", "/"):
+                return None
+            a = _parse_simple_fraction_str(ops[0])
+            b = _parse_simple_fraction_str(ops[1])
+            if oper == "/" and b == 0:
+                return None
+            correct = a * b if oper == "*" else a / b
+            return correct == _parse_simple_fraction_str(student)
+        if ptype == "form_improper_fraction":
+            inp = entry.get("input_value")
+            if not inp:
+                return None
+            return (
+                _parse_mixed_or_improper_str(inp)
+                == _parse_simple_fraction_str(student)
+            )
+        if ptype == "form_mixed_number":
+            inp = entry.get("input_value")
+            if not inp:
+                return None
+            return (
+                _parse_simple_fraction_str(inp)
+                == _parse_mixed_or_improper_str(student)
+            )
+    except (ValueError, ZeroDivisionError):
+        return None
+    return None
+
+
+def _compute_quiz_via_arithmetic_plan(
+    voted: list[dict], type_points: dict[str, int], bonus: int,
+) -> tuple[str, dict]:
+    """Map voted problems → awarded points list → sum + bonus via
+    :func:`concinno.tools.builtin.compute.execute_arithmetic_plan`.
+    Returns ``(formatted_answer, info)``."""
+    try:
+        from concinno.tools.builtin.compute import (
+            ComputePlanError,
+            execute_arithmetic_plan,
+        )
+    except Exception as err:
+        return "", {"error": f"compute import: {err}"}
+    awarded = [
+        type_points.get(p["problem_type"], 0)
+        if p.get("student_correct")
+        else 0
+        for p in voted
+    ]
+    plan = {
+        "steps": [
+            {
+                "name": "subtotal",
+                "op": "sum_list",
+                "args": ["awarded_points"],
+            },
+            {
+                "name": "total",
+                "op": "add",
+                "args": ["subtotal", float(bonus)],
+            },
+        ],
+        "final": "total",
+        "round_decimals": 0,
+    }
+    try:
+        result = execute_arithmetic_plan(
+            plan, {"awarded_points": awarded},
+        )
+    except ComputePlanError as err:
+        return "", {
+            "error": f"arithmetic_plan: {err}",
+            "awarded_points": awarded,
+        }
+    info = {
+        "awarded_points": awarded,
+        "bonus": bonus,
+        "raw_result": result.get("raw_result"),
+        "plan": plan,
+    }
+    return result.get("answer", ""), info
+
+
+def _solve_image_quiz_scoring_via_hybrid(
+    question: str,
+    image_path: str,
+    *,
+    model: str = "claude-sonnet-4-6",
+    passes_count: int = 3,
+) -> tuple[str, dict]:
+    """Hybrid OCR + classifier (Sonnet) + deterministic correctness +
+    arithmetic-plan compute (Python) solver for image-quiz scoring
+    questions. Returns ``(answer, info)``; empty answer on any
+    pipeline failure (caller falls through to legacy)."""
+    info: dict = {"stage": "init"}
+    type_points, bonus = _parse_quiz_scoring_rules(question)
+    if not type_points:
+        return "", {**info, "error": "no scoring rules parsed"}
+    info["type_points"] = type_points
+    info["bonus"] = bonus
+
+    info["stage"] = "ocr"
+    try:
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+    except Exception as err:
+        return "", {**info, "error": f"image read: {err}"}
+    passes: list[list[dict]] = []
+    for _ in range(max(1, passes_count)):
+        rows = _call_sonnet_quiz_extract(image_bytes, model=model)
+        if rows:
+            passes.append(rows)
+    info["passes_n"] = len(passes)
+    if not passes:
+        return "", {**info, "error": "all OCR passes failed"}
+
+    voted = _per_problem_majority_vote_quiz(passes)
+    if not voted:
+        return "", {**info, "error": "majority vote produced empty list"}
+    for v in voted:
+        v["student_correct"] = bool(_judge_quiz_problem_correct(v))
+    info["voted"] = voted
+    info["n_problems"] = len(voted)
+    info["n_correct"] = sum(1 for v in voted if v["student_correct"])
+
+    info["stage"] = "compute"
+    answer, compute_info = _compute_quiz_via_arithmetic_plan(
+        voted, type_points, bonus,
+    )
+    info.update(compute_info)
+    if not answer:
+        return "", info
+    info["stage"] = "done"
+    return answer, info
+
+
 def _solve_vision_local(question: str, image_path: str) -> str:
     """Solve a vision question with the local Qwen2.5-VL (or fallback
     open-source multimodal) model. CPU path, ~5-20s/image.
@@ -2200,15 +3793,148 @@ def _solve_vision_local(question: str, image_path: str) -> str:
     ``gaia_polygon_area_procedure_anchor`` feature toggles registered
     in :mod:`concinno.feature_config`.
     """
+    # ── Image-quiz scoring: Sonnet OCR + Python Fraction + arithmetic_plan ──
+    # Hybrid pipeline for image questions of the form "scored as
+    # follows: <type-A>: N₁ points / <type-B>: N₂ points … +M bonus
+    # points. How many points would the student have earned?". Sonnet
+    # is narrowed to OCR + classification (reads each problem's
+    # operands, operator, student answer, picks one of 4 type tags).
+    # Python computes correctness deterministically via
+    # ``fractions.Fraction`` (avoids the v1-prototype anti-pattern of
+    # Sonnet visually accepting a wrong student answer). Final score
+    # sum runs through the new
+    # ``concinno.tools.builtin.compute.execute_arithmetic_plan`` so the
+    # agent dogfoods its own structured-compute Skill.
+    if (
+        _is_image_quiz_scoring_question(question, image_path)
+        and _feature_enabled("gaia_quiz_scoring_hybrid")
+    ):
+        passes_count, model = _multipass_params(
+            "gaia_quiz_scoring_hybrid",
+        )
+        print(
+            "  [quiz-scoring hybrid] "
+            f"model={model} passes={passes_count} for "
+            f"{question[:60]!r}",
+            flush=True,
+        )
+        voted, info = _solve_image_quiz_scoring_via_hybrid(
+            question, image_path,
+            model=model, passes_count=passes_count,
+        )
+        if voted:
+            print(
+                f"  [quiz-scoring hybrid] answer={voted!r} "
+                f"n_problems={info.get('n_problems')} "
+                f"n_correct={info.get('n_correct')} "
+                f"awarded={info.get('awarded_points')}",
+                flush=True,
+            )
+            return voted
+        print(
+            "  [quiz-scoring hybrid empty — falling through] "
+            f"stage={info.get('stage')} error={info.get('error')!r}",
+            flush=True,
+        )
+
+    # ── Colour-coded numeric data: OpenCV colour-isolate + narrow OCR ──
+    # Hybrid pipeline for image questions where the agent must compute a
+    # statistic / arithmetic operation over numbers that are colour-coded
+    # in the image (e.g. "average of pstdev of red numbers and stdev of
+    # green numbers"). OpenCV masks each colour separately so OCR is
+    # done on a single-colour-only image (Sonnet's vision is reliable
+    # at single-colour OCR but unreliable at colour discrimination on
+    # dense grids). Per-colour multipass + per-position majority vote.
+    # Sonnet then computes the answer from the clean text-only data
+    # (no vision burden) per the question's specified operation.
+    if (
+        _is_colour_coded_numeric_data_question(question)
+        and _feature_enabled("gaia_colour_coded_numeric_hybrid")
+    ):
+        passes_count, model = _multipass_params(
+            "gaia_colour_coded_numeric_hybrid",
+        )
+        print(
+            "  [colour-coded-numeric hybrid] "
+            f"model={model} passes={passes_count} for "
+            f"{question[:60]!r}",
+            flush=True,
+        )
+        voted, info = _solve_colour_coded_numeric_via_hybrid(
+            question, image_path,
+            model=model, passes_count=passes_count,
+        )
+        if voted:
+            print(
+                f"  [colour-coded-numeric] answer={voted!r} "
+                f"colours={info.get('colours')}",
+                flush=True,
+            )
+            return voted
+        print(
+            "  [colour-coded-numeric empty — falling through] "
+            f"stage={info.get('stage')} error={info.get('error')!r}",
+            flush=True,
+        )
+
+    # ── Polygon-area: OpenCV + narrow Sonnet OCR + Python shoelace ──
+    # Highest-priority path for orthogonal polygon area questions.
+    # OpenCV extracts polygon vertices in pixel coords (ground truth
+    # the LLM cannot fabricate). Anthropic vision call is narrowed to
+    # OCR + spatial matching — assigning visible numeric labels to
+    # each edge by index. Python walks the polygon in unit space and
+    # computes the area via shoelace formula. Closure is anchored
+    # against the OpenCV-supplied vertex structure, escaping the
+    # "closure-valid != structural-truth" failure mode of the free-
+    # form structured-JSON multipass below.
+    if (
+        _is_orthogonal_polygon_area_question(question)
+        and _feature_enabled("gaia_polygon_opencv_hybrid")
+    ):
+        passes_count, model = _multipass_params(
+            "gaia_polygon_opencv_hybrid",
+        )
+        upscale_path = (
+            _upscale_image_if_small(image_path)
+            if _feature_enabled("image_upscale_4x")
+            else image_path
+        )
+        print(
+            "  [polygon-area opencv-hybrid] "
+            f"model={model} passes={passes_count} for "
+            f"{question[:60]!r}",
+            flush=True,
+        )
+        voted, info = _solve_orthogonal_polygon_via_opencv_hybrid(
+            question, upscale_path,
+            model=model, passes_count=passes_count,
+        )
+        if voted:
+            print(
+                "  [polygon-opencv-hybrid] "
+                f"answer={voted!r} stage={info.get('stage')} "
+                f"labels_assigned={info.get('labels_assigned')}/"
+                f"{info.get('n_edges')} closure_ok="
+                f"{info.get('closure_ok')}",
+                flush=True,
+            )
+            return voted
+        print(
+            "  [polygon-opencv-hybrid empty — falling through] "
+            f"stage={info.get('stage')} error={info.get('error')!r}",
+            flush=True,
+        )
+
     # ── Polygon-area: structured-JSON multipass (closure-validated) ──
-    # First-class path. Asks the vision model for a strict JSON object
-    # carrying the rectangle decomposition + per-direction edge sums and
-    # has Python (a) verify horizontal/vertical closure and (b) re-derive
-    # the area from rectangles, dropping passes whose decomposition fails
-    # closure or whose self-claimed area disagrees with the rectangle
-    # sum. Generic for any orthogonal polygon area question — no task-
-    # specific keywords, no expected-answer reading. On total validation
-    # failure falls through to the legacy free-form multipass below.
+    # Fallback when the OpenCV hybrid pipeline fails (no OpenCV install,
+    # contour extraction fails, OCR JSON parse fails, closure broken,
+    # etc.). Asks the vision model for a strict JSON object carrying
+    # the rectangle decomposition + per-direction edge sums and has
+    # Python (a) verify horizontal/vertical closure and (b) re-derive
+    # the area from rectangles, dropping passes whose decomposition
+    # fails closure or whose self-claimed area disagrees with the
+    # rectangle sum. Falls through to the legacy free-form multipass
+    # on zero closure-valid passes (e.g. very ambiguous polygon).
     if (
         _is_orthogonal_polygon_area_question(question)
         and _feature_enabled("gaia_polygon_structured_multipass")
