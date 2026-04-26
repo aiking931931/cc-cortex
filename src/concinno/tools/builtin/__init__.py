@@ -12,11 +12,14 @@ Exports:
         (file_io); ShellSecurityError, ShellDestructionError, ShellTimeoutError
         (shell).
     EXCLUDED_DIRS — shared exclude set for search tools.
+    DspyOptimizer — DSPy MIPROv2 prompt optimizer for CBUA stage prompts
+        (opt-in, feature-gated; dspy is an optional dependency).
 """
 
 from __future__ import annotations
 
 from .date_calc import DateCalcTool
+from .dspy_optimizer import DspyOptimizer
 from .file_io import (
     BinaryFileError,
     FileEdit,
@@ -92,4 +95,6 @@ __all__ = [
     # web_fetch_full
     "WebFetchFullTool",
     "web_fetch_full",
+    # dspy_optimizer (opt-in; dspy is an optional dep)
+    "DspyOptimizer",
 ]

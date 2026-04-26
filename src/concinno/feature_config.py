@@ -107,6 +107,8 @@ DEFAULT_OFF_4_0_0: frozenset[str] = frozenset({
     # external module (no FEATURE_META entry; honoured via
     # meta_enabled_default fallback chain)
     "premise_gate",
+    # opt-in dev tool: burns LLM credits during optimization runs
+    "dspy_prompt_optimization",
 })
 
 
@@ -2315,6 +2317,49 @@ FEATURE_META: dict[str, dict] = {
                 "min": 60,
                 "max": 3600,
                 "recommended": 300,
+            },
+        },
+    },
+    # 2026-04-27 — DSPy MIPROv2 Bayesian prompt optimizer (wave-1).
+    # Opt-in only — optimization runs burn LLM credits. Ships default-OFF
+    # (also in DEFAULT_OFF_4_0_0 frozenset above).
+    # Targets: mas_prompts critic/judge (GAIA exact-match metric).
+    "dspy_prompt_optimization": {
+        "category": "behavioral",
+        "description": (
+            "DSPy MIPROv2 Bayesian prompt optimizer for CBUA stage prompts. "
+            "Auto-tunes critic/judge instructions from GAIA training examples "
+            "instead of manual feedback-loop iteration. Default OFF — each "
+            "optimization run calls the LM (credit cost). Enable to opt in."
+        ),
+        "description_zh": (
+            "DSPy MIPROv2 Bayesian prompt 自動優化器，針對 CBUA stage prompts。"
+            "從 GAIA training examples 自動 tune critic/judge instructions，"
+            "取代人工反覆改 prompt 的 feedback loop。預設 OFF — "
+            "每次 optimize 會呼叫 LLM（燒 credit）。啟用才生效。"
+        ),
+        "enabled": False,
+        "ziq_autotunable": False,  # optimizer itself; would be circular
+        "cosmetic": False,
+        "recommended": False,
+        "severity_if_off": "none",
+        "consequences_if_off": (
+            "CBUA critic/judge prompt 需人工 tune，無法自動 Bayesian search 最佳版本"
+        ),
+        "consequences_if_off_en": (
+            "CBUA critic/judge prompts require manual tuning; "
+            "no automatic Bayesian search for better instructions."
+        ),
+        "params": {
+            "auto_mode": {
+                "type": "str",
+                "default": "light",
+                "options": ["light", "medium", "heavy"],
+                "recommended": "light",
+                "risk_off": (
+                    "'medium'/'heavy' run more trials and cost more. "
+                    "'light' is appropriate for dev iteration."
+                ),
             },
         },
     },

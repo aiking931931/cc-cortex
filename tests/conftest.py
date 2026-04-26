@@ -149,6 +149,7 @@ def _restore_default_on_for_legacy_tests(
         "test_default_off_4_0_0.py",  # 4.0.0 defaults regression test
         "test_feature_enabled_wiring.py",  # wiring uses explicit state
         "test_feature_enabled_wiring_part2.py",  # wiring uses explicit state
+        "test_dspy_optimizer.py",  # tests default-off behavior of dspy_prompt_optimization
     }:
         return
     try:

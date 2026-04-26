@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `concinno.tools.builtin.dspy_optimizer` (DSPy MIPROv2 prompt optimizer)
+
+Adds an opt-in DSPy MIPROv2 Bayesian search wrapper for CBUA stage
+prompts. Converts the manual feedback-loop cycle (user-report →
+hand-edit → re-test) into automated instruction-optimization using
+GAIA sediment as training data.
+
+New public API (all zero API calls in tests — `DummyLM` throughout):
+
+* `DspyOptimizer` — feature-gated wrapper around `dspy.MIPROv2`.
+  `optimize_prompt(module, examples, metric_fn)` returns the
+  original module unchanged when `dspy_prompt_optimization` is
+  disabled (default), or runs MIPROv2 when enabled.
+* `CriticModule` / `JudgeModule` — `dspy.Module` subclasses wrapping
+  `CriticSignature` / `JudgeSignature` via `dspy.ChainOfThought`.
+  Directly compatible with MIPROv2's `compile(student=...)`.
+* `build_critic_examples` / `build_judge_examples` — convert GAIA
+  sediment records to `dspy.Example` with correct `with_inputs()`.
+* `gaia_exact_match` — metric function (NFKC + lowercase + trailing-
+  punctuation strip + whole-float normalization). Returns `float`.
+* `normalize_answer` — shared normalizer, importable standalone.
+
+Feature flag `dspy_prompt_optimization`: default **OFF**
+(`DEFAULT_OFF_4_0_0`). Tunable `auto_mode` param (`"light"` /
+`"medium"` / `"heavy"`). `ziq_autotunable=False`, `cosmetic=False`.
+
+30 tests added (`tests/test_dspy_optimizer.py`), all passing, zero
+API calls. `tests/conftest.py` skip-listed so the 4.0.0 default-off
+autouse fixture does not override the feature gate in these tests.
+
 ## [4.2.1] - 2026-04-27 — pip aftermath hint + Memoria heartbeat
 
 ### Added — `concinno.hooks.pip_aftermath` (post-pip Memoria heartbeat check)
