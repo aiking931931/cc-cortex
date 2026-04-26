@@ -3,21 +3,23 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-26 — **3.2.0 ship-prep complete; bump+upload deferred to next session**）
+## 現況 snapshot（2026-04-26 — **3.2.0 LIVE on PyPI**; yank of 2.21-2.23 + 4.0.0 default-off pending）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | `3.0.0` (3.1.0/3.1.1/3.1.2/3.2.0 not yet on PyPI) |
-| `pyproject.toml` version | `3.1.2` (kept stable through prep — bump to 3.2.0 deferred to next session per ship-prep contract) |
-| `src/concinno/__init__.py __version__` | `3.1.2` |
-| CHANGELOG.md 最新 release heading | `## [Unreleased]` holding all 3.2.0-bound entries (a0dc62 handoff redesign + time_steward + state_client + capability #7 + DISCLOSURE; heading promotion deferred to next session) |
-| 三源對齊狀態 | ✅ aligned at 3.1.2 (intentionally — bump is the next session's first op) |
-| 本地 commit | Phase 1-5 shipped today: `0f6e9b1` (a0dc62 handoff redesign integrate) → `aa7f58c` (time_steward subagent lifecycle wire) → `02407ea` (capability #7 polling watchdog) → `c900b5b` (FieldRead state_client wire) → `7f76389` (DISCLOSURE.md). Bump-to-3.2.0 commit pending (next session). |
-| 本地 tag | 待 publish 完後 `v3.2.0` |
-| Pending Publish Queue | **3.2.0 ready-to-publish-at-3.2.0** (next session bumps + builds + uploads + tags + yanks 2.21-2.23 per DISCLOSURE.md) |
-| release_auth 狀態 | check fresh per session: `python -c "from concinno.release_authorization import describe_current_config; print(describe_current_config())"` (typically `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` on this host) |
-| Build artifacts | ✅ `dist/concinno-3.1.2-py3-none-any.whl` + `dist/concinno-3.1.2.tar.gz` built this prep session (`python -m build` exit 0 — confirms hatchling wiring is correct for the 3.2.0 bump rebuild). Next session rebuilds at 3.2.0 HEAD. |
-| Cross-stack pair | None this cycle — 3.2.0 is concinno-internal (handoff redesign + Sancio state_store wire). Sancio side is the state_store implementation itself which is on a parallel track. |
+| Registry latest (PyPI) | **`3.2.0`** ✅ (uploaded 2026-04-26 — <https://pypi.org/project/concinno/3.2.0/>) |
+| `pyproject.toml` version | `3.2.0` ✅ aligned |
+| `src/concinno/__init__.py __version__` | `3.2.0` ✅ aligned |
+| CHANGELOG.md 最新 release heading | `## [3.2.0] - 2026-04-26` (wiring-audit round 3 — 5 fixes); `## [Unreleased]` holds 4.0.0 default-off SPEC + plan |
+| 三源對齊狀態 | ✅ aligned at 3.2.0 |
+| Git tag | ✅ `v3.2.0` pushed (`git push origin v3.2.0` — branch feat/2.3.0-red-team-round-3) |
+| Pending Publish Queue | empty (3.2.0 published; 4.0.0 spec'd but not started — major breaking change, queued for next planning cycle) |
+| release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness Bash(*)) green for this host. |
+| Build artifacts | ✅ `dist/concinno-3.2.0-py3-none-any.whl` (1.76 MB) + `dist/concinno-3.2.0.tar.gz` published. (Stale `dist/concinno-3.2.1*` from earlier session — kept on disk, not on PyPI; safe to manually rm.) |
+| **Pending post-publish ops** | ⬜ **PyPI yank 2.21.0/2.22.0/2.23.0** per DISCLOSURE.md Path C-hybrid (web UI only — pypi-cli is broken on modern click; user does this in 3 minutes once via <https://pypi.org/manage/project/concinno/release/2.21.0/> + 2.22.0 + 2.23.0). |
+| **User local config** | ✅ ALL hard_gate / soft_gate features disabled per AI King 2026-04-26 directive ("除了刪除擋以外 把其他擋的功能預設關閉 我的也關閉"). 27 entries set to `enabled: false` in `~/.claude/hooks/cc_config.json`. DestructionGuard (R0-R4 hardcoded patterns) remains on always. See [feedback_default_off_gates_for_senior_devs.md](../../C:/Users/zerox/.claude/projects/e--ai-king/memory/feedback_default_off_gates_for_senior_devs.md). |
+| **Next major** | 4.0.0 — flip ship-level `FEATURE_META` defaults to match the user-local config (default-off for non-destruction gates). SEMVER-MAJOR breaking change. Spec in CHANGELOG `[Unreleased]`. Queued for proper red/blue review before bump. |
+| Cross-stack pair | None this cycle — 3.2.0 is concinno-internal. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
@@ -28,7 +30,14 @@
 
 ```yaml
 - version: "3.2.0"
-  state: ready-to-publish-at-3.2.0
+  state: PUBLISHED  # 2026-04-26 — twine upload OK + git tag v3.2.0 pushed. Detail block kept inline (rather than moved to Session Registry::History) for one-cycle audit; scavenger may relocate next cleanup pass.
+  published_at: 2026-04-26T11:08+08:00
+  pypi_url: https://pypi.org/project/concinno/3.2.0/
+  upload_session: cc_9502_0838 (concinno session resume after a0c4389e prep)
+  post_publish_followups:
+    - "Yank 2.21.0 / 2.22.0 / 2.23.0 per DISCLOSURE.md Path C-hybrid (web UI only — pypi-cli incompatible with modern click; user 3-click op via https://pypi.org/manage/project/concinno/release/<ver>/)."
+    - "Spec 4.0.0 default-off-gates in CHANGELOG [Unreleased]; queue when ready for red/blue review."
+  # ── original prep record below ─────────────────────────────────────
   queued_by:
     session: cc-2026-04-26-concinno-3.2.0-ship-prep (autonomous prep sub-agent)
     host: ai-king local (e:/ai-king/projects/concinno)

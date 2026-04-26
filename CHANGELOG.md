@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned for next major (4.0.0) — default-off feature gates
+
+User directive 2026-04-26 (AI King): "Concinno is for senior engineers
+who can write the code themselves and want a guard against AI breaking
+things, plus cautious users; everyone else (most people) wants gates
+on by default. Default behaviour should be permissive — only data-
+deletion (DestructionGuard R0-R4) stays hardcoded-on; every other
+``hard_gate`` / ``soft_gate`` ``enabled`` default flips to False so
+``pip install concinno`` is friction-free out of the box. Users who
+want the full guardrail suite opt in via ``concinno features
+set-profile strict`` or per-feature ``set <name> enabled true``."
+
+- This is a SEMVER-MAJOR breaking change (advertised behaviour
+  reverses). Will land in 4.0.0 with a migration note + a
+  ``set-profile`` CLI shortcut + a one-shot diagnostic at first run
+  showing the user what changed.
+- Per-feature toggles already in place since 3.2.0 (wiring-audit
+  round 3); the 4.0.0 change is purely flipping defaults in
+  ``FEATURE_META``, not adding new infrastructure.
+- Ship sequencing: 3.2.x patches stay default-on (community
+  install-base safety) until 4.0.0 is reviewed and announced.
+
+## [3.2.0] - 2026-04-26
+
 ### Fixed — wiring-audit round 3 (orphan guards + missing opt-out toggles)
 
 A 26-minute Opus audit of the 3.1.2 codebase produced five findings,

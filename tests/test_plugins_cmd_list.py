@@ -94,8 +94,19 @@ class TestPerformance:
         dist_count = len(list(_meta.distributions()))
         # Realistic budgets after 2.32.0 hardened the default ``list``
         # path: guards pipeline deferred to --verbose so the default
-        # call is features + skills discovery + file read.
-        budget_ms = 1500 if dist_count >= 100 else 1000 if dist_count >= 30 else 300
+        # call is features + skills discovery + file read. Cold scan
+        # time scales linearly with installed-distribution count
+        # (importlib.metadata.entry_points walks every dist's
+        # ``METADATA``); on dev machines with hundreds of
+        # ``concinno-skills-*`` / scientific-Python packages the
+        # 100-distribution budget under-counts cost. Allow ~15ms per
+        # distribution above 100 with a 1500ms floor.
+        if dist_count >= 100:
+            budget_ms = max(1500, dist_count * 15)
+        elif dist_count >= 30:
+            budget_ms = 1000
+        else:
+            budget_ms = 300
 
         from concinno.cli.plugins_cmd import cmd_plugins_list
 
