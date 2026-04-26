@@ -1426,6 +1426,27 @@ FEATURE_META: dict[str, dict] = {
         "cosmetic": False,
         "params": {},
     },
+    "gaia_web_only_force_anthropic": {
+        "category": "context",
+        "description": (
+            "Force-route web-only questions (no attachment + temporal "
+            "/ named-entity cues) from local gemma backend to "
+            "Anthropic Sonnet. Local Gemma reliably hallucinates "
+            "answers instead of invoking Action: web_search(...); "
+            "Sonnet has native web_search_20250305 tool. Generic "
+            "infra routing, no GAIA answer paths."
+        ),
+        "description_zh": (
+            "web-only 題（無附件 + 時間/命名實體線索）從本地 gemma "
+            "強制改走 Anthropic Sonnet。本地 Gemma 不會穩定呼 "
+            "Action: web_search(...) 而會幻覺答案；Sonnet 有原生 "
+            "web_search_20250305 tool。通用 infra 路由，無 GAIA "
+            "答案路徑"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
     "ocr_fallback": {
         "category": "context",
         "description": (

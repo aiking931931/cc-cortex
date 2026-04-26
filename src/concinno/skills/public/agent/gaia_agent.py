@@ -826,7 +826,39 @@ def react_solve_split(question: str, file_content: str,
     Gemma A (Gatherer): ReAct loop, collects observations
     Gemma B (Analyst): ZIQ classification already done by caller
     Gemma C (Synthesizer): clean context → final answer
+
+    Web-only fast-path: when the question is detected as
+    web-research-without-attachment AND the configured backend is a
+    local (gemma) tier that empirically hallucinates instead of
+    invoking ``Action: web_search(...)``, force-route the entire
+    gather+synth loop through Anthropic Sonnet so the L1
+    ``gaia_web_only_procedure_anchor`` actually triggers a real
+    ``web_search_20250305`` tool call. Gated by feature toggle
+    ``gaia_web_only_force_anthropic`` (default on).
     """
+    # ── Web-only force-route to Anthropic ──
+    if (
+        backend.tier not in ("sonnet", "opus")
+        and not file_content
+        and not file_path
+        and _is_web_only_question(question, file_path)
+        and _feature_enabled("gaia_web_only_force_anthropic")
+    ):
+        try:
+            override = ModelBackend(model="sonnet")
+            print(
+                "  [web-only force-anthropic] tier="
+                f"{backend.tier} → sonnet for {question[:60]!r}",
+                flush=True,
+            )
+            backend = override
+        except Exception as err:  # pragma: no cover — defensive
+            print(
+                f"  [web-only override failed] {err}; falling back to "
+                f"original {backend.tier} backend",
+                flush=True,
+            )
+
     # ── Phase 1: Gather observations ──
     observations = []
 
@@ -1335,7 +1367,9 @@ def _get_local_vision_llm():
       GAIA_VISION_HANDLER       llama-cpp-python chat handler class name
                                 (default Qwen25VLChatHandler)
       GAIA_VISION_N_GPU_LAYERS  GPU layer offload (default 0 = CPU)
-      GAIA_VISION_CTX           context size (default 4096)
+      GAIA_VISION_CTX           context size (default 8192;
+                                Gemma 4 + mmproj + L1 anchor needs
+                                ≥4373 tokens, 4096 was too small)
     """
     global _local_vision_llm
     if _local_vision_llm is not None:
@@ -1351,7 +1385,7 @@ def _get_local_vision_llm():
         "GAIA_VISION_HANDLER", "Qwen25VLChatHandler"
     )
     n_gpu_layers = int(os.environ.get("GAIA_VISION_N_GPU_LAYERS", "0"))
-    n_ctx = int(os.environ.get("GAIA_VISION_CTX", "4096"))
+    n_ctx = int(os.environ.get("GAIA_VISION_CTX", "8192"))
 
     from llama_cpp import Llama, llama_chat_format
     # Prefer Concinno-shipped custom handlers (e.g. Gemma4) first,
