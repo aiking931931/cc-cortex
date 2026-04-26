@@ -214,6 +214,95 @@ def _last_git_commit(project_root: Path) -> str:
     return out
 
 
+# ── Source: state_client snapshot (Sancio state_store) ────
+
+
+def _read_state_snapshot(project_name: str) -> dict:
+    """Return ``state_client.snapshot(project)`` or ``{}`` on any error.
+
+    Lazy-imports ``concinno.state_client`` so a stripped-down Concinno
+    install (no Sancio thin client wired in) still imports cleanly.
+    Failure is silent — the caller falls back to its existing
+    markdown / live-probe sources, preserving the pre-state_store
+    behaviour for non-migrated projects (Phase 1 of the migration
+    plan in ``_AI_BRAIN/05_Planning/sancio_state_store_spec_2026-04-26.md``
+    §8).
+    """
+    try:
+        from concinno.state_client import snapshot as _state_snapshot
+        snap = _state_snapshot(project_name)
+        if isinstance(snap, dict):
+            return snap
+        return {}
+    except Exception:
+        return {}
+
+
+def _resolve_pod_ssh_from_state(state_snap: dict) -> tuple[str, str] | None:
+    """Return ``(pod_id, ssh_cmd)`` from state_store, or ``None``.
+
+    Helper extracted from ``populate_section_0`` to keep the parent's
+    nesting depth ≤5. Only returns a tuple when the state_store has
+    a non-empty ``last_pod_id`` / ``pod_id``; the ssh_cmd is either
+    ``ssh_cmd`` directly OR synthesised from ``pod_ssh_host`` /
+    ``pod_ssh_port``. Returns the pod_id with an empty ssh string
+    when state_store has the id but lacks both ssh fields — the
+    caller then probes the cache for the ssh line.
+    """
+    pod_id = state_snap.get("last_pod_id") or state_snap.get("pod_id")
+    if not isinstance(pod_id, str) or not pod_id:
+        return None
+    ssh_cmd_raw = state_snap.get("ssh_cmd")
+    if isinstance(ssh_cmd_raw, str) and ssh_cmd_raw:
+        return (pod_id, ssh_cmd_raw)
+    host = state_snap.get("pod_ssh_host")
+    port = state_snap.get("pod_ssh_port")
+    if host and port:
+        return (
+            pod_id,
+            f"ssh -i ~/.ssh/runpod_ed25519 -p {port} root@{host}",
+        )
+    return (pod_id, "")
+
+
+def _ssh_cmd_from_cache_or_failed() -> str:
+    """Try the pod_current.json cache for the ssh line; return failed marker on error."""
+    try:
+        cache = _read_pod_cache()
+    except SourceFailure as exc:
+        return _failed(str(exc))
+    try:
+        return _ssh_cmd_from_cache(cache)
+    except SourceFailure as exc:
+        return _failed(str(exc))
+
+
+def _pod_fields_from_cache() -> tuple[str, str]:
+    """Return ``(pod_id, ssh_cmd)`` from ``~/.concinno/pod_current.json``.
+
+    Each field is independently failure-marked: a missing or malformed
+    cache file makes both fields share the same parent failure marker;
+    a present cache with a missing pod_id / ssh_cmd makes only that
+    field show the more specific marker. This mirrors the original
+    populate_section_0 inline logic so the user-facing failure text
+    stays identical.
+    """
+    try:
+        cache = _read_pod_cache()
+    except SourceFailure as exc:
+        marker = _failed(str(exc))
+        return (marker, marker)
+    try:
+        pid = _pod_id_from_cache(cache)
+    except SourceFailure as exc:
+        pid = _failed(str(exc))
+    try:
+        ssh = _ssh_cmd_from_cache(cache)
+    except SourceFailure as exc:
+        ssh = _failed(str(exc))
+    return (pid, ssh)
+
+
 # ── Source: last session id ───────────────────────────────
 
 
@@ -266,52 +355,83 @@ def populate_section_0(
     else:
         root = Path(project_root)
 
+    # Read live snapshot from concinno.state_client (Sancio state_store
+    # thin client). Empty dict on any error — preserves existing
+    # markdown-source semantics for projects that haven't migrated to
+    # state_store yet (Phase 1 / 2 of the migration plan in
+    # _AI_BRAIN/05_Planning/sancio_state_store_spec_2026-04-26.md §8).
+    # Outer try/except is defense-in-depth: ``_read_state_snapshot``
+    # already catches its own exceptions, but if a future caller
+    # monkey-patches the helper or future code raises during the helper
+    # itself, this guard preserves the populator's "never raises"
+    # contract from the module docstring.
+    try:
+        state_snap = _read_state_snapshot(project_name)
+        if not isinstance(state_snap, dict):
+            state_snap = {}
+    except Exception:
+        state_snap = {}
+
     out: dict[str, str] = {}
 
-    # vault aliases
-    try:
-        out["vault_aliases"] = _list_vault_aliases(project_name)
-    except SourceFailure as exc:
-        out["vault_aliases"] = _failed(str(exc))
-
-    # pod (cache-only)
-    try:
-        cache = _read_pod_cache()
+    # vault aliases — prefer state_store value, fall back to live vault probe
+    state_aliases = state_snap.get("vault_aliases")
+    if isinstance(state_aliases, str) and state_aliases:
+        out["vault_aliases"] = state_aliases
+    elif isinstance(state_aliases, list) and state_aliases:
+        out["vault_aliases"] = ", ".join(str(a) for a in state_aliases)
+    else:
         try:
-            out["pod_id"] = _pod_id_from_cache(cache)
+            out["vault_aliases"] = _list_vault_aliases(project_name)
         except SourceFailure as exc:
-            out["pod_id"] = _failed(str(exc))
-        try:
-            out["ssh_cmd"] = _ssh_cmd_from_cache(cache)
-        except SourceFailure as exc:
-            out["ssh_cmd"] = _failed(str(exc))
-    except SourceFailure as exc:
-        marker = _failed(str(exc))
-        out["pod_id"] = marker
-        out["ssh_cmd"] = marker
+            out["vault_aliases"] = _failed(str(exc))
 
-    # env var names
+    # pod — prefer state_store (live source per kb_handoff §0 一鍵復活
+    # pain point), fall back to ~/.concinno/pod_current.json cache.
+    state_pod = _resolve_pod_ssh_from_state(state_snap)
+    if state_pod is not None:
+        pod_id, ssh_cmd = state_pod
+        out["pod_id"] = pod_id
+        out["ssh_cmd"] = ssh_cmd or _ssh_cmd_from_cache_or_failed()
+    else:
+        out["pod_id"], out["ssh_cmd"] = _pod_fields_from_cache()
+
+    # env var names (no state_store source — env is live process-only)
     try:
         out["env_vars"] = _list_env_var_names(project_name)
     except SourceFailure as exc:  # pragma: no cover (helper never raises today)
         out["env_vars"] = _failed(str(exc))
 
-    # last commit
-    try:
-        out["last_commit"] = _last_git_commit(root)
-    except SourceFailure as exc:
-        out["last_commit"] = _failed(str(exc))
+    # last commit — prefer state_store, fall back to live git
+    state_commit = state_snap.get("last_commit_hash")
+    if isinstance(state_commit, str) and state_commit:
+        out["last_commit"] = state_commit
+    else:
+        try:
+            out["last_commit"] = _last_git_commit(root)
+        except SourceFailure as exc:
+            out["last_commit"] = _failed(str(exc))
 
-    # last session id
-    try:
-        out["last_session_id"] = _last_session_id()
-    except SourceFailure as exc:
-        out["last_session_id"] = _failed(str(exc))
+    # last session id — prefer state_store
+    state_session = state_snap.get("last_session_id")
+    if isinstance(state_session, str) and state_session:
+        out["last_session_id"] = state_session
+    else:
+        try:
+            out["last_session_id"] = _last_session_id()
+        except SourceFailure as exc:
+            out["last_session_id"] = _failed(str(exc))
 
-    # token usage — leave placeholder (Sancio state_store dependency)
-    out["last_token_usage"] = (
-        "<deferred — Sancio state_store integration pending>"
-    )
+    # token usage — now sourced from state_store (no longer the static
+    # "<deferred — Sancio state_store integration pending>" placeholder
+    # that has been outstanding since 2026-04-23 per kb_handoff §0).
+    state_tokens = state_snap.get("last_token_usage")
+    if state_tokens not in (None, ""):
+        out["last_token_usage"] = str(state_tokens)
+    else:
+        out["last_token_usage"] = _failed(
+            "state_store has no last_token_usage entry yet"
+        )
 
     out["populated_at"] = datetime.now(timezone.utc).isoformat()
 

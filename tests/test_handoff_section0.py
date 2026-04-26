@@ -227,3 +227,86 @@ def test_populated_at_is_iso8601(tmp_path):
     # within ±5 seconds of now
     delta = abs((parsed - datetime.now(timezone.utc)).total_seconds())
     assert delta < 60
+
+
+# ── state_client integration (Phase 4 of 3.2.0 ship-prep) ─
+
+
+def test_state_client_supplies_token_usage(monkeypatch, tmp_path):
+    """When state_store has last_token_usage, that value populates §0 directly."""
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        handoff_section0,
+        "_read_state_snapshot",
+        lambda _proj: {"last_token_usage": "47k/1M (4.7%)"},
+    )
+    out = populate_section_0("gaia", project_root=tmp_path)
+    assert out["last_token_usage"] == "47k/1M (4.7%)"
+
+
+def test_state_client_supplies_pod_fields(monkeypatch, tmp_path):
+    """state_store.last_pod_id + pod_ssh_host/port wins over markdown cache."""
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        handoff_section0,
+        "_read_state_snapshot",
+        lambda _proj: {
+            "last_pod_id": "live-pod-xyz",
+            "pod_ssh_host": "1.2.3.4",
+            "pod_ssh_port": 24831,
+        },
+    )
+    out = populate_section_0("gaia", project_root=tmp_path)
+    assert out["pod_id"] == "live-pod-xyz"
+    assert "1.2.3.4" in out["ssh_cmd"]
+    assert "24831" in out["ssh_cmd"]
+
+
+def test_state_client_falls_back_when_empty(monkeypatch, tmp_path):
+    """Empty snapshot → existing markdown / cache logic still runs."""
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        handoff_section0, "_read_state_snapshot", lambda _proj: {},
+    )
+    out = populate_section_0("any", project_root=tmp_path)
+    # Without a state_store value AND without a pod_current.json cache,
+    # both should be failure markers (preserving pre-state_store
+    # behaviour).
+    assert out["pod_id"].startswith("<unknown — source failed")
+    assert out["last_token_usage"].startswith("<unknown — source failed")
+
+
+def test_state_client_failure_does_not_crash(monkeypatch, tmp_path):
+    """A raising state_client → silent fallback to existing logic."""
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    def _boom(_proj):
+        raise RuntimeError("state_store backend down")
+
+    monkeypatch.setattr(handoff_section0, "_read_state_snapshot", _boom)
+    # populate_section_0's helper itself catches; but be defensive — if
+    # someone wires a raising _read_state_snapshot directly we still
+    # want a clean exit. Prove no exception bubbles up.
+    try:
+        out = populate_section_0("any", project_root=tmp_path)
+    except Exception as exc:  # pragma: no cover
+        raise AssertionError(
+            f"populate_section_0 must never raise; got {exc!r}"
+        ) from exc
+    assert set(out.keys()) == set(SECTION0_FIELDS)
+
+
+def test_state_client_supplies_session_and_commit(monkeypatch, tmp_path):
+    """state_store.last_session_id / last_commit_hash override live probes."""
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(
+        handoff_section0,
+        "_read_state_snapshot",
+        lambda _proj: {
+            "last_session_id": "sess-from-state",
+            "last_commit_hash": "deadbeef WIP",
+        },
+    )
+    out = populate_section_0("any", project_root=tmp_path)
+    assert out["last_session_id"] == "sess-from-state"
+    assert out["last_commit"] == "deadbeef WIP"
