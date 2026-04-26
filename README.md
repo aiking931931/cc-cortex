@@ -10,6 +10,9 @@
 [![PyPI](https://img.shields.io/pypi/v/concinno.svg)](https://pypi.org/project/concinno/)
 [![Tests](https://github.com/aiking931931/concinno/actions/workflows/ci.yml/badge.svg)](https://github.com/aiking931931/concinno/actions/workflows/ci.yml)
 
+**Disclosure**: see [DISCLOSURE.md](DISCLOSURE.md) for the 2.21–2.23
+GAIA artifact cleanup notice.
+
 > **concinno** is a modular hook toolkit that plugs into
 > [Anthropic's Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
 > It adds opt-in dev-time scaffolding — guardrails against destructive
