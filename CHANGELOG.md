@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-04-27 — pip aftermath hint + Memoria heartbeat
+
+### Added — `concinno.hooks.pip_aftermath` (post-pip Memoria heartbeat check)
+
+Detects `pip install/uninstall` operations targeting the concinno
+package itself, then checks `~/.memoria/heartbeat.json` (written by
+the Memoria scheduler each tick — see Memoria v0.3+
+`scheduler.py::Scheduler._heartbeat`). If the heartbeat is missing
+or stale (>5 min default), emits an `additionalContext` reminder so
+the agent surfaces the issue: "📦 pip touched concinno → Memoria
+heartbeat is N s stale. Restart with `pythonw -m memoria`."
+
+Solves the user-visible "Memoria 整個不見了" pattern after a pip
+upgrade cycle: mid-install the concinno `*.py` files briefly vanish,
+Memoria's daemon thread hits ImportError on its next tick, but the
+process logger gets garbage-collected with the dying process so no
+traceback ever lands in `~/.claude/logs/memoria.log`. The hook fills
+that gap.
+
+* `concinno.hooks.pip_aftermath.detect_pip_concinno` — wired into
+  `on_post_tool.py` step 5.45 (right after the polling watcher).
+* Detection regex is **segment-anchored** (split on `&&`/`||`/`;`/`|`,
+  strip `python -m`/`nohup`/`sudo`/`env` invocation prefixes, then
+  match at segment START) — same false-positive guard the polling
+  classifier shipped, so a `git commit -m "release: pip install
+  concinno docs note"` body doesn't false-trigger.
+* New FEATURE_META entry `pip_aftermath_hint` — category
+  `behavioral`, recommended on, severity `minor`. **NOT** in
+  `DEFAULT_OFF_4_0_0`. Tunable `stale_threshold_seconds` (default
+  300, min 60, max 3600). Opt-out:
+  `concinno config set features.pip_aftermath_hint.enabled false`.
+* 14 regression tests in `tests/test_pip_aftermath.py` covering
+  pattern detection + heartbeat freshness + commit-message
+  false-positive guard + FEATURE_META wiring.
+
+Memoria-side change (separate package, lives at
+`~/.claude/scripts/memoria/`):
+
+* `scheduler.py::Scheduler._heartbeat` writes
+  `~/.memoria/heartbeat.json` atomically each tick. Body includes
+  `ts` / `ts_iso` / `pid` / `next_run_eta_seconds` for human
+  inspection; the file `mtime` is the freshness signal the hook
+  reads.
+
+Sediment: `feedback_pip_concinno_kills_memoria.md` in memory.
+
 ## [4.2.0] - 2026-04-27 — GAIA hybrid solvers + structured-plan compute Skill
 
 ### Added — `concinno.tools.builtin.compute` module

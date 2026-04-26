@@ -778,6 +778,16 @@ def main(hook_data: dict | None = None) -> None:
     except Exception:
         pass  # never block the hook
 
+    # 5.45 pip-aftermath — detect pip touching concinno + Memoria
+    # heartbeat staleness (4.2.0)
+    try:
+        from concinno.hooks.pip_aftermath import detect_pip_concinno
+        pip_ctx = detect_pip_concinno(tool_name, tool_input)
+        if pip_ctx:
+            fragments.append(pip_ctx)
+    except Exception:
+        pass
+
     # 5.5 ThinkingDepthGuard — record ALL tools, warn only on Edit
     try:
         if _CACHE_DIR:

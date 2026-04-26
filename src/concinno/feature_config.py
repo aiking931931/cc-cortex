@@ -2274,6 +2274,50 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # 4.2.0 — pip aftermath hint: detect ``pip install/uninstall``
+    # touching concinno + check whether the long-running Memoria tray
+    # app is still ticking via its heartbeat file. If heartbeat is
+    # stale, emit a restart hint. Addresses "Memoria 整個不見了"
+    # after a pip-upgrade cycle that left no traceback in the log
+    # (daemon thread's logger garbage-collected with dying process).
+    # Productivity feature, ships ON.
+    "pip_aftermath_hint": {
+        "category": "behavioral",
+        "description": (
+            "Detect pip install/uninstall touching concinno + check "
+            "Memoria heartbeat freshness. Emit a restart hint when "
+            "the heartbeat is stale (>5 min) — addresses the silent "
+            "Memoria-died-mid-install class of failure."
+        ),
+        "description_zh": (
+            "偵測 pip install/uninstall 動到 concinno + 檢查 Memoria "
+            "heartbeat 新鮮度。過期 (>5 min) 提示 restart — 解 "
+            "「Memoria 中途 import 失敗 silent die」這類無 traceback "
+            "失蹤案例。"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "pip 動 concinno 後 Memoria 若 silent die 不會有提醒，"
+            "用戶下次發現 tray 不見才察覺"
+        ),
+        "consequences_if_off_en": (
+            "If Memoria silently dies on a mid-install ImportError "
+            "after a pip operation on concinno, no reminder is "
+            "emitted; user notices when the tray icon is gone."
+        ),
+        "params": {
+            "stale_threshold_seconds": {
+                "type": "int",
+                "default": 300,
+                "min": 60,
+                "max": 3600,
+                "recommended": 300,
+            },
+        },
+    },
 }
 
 
