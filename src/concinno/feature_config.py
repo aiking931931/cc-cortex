@@ -1313,6 +1313,67 @@ FEATURE_META: dict[str, dict] = {
         "cosmetic": False,
         "params": {},
     },
+    # 3.2.0 — Sancio state_store v1 client (concinno.state_client). Thin
+    # client implementing the project-scoped key-value API per
+    # _AI_BRAIN/05_Planning/sancio_state_store_spec_2026-04-26.md. v1
+    # default backend = JSON-per-project file under ~/.sancio/state/;
+    # automatic fallback to legacy ~/.concinno/state/ for projects
+    # written under the pre-spec layout. Sancio HTTP daemon backend is
+    # ready (urllib transport) but the daemon itself is not yet shipped,
+    # so the auto-detect chain reaches the file backend in practice.
+    "state_client": {
+        "category": "core",
+        "description": (
+            "Cross-session project-scoped key-value store. Replaces the "
+            "kb_handoff §0 'one-key resurrection' markdown placeholders "
+            "with a live source readable from any hook. Backend chain: "
+            "Sancio daemon HTTP -> file (~/.sancio/state) -> legacy file "
+            "(~/.concinno/state). Sancio port via SANCIO_STATE_STORE_PORT "
+            "env (default 8530, deliberately off persona-api 8500 / "
+            "llama-cpp 9000). preferred_backend chooseable via "
+            "CONCINNO_STATE_BACKEND env or ~/.concinno/state_client.json."
+        ),
+        "description_zh": (
+            "跨 session、project-scoped 的 key-value store。取代 "
+            "kb_handoff §0「一鍵復活」markdown placeholder，讓任何 hook "
+            "都能從活的來源讀。Backend chain: Sancio daemon HTTP -> file "
+            "(~/.sancio/state) -> legacy file (~/.concinno/state)。"
+            "Sancio port 透過 SANCIO_STATE_STORE_PORT env（default 8530，"
+            "刻意避開 persona-api 8500 / llama-cpp 9000）。"
+            "preferred_backend 可由 CONCINNO_STATE_BACKEND env 或 "
+            "~/.concinno/state_client.json 覆寫。"
+        ),
+        "enabled": True,
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "preferred_backend": {
+                "type": "str",
+                "default": "auto",
+                "options": ["auto", "sancio_http", "file", "legacy_file"],
+                "recommended": "auto",
+                "risk_off": (
+                    "'legacy_file' is read-only - writes raise "
+                    "BackendUnavailable until backend changed back."
+                ),
+                "risk_off_zh": (
+                    "'legacy_file' 是 read-only - 寫入會 raise "
+                    "BackendUnavailable，直到 backend 改回。"
+                ),
+            },
+            "sancio_port": {
+                "type": "int",
+                "default": 8530,
+                "min": 1024,
+                "max": 65535,
+                "recommended": 8530,
+                "risk_low": "Below 1024 needs root on POSIX",
+                "risk_high": "Outside 1-65535 is invalid",
+                "risk_low_zh": "低於 1024 在 POSIX 需 root",
+                "risk_high_zh": "超出 1-65535 範圍無效",
+            },
+        },
+    },
     # 2.36.0a1 — register intent_anchor as a first-class FEATURE_META row.
     # Was previously only a guard (concinno.intent_anchor_guard.IntentAnchorGuard)
     # picked up by the GuardPipeline dispatch via cfg.feature("intent_anchor",
@@ -1340,6 +1401,43 @@ FEATURE_META: dict[str, dict] = {
         "consequences_if_off_en": (
             "Original intent stops being re-injected; long sessions and "
             "post-redteam loops drift from the user's first ask."
+        ),
+        "params": {},
+    },
+    # 2026-04-26 — DAG-aware time-scheduling hook for autonomous agent.
+    # Six capabilities: pre-spawn ⬜ DAG visualiser, pre-spawn contention
+    # check, idle-waiting detection, sub-agent budget tracker, re-triage
+    # on completion, cancel-restart heuristic. Supersedes the placeholder
+    # ``parallel_spawn_reminder`` shipped earlier the same day. All six
+    # are syntactic / state-counter only — no LLM-as-judge call on the
+    # hot path, zero per-turn API cost. Behavioural-signal driven (looks
+    # at the agent's own recent turns + sub-agent registry), never the
+    # user's prompt text.
+    "time_steward": {
+        "category": "behavioral",
+        "description": (
+            "DAG-aware time scheduling for autonomous agent: prevent "
+            "wall-clock waste while sub-agents run in parallel. Six "
+            "capabilities (DAG visualiser / contention check / idle "
+            "detection / budget tracker / re-triage / cancel-restart)."
+        ),
+        "description_zh": (
+            "自主代理 DAG 感知時間調度：防止子代理並行時主代理空轉浪費"
+            " wall-clock。六項能力（⬜ DAG 視覺化 / spawn 前衝突檢查 /"
+            "等待偵測 / 子代理預算追蹤 / 完成後再分流 / 取消重啟啟發式）。"
+        ),
+        "ziq_autotunable": False,  # UX behavioural judgement, not metric-optimisable
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "子代理並行時主代理可能 idle 等待 / 重複 spawn 衝突檔案 /"
+            "子代理跑超時不被察覺"
+        ),
+        "consequences_if_off_en": (
+            "Main agent may idle while sub-agents run, double-spawn on "
+            "conflicting files, or miss stuck sub-agents past their "
+            "estimate."
         ),
         "params": {},
     },
