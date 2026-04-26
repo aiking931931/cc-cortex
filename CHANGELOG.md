@@ -7,7 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Changed
+
+- Rename feature flags `bassclef_wordreverse` → `gaia_music_image_upscale`,
+  `polygon_counting_hint` → `gaia_polygon_image_upscale`. Old names remain
+  accepted via back-compat alias for one minor version (deprecation
+  warning on use, drops in next minor). Rationale: old names hinted at
+  GAIA test-set answer paths; new names describe actual behavior
+  (LANCZOS image upscale gate). Actual code path unchanged — pure
+  preprocess, no prompt injection.
+
+## [3.1.0] - 2026-04-26
+
+### Added — `concinno.memory_relief`
+
+- New ``concinno.memory_relief`` module — Windows RAM cleanup with
+  before/after stats and per-process trim list. Anti-snake-oil defaults
+  (``SAFE`` tier uses documented ``EmptyWorkingSet`` only; standby /
+  modified-list purges are opt-in admin-required tiers). Cross-platform
+  safe — non-Windows callers get a zero snapshot and the engine no-ops
+  with a ``notes`` entry.
+- Public API (``run_cleanup`` / ``CleanupMode`` / ``CleanupReport`` /
+  ``MemorySnapshot`` / ``empty_working_set_for_pid`` /
+  ``purge_standby_list`` / ``purge_low_priority_standby_list`` /
+  ``purge_modified_page_list`` / ``set_system_file_cache_minimal`` /
+  ``get_memory_snapshot`` / ``get_performance_info`` / ``is_admin``).
+- New ``MemoryReliefTool`` (``concinno.tools.builtin.memory_relief``)
+  — agent-callable Tool returning structured JSON
+  (``{mode, dry_run, before, after, reclaimed_mb, stages[],
+  process_trims[]}``). Registered in ``tools.builtin.__all__``.
+- New CLI: ``python -m concinno.memory_relief [dryrun|safe|standby|
+  aggressive|destructive|status]``. ``status`` returns snapshot only
+  (no kernel writes).
+- New optional extras ``[memory-relief-tray]`` (pystray + Pillow)
+  enabling the system-tray right-click cleanup app
+  (``concinno-mem-tray`` console script). Tray defaults off via
+  FEATURE_META ``tray_enabled=False``.
+- New FEATURE_META entry ``memory_relief`` (category
+  ``optional_optimization``, ``ziq_autotunable=False`` per red-team
+  Goodhart guard) with five user-tunable params
+  (``auto_trigger_after_process_guard`` /
+  ``auto_trigger_mode`` / ``top_n_per_process_trim`` / ``min_trim_mb`` /
+  ``tray_enabled``).
+- New ``/memrelief`` Skill at
+  ``~/.claude/skills/public/memory-relief/SKILL.md`` — triggers on
+  ``記憶體`` / ``RAM`` / ``卡死`` / ``cleanup memory`` /
+  ``standby pollution`` / ``Mem Reduct``.
+
+### Changed — `concinno.process_guard`
+
+- Wave 4 chain: when ``run_guard`` finishes wave 1-3 (kill orphans /
+  subagents / idle children) and RAM is still ≥ ``MEMORY_CRITICAL_PERCENT``,
+  the chain now invokes ``memory_relief.run_cleanup(mode='safe')``
+  automatically. Aggressive tiers stay manual. Best-effort: any failure
+  is recorded in ``GuardResult.actions`` but never aborts the guard.
+- Added ``concinno/process_guard/__main__.py`` so the canonical command
+  ``python -m concinno.process_guard`` (documented in the
+  ``cortex-guard`` skill) works again after the 2.x → 3.x package
+  refactor moved ``cli.py`` into a sub-package.
+
+### Added — GAIA agent
 
 - GAIA agent: 3 L1 domain-typed procedure anchors (music notation /
   orthogonal polygon area / no-attachment web-only). Replaces previous

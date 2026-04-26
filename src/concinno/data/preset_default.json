@@ -20,8 +20,8 @@
         "gemma4_vision.enabled": true,
         "binary_extractor.enabled": true,
         "image_upscale_4x.enabled": true,
-        "bassclef_wordreverse.enabled": true,
-        "polygon_counting_hint.enabled": true,
+        "gaia_music_image_upscale.enabled": true,
+        "gaia_polygon_image_upscale.enabled": true,
         "ocr_fallback.enabled": true
       },
       "full_ref": null,
@@ -42,8 +42,8 @@
         "gemma4_vision.enabled": "Gemma 4 native vision handler active",
         "binary_extractor.enabled": "inline-extract xlsx/csv/tsv for weak-model help",
         "image_upscale_4x.enabled": "4x LANCZOS for <800px vision images",
-        "bassclef_wordreverse.enabled": "music notation mnemonic + word-reverse hint",
-        "polygon_counting_hint.enabled": "polygon edge / vertex off-by-one procedure",
+        "gaia_music_image_upscale.enabled": "music-notation image upscale gate (pure preprocess)",
+        "gaia_polygon_image_upscale.enabled": "polygon image upscale gate (pure preprocess)",
         "ocr_fallback.enabled": "OCR path for text-heavy images before vision"
       }
     },
@@ -66,8 +66,8 @@
         "gemma4_vision.enabled": false,
         "binary_extractor.enabled": true,
         "image_upscale_4x.enabled": true,
-        "bassclef_wordreverse.enabled": false,
-        "polygon_counting_hint.enabled": false,
+        "gaia_music_image_upscale.enabled": false,
+        "gaia_polygon_image_upscale.enabled": false,
         "ocr_fallback.enabled": true
       },
       "full_ref": null,
@@ -88,8 +88,8 @@
         "gemma4_vision.enabled": "off by default — Qwen2.5-VL fallback is the general multimodal",
         "binary_extractor.enabled": "generic utility — enabled for everyone",
         "image_upscale_4x.enabled": "generic utility — enabled for everyone",
-        "bassclef_wordreverse.enabled": "benchmark-specific hint — off outside benchmark",
-        "polygon_counting_hint.enabled": "benchmark-specific hint — off outside benchmark",
+        "gaia_music_image_upscale.enabled": "benchmark-specific upscale gate — off outside benchmark",
+        "gaia_polygon_image_upscale.enabled": "benchmark-specific upscale gate — off outside benchmark",
         "ocr_fallback.enabled": "generic utility — enabled for everyone"
       }
     },
@@ -112,8 +112,8 @@
         "gemma4_vision.enabled": false,
         "binary_extractor.enabled": false,
         "image_upscale_4x.enabled": false,
-        "bassclef_wordreverse.enabled": false,
-        "polygon_counting_hint.enabled": false,
+        "gaia_music_image_upscale.enabled": false,
+        "gaia_polygon_image_upscale.enabled": false,
         "ocr_fallback.enabled": false
       },
       "full_ref": null,
@@ -134,8 +134,8 @@
         "gemma4_vision.enabled": "off — prod vision uses managed provider",
         "binary_extractor.enabled": "off — prod attachments go through auditable path",
         "image_upscale_4x.enabled": "off — prod images pre-sized upstream",
-        "bassclef_wordreverse.enabled": "off — prod does not have music-notation workloads",
-        "polygon_counting_hint.enabled": "off — prod does not have polygon counting workloads",
+        "gaia_music_image_upscale.enabled": "off — prod does not have music-notation workloads",
+        "gaia_polygon_image_upscale.enabled": "off — prod does not have polygon counting workloads",
         "ocr_fallback.enabled": "off — prod uses managed OCR provider if needed"
       }
     }

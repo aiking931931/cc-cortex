@@ -1157,31 +1157,51 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
-    "bassclef_wordreverse": {
+    "gaia_music_image_upscale": {
         "category": "context",
         "description": (
-            "Inject bass-clef mnemonic + word-reverse L/S tag + "
-            "time-unit hint for music-notation vision questions"
+            "Pre-inference 4× LANCZOS upscale gate for music notation "
+            "image questions. Small (<800px) staff-notation images "
+            "are upscaled before being fed to the local vision "
+            "encoder, which underperforms on sub-pixel notehead "
+            "detail at native resolution. Pure preprocess — no "
+            "prompt injection. Renamed from legacy "
+            "`bassclef_wordreverse` (2026-04-26) to remove "
+            "task-specific naming; back-compat alias preserved one "
+            "minor version."
         ),
         "description_zh": (
-            "bass clef 樂譜題注入 mnemonic + word-reverse L/S tag + "
-            "time-unit hint（GAIA 8f80e01c 起源）"
+            "樂譜題的 pre-inference 4× LANCZOS 圖像放大閘。小於 "
+            "800px 的五線譜圖在送入本機視覺編碼器前先放大，避免 "
+            "noteheads 在原始解析度下細節丟失。純前處理 — 無 prompt "
+            "注入。2026-04-26 從 legacy `bassclef_wordreverse` "
+            "改名以移除題型特定命名；保留一個 minor 版本的向後相容 "
+            "alias。"
         ),
         "ziq_autotunable": False,
         "cosmetic": False,
         "params": {},
     },
-    "polygon_counting_hint": {
+    "gaia_polygon_image_upscale": {
         "category": "context",
         "description": (
-            "Inject a systematic walk-the-boundary procedure + "
-            "label-as-metadata warning for polygon edge/vertex "
-            "counting vision questions (off-by-one defence)"
+            "Pre-inference 4× LANCZOS upscale gate for "
+            "orthogonal-polygon image questions. Small (<800px) "
+            "polygon-with-labels images are upscaled before being "
+            "fed to the local vision encoder, which loses small "
+            "numeric labels at native resolution. Pure preprocess — "
+            "no prompt injection. Renamed from legacy "
+            "`polygon_counting_hint` (2026-04-26) to remove "
+            "task-specific naming; back-compat alias preserved one "
+            "minor version."
         ),
         "description_zh": (
-            "polygon / 邊數 / 頂點 類計數題注入沿邊走一遍的系統化 "
-            "procedure + 標籤是 metadata 不納入計數的警告 "
-            "（GAIA 6359a0b1 off-by-one 起源）"
+            "直角多邊形題的 pre-inference 4× LANCZOS 圖像放大閘。"
+            "小於 800px 的帶標籤多邊形圖在送入本機視覺編碼器前先 "
+            "放大，避免小型數字標籤在原始解析度下丟失。純前處理 — "
+            "無 prompt 注入。2026-04-26 從 legacy "
+            "`polygon_counting_hint` 改名以移除題型特定命名；保留 "
+            "一個 minor 版本的向後相容 alias。"
         ),
         "ziq_autotunable": False,
         "cosmetic": False,
@@ -1324,6 +1344,36 @@ FEATURE_META: dict[str, dict] = {
         "params": {},
     },
 }
+
+
+# ── Back-compat aliases (legacy feature names → canonical) ──────
+#
+# Each entry is ``<old_name>: <canonical_name>``. When the config layer
+# (``concinno.core.config.Config.feature``) sees a user-set value
+# under ``<old_name>`` it transparently treats it as a value on
+# ``<canonical_name>`` and emits a one-time stderr deprecation warning
+# of the form
+# ``concinno: feature '<old_name>' renamed to '<canonical_name>' (drops 2026-07)``.
+#
+# Drop policy: aliases stay for one minor version after introduction
+# so existing user configs keep working through one upgrade cycle.
+LEGACY_ALIASES: dict[str, str] = {
+    # 2026-04-26 — leakage-suspect names removed; behavior unchanged
+    # (these always only toggled the LANCZOS upscale gate, no prompt
+    # injection lived under these flags).
+    "bassclef_wordreverse": "gaia_music_image_upscale",
+    "polygon_counting_hint": "gaia_polygon_image_upscale",
+}
+
+
+def resolve_alias(name: str) -> str:
+    """Map a legacy feature name to its canonical replacement.
+
+    Returns ``name`` unchanged when no alias exists. Pure lookup —
+    deprecation warnings are emitted by the config layer (which has
+    the per-session dedup state), not here.
+    """
+    return LEGACY_ALIASES.get(name, name)
 
 
 # ── 2.36.0a1 schema-extension constants ────────────────────────

@@ -15,6 +15,7 @@ Usage:
 import json
 import logging
 import os
+import sys
 from datetime import timedelta, timezone
 from typing import Any, Optional
 
@@ -162,6 +163,53 @@ _DEFAULTS = {
         "toast_group": "concinno",
     },
 }
+
+
+# ── Legacy feature alias helpers ──────────────────────────────────
+#
+# Lazy import of feature_config inside the function body so this
+# module stays importable during the feature_config import (avoid
+# circular import at module load time).
+
+_WARNED_LEGACY_ALIASES: set[str] = set()
+
+
+def _legacy_aliases() -> dict[str, str]:
+    """Return the {old_name: canonical_name} alias map.
+
+    Lazy + failure-tolerant: if ``concinno.feature_config`` cannot be
+    imported (very early in bootstrap or partial install), the map is
+    empty and no alias resolution happens — callers see whatever name
+    they passed in, identical to pre-alias behavior.
+    """
+    try:
+        from concinno.feature_config import LEGACY_ALIASES
+        return LEGACY_ALIASES
+    except Exception:
+        return {}
+
+
+def _resolve_feature_alias(name: str) -> str:
+    """Map a legacy feature name to its canonical replacement, or
+    return ``name`` unchanged when no alias exists."""
+    return _legacy_aliases().get(name, name)
+
+
+def _warn_legacy_alias(legacy: str, canonical: str) -> None:
+    """Emit a one-time-per-process stderr deprecation warning.
+
+    Format: ``concinno: feature '<legacy>' renamed to '<canonical>'
+    (drops 2026-07)``. Idempotent — second call for the same legacy
+    name in the same process is a no-op so logs don't fill up.
+    """
+    if legacy in _WARNED_LEGACY_ALIASES:
+        return
+    _WARNED_LEGACY_ALIASES.add(legacy)
+    print(
+        f"concinno: feature '{legacy}' renamed to '{canonical}' "
+        f"(drops 2026-07)",
+        file=sys.stderr,
+    )
 
 
 class Config:
@@ -312,26 +360,80 @@ class Config:
         )
 
     def feature(self, name: str, key: str = "enabled") -> Any:
-        """Get a feature config value. e.g. feature("agent_cap", "max_spawns")."""
+        """Get a feature config value. e.g. feature("agent_cap", "max_spawns").
+
+        Honors :data:`concinno.feature_config.LEGACY_ALIASES` — when a
+        caller asks for the canonical (new) name and the cc_config.json
+        only has the legacy (old) name set, we transparently read the
+        legacy entry and emit a one-time stderr deprecation warning per
+        alias. Symmetric: if a caller asks for the legacy name we
+        forward to the canonical lookup so existing call-sites keep
+        working until the alias is dropped.
+        """
         self._load()
-        feat = self._data.get("features", {}).get(name, {})
+        canonical = _resolve_feature_alias(name)
+        features = self._data.get("features", {})
+        # Always warn when the caller used the legacy name — they
+        # need to migrate even if they also have the canonical key
+        # set on disk.
+        if canonical != name:
+            _warn_legacy_alias(name, canonical)
+        feat = features.get(canonical) or {}
+        # Fallback path: caller asked by legacy name but only canonical
+        # is on disk (already handled above by .get(canonical)). Now
+        # cover the inverse — caller asked by either name and only the
+        # legacy entry exists on disk.
+        if not feat:
+            if canonical != name and name in features:
+                # Legacy caller, legacy entry on disk.
+                feat = features[name]
+            else:
+                # Canonical (or any) caller, only legacy entry on disk.
+                for legacy, target in _legacy_aliases().items():
+                    if target == canonical and legacy in features:
+                        feat = features[legacy]
+                        _warn_legacy_alias(legacy, canonical)
+                        break
         if key == "enabled":
             return feat.get("enabled", True)
         return feat.get(key)
 
     def feature_all(self, name: str) -> dict:
-        """Get full feature config dict."""
+        """Get full feature config dict.
+
+        Same alias semantics as :meth:`feature`.
+        """
         self._load()
-        return dict(self._data.get("features", {}).get(name, {}))
+        canonical = _resolve_feature_alias(name)
+        features = self._data.get("features", {})
+        if canonical != name:
+            _warn_legacy_alias(name, canonical)
+        feat = features.get(canonical)
+        if feat is not None:
+            return dict(feat)
+        # Fallback: legacy entry on disk.
+        if canonical != name and name in features:
+            return dict(features[name])
+        for legacy, target in _legacy_aliases().items():
+            if target == canonical and legacy in features:
+                if name == canonical:
+                    _warn_legacy_alias(legacy, canonical)
+                return dict(features[legacy])
+        return {}
 
     def set_feature(self, name: str, key: str, value: Any) -> None:
         """Update a feature config value and persist to disk.
 
-        Use feature_config.validate() first for risk warnings.
+        Use feature_config.validate() first for risk warnings. Writes
+        always go to the canonical name even if the caller used a
+        legacy alias (keeps the on-disk config clean).
         """
         self._load()
+        canonical = _resolve_feature_alias(name)
+        if canonical != name:
+            _warn_legacy_alias(name, canonical)
         features = self._data.setdefault("features", {})
-        feat = features.setdefault(name, {})
+        feat = features.setdefault(canonical, {})
         feat[key] = value
         self.update_file("features", features)
 

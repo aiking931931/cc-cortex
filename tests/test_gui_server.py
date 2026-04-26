@@ -231,6 +231,6 @@ def test_post_manual_pin_accepted(client, tmp_path, monkeypatch):
 def test_example_populated_for_gaia_features(client):
     r = client.get("/api/features")
     examples = {f["name"]: f["example"] for f in r.json()["features"]}
-    for name in ("gaia_tool_router", "bassclef_wordreverse",
-                 "polygon_counting_hint", "image_upscale_4x"):
+    for name in ("gaia_tool_router", "gaia_music_image_upscale",
+                 "gaia_polygon_image_upscale", "image_upscale_4x"):
         assert examples.get(name), f"missing example for {name}"

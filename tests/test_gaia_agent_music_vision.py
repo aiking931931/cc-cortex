@@ -276,7 +276,11 @@ class TestPolygonCounting:
         Image.new("RGB", (1024, 800), "white").save(img)
 
         def _feature(name, default=True):
-            return False if name == "polygon_counting_hint" else default
+            return (
+                False
+                if name == "gaia_polygon_image_upscale"
+                else default
+            )
         monkeypatch.setattr(gaia_agent_mod, "_feature_enabled", _feature)
 
         captured = {}
@@ -297,11 +301,12 @@ class TestPolygonCounting:
             "How many edges are there?", str(img),
         )
         text_block = captured["messages"][0]["content"][0]["text"]
-        # 2.x: polygon_counting_hint feature only gates the upscale
-        # path. The dispatcher still falls through to the generic L2
-        # scaffold when an image is present (any image deserves the
-        # scaffold). What it does NOT inject is the L1 polygon-area
-        # anchor (different feature toggle, not triggered by this Q).
+        # 2.x: gaia_polygon_image_upscale feature only gates the
+        # upscale path. The dispatcher still falls through to the
+        # generic L2 scaffold when an image is present (any image
+        # deserves the scaffold). What it does NOT inject is the L1
+        # polygon-area anchor (different feature toggle, not
+        # triggered by this Q).
         assert "[Orthogonal polygon area procedure]" not in text_block
 
 
@@ -351,7 +356,7 @@ class TestFeatureSwitches:
             "gaia_tool_router", default=True,
         ) is True
 
-    def test_bassclef_feature_disabled_skips_hint(
+    def test_music_image_upscale_feature_disabled_skips_hint(
         self, gaia_agent_mod, tmp_path, monkeypatch,
     ):
         pytest.importorskip("PIL")
@@ -361,7 +366,11 @@ class TestFeatureSwitches:
 
         # Hide the hint even though the question is music-notation.
         def _feature(name, default=True):
-            return False if name == "bassclef_wordreverse" else default
+            return (
+                False
+                if name == "gaia_music_image_upscale"
+                else default
+            )
         monkeypatch.setattr(gaia_agent_mod, "_feature_enabled", _feature)
 
         captured = {}
@@ -382,7 +391,8 @@ class TestFeatureSwitches:
             "Read the bass clef notes.", str(img),
         )
         text_block = captured["messages"][0]["content"][0]["text"]
-        # bassclef_wordreverse off → no scaffold prelude for music-only Q.
+        # gaia_music_image_upscale off → no scaffold prelude for
+        # music-only Q.
         assert "Step 1 — Describe" not in text_block
 
     def test_image_upscale_feature_disabled_keeps_original(

@@ -1381,8 +1381,11 @@ def _solve_vision_local(question: str, image_path: str) -> str:
     Music-notation questions (bass clef / staff / noteheads) get:
       - 4× LANCZOS upscale for small images (<800px) so noteheads land
         on enough pixels for the visual encoder
-      - a bass-clef mnemonic + word-reverse L/S tag + time-unit hint
-        prepended to the user prompt
+
+    The L1 procedural anchor (generic music-theory / polygon procedure
+    text) is gated by separate ``gaia_music_procedure_anchor`` /
+    ``gaia_polygon_area_procedure_anchor`` feature toggles registered
+    in :mod:`concinno.feature_config`.
     """
     try:
         llm = _get_local_vision_llm()
@@ -1391,11 +1394,11 @@ def _solve_vision_local(question: str, image_path: str) -> str:
         return ""
     music_mode = (
         _is_music_notation_question(question)
-        and _feature_enabled("bassclef_wordreverse")
+        and _feature_enabled("gaia_music_image_upscale")
     )
     polygon_mode = (
         _is_polygon_counting_question(question)
-        and _feature_enabled("polygon_counting_hint")
+        and _feature_enabled("gaia_polygon_image_upscale")
     )
     upscale_enabled = _feature_enabled("image_upscale_4x")
     should_upscale = (music_mode or polygon_mode) and upscale_enabled

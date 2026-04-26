@@ -265,19 +265,24 @@ Concinno ships ~40 modules organized into 5 layers:
 
 | Feature | Category | Effect scope | ZIQ-tunable | Description |
 |---------|----------|--------------|-------------|-------------|
+| `intent_anchor` | behavioral | immediate |  | CBUA Stage 0 / B4 anchoring: re-inject the user's original intent every N write-tools to prevent scope drift, redteam tangents, and direction-loss in long sessions. |
 | `insight_engine` | cognitive | immediate |  | Proactive knowledge injection when user prompt matches blind-spot rules |
-| `bassclef_wordreverse` | context | immediate |  | Inject bass-clef mnemonic + word-reverse L/S tag + time-unit hint for music-notation vision questions |
 | `binary_extractor` | context | immediate |  | Inline-extract xlsx/csv/tsv attachments into the prompt (bypasses weak-model tool-use discipline) |
 | `cognitive_anchor` | context | session_restart | ✓ | Inject solid-state language red-team prompts before high-risk operations (architecture edits, large deletions, new modules, deploys) |
+| `gaia_music_image_upscale` | context | immediate |  | Pre-inference 4× LANCZOS upscale gate for music notation image questions. Small (<800px) staff-notation images are upscaled before being fed to the local vision encoder, which underperforms on sub-pixel notehead detail at native resolution. Pure preprocess — no prompt injection. Renamed from legacy `bassclef_wordreverse` (2026-04-26) to remove task-specific naming; back-compat alias preserved one minor version. |
+| `gaia_music_procedure_anchor` | context | immediate |  | L1 domain-typed anchor: inject music-notation procedure (clef line/space mnemonics + common time-units) for any question referencing musical staff / clef / noteheads. Generic textbook knowledge, no GAIA answer paths. |
+| `gaia_polygon_area_procedure_anchor` | context | immediate |  | L1 domain-typed anchor: inject orthogonal-polygon area procedure (label-vs-decoration / boundary walk / closure check / decompose / sum / sanity check) for area-of-polygon questions. Generic geometry, no GAIA answer paths. |
+| `gaia_polygon_image_upscale` | context | immediate |  | Pre-inference 4× LANCZOS upscale gate for orthogonal-polygon image questions. Small (<800px) polygon-with-labels images are upscaled before being fed to the local vision encoder, which loses small numeric labels at native resolution. Pure preprocess — no prompt injection. Renamed from legacy `polygon_counting_hint` (2026-04-26) to remove task-specific naming; back-compat alias preserved one minor version. |
 | `gaia_tool_router` | context | immediate |  | Route GAIA questions by the Annotator-Metadata Tools field (ground-truth tool list) instead of self-regex heuristic |
+| `gaia_web_only_procedure_anchor` | context | immediate |  | L1 domain-typed anchor: inject web-research procedure (call web_search / multi-hop strategy / Wayback fallback) for questions with no attachment + temporal/named-entity cues. Generic research strategy, no GAIA answer paths. |
 | `gemma4_vision` | context | immediate |  | Enable Gemma 4 native vision handler (Gemma4VisionChatHandler) in place of Qwen2.5-VL fallback |
 | `image_upscale_4x` | context | immediate |  | Auto 4× LANCZOS upscale for small (<800 px) images before vision inference — music notation / compact tables benefit |
 | `language_enforce` | context | session_restart |  | Inject language enforcement on every tool call — forces thinking + responses in configured language |
 | `ocr_fallback` | context | immediate |  | Route text-heavy images through OCR + text-LLM reasoning (charts / headstones / documents) before vision |
 | `pipeline_mode` | context | immediate |  | Toggle between Dynamic (Guard Pipeline + learning loop) and Static (pure prompt pipeline, no guards) mode. Dynamic is a strict superset of Static |
-| `polygon_counting_hint` | context | immediate |  | Inject a systematic walk-the-boundary procedure + label-as-metadata warning for polygon edge/vertex counting vision questions (off-by-one defence) |
 | `session_switches` | context | session_restart |  | SessionStart summary of non-default switches — ensures the agent reads user opt-outs before primacy-bias kicks in |
 | `unified_inprocess` | context | immediate |  | Use a single in-process Llama instance for both text and vision (KV cache shared, no HTTP :9000 hop) |
+| `plugins_enabled` | core | immediate |  | Master switch for entry-points plugin discovery (concinno.features + concinno.skills). Off = ignore all installed concinno-skills-* packages. Off via env CONCINNO_PLUGINS_ENABLED=0 or allowlist restrictions via CONCINNO_PLUGINS_ALLOWLIST=pkg-a,pkg-b. Same trust model as pytest/flask/mkdocs plugins -- pip install is the trust boundary. |
 | `agent_cap` | hard_gate | immediate | ✓ | Block execution-type Agent spawn after N times per session. Research agents (Explore/Plan/read-only) are uncapped. |
 | `bash_background_gate` | hard_gate | immediate |  | Block long-running Bash commands without run_in_background |
 | `boundary_guard` | hard_gate | immediate |  | Hook/library boundary violation detection (PreToolUse DENY) |
@@ -303,6 +308,7 @@ Concinno ships ~40 modules organized into 5 layers:
 | `linting` | hard_quality | immediate |  | ESLint for JavaScript files |
 | `structural_guard` | hard_quality | immediate | ✓ | Structural analysis (func length / nesting / TODO debt / file size) |
 | `typescript` | hard_quality | immediate |  | tsc --noEmit type checking with SHA256 cache |
+| `memory_relief` | optional_optimization | immediate |  | Windows-only RAM cleanup with before/after stats and per-process trim list. SAFE tier needs no admin; STANDBY/AGGRESSIVE/DESTRUCTIVE require elevated token. Auto-fires as wave 4 of process_guard chain when wave 3 leaves RAM above threshold. |
 | `configure_permissions` | utility | immediate |  | One-shot allowlist bootstrap — add ~100 safe Bash patterns (pytest/ruff/git/pip) to ~/.claude/settings.json so the agent stops being prompted for routine ops |
 | `deny_marker` | ux | session_restart |  | Red ANSI counter on every deny (✖ 阻擋 #N) |
 | `session_summary` | ux | session_restart |  | Visual session end summary (token/streak/files box) |
