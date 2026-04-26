@@ -621,8 +621,12 @@ def auto_commit(
     finishes in O(seconds) regardless of file count.
 
     Skip gates (return None without staging anything):
-        1. ``CONCINNO_NO_AUTOCOMMIT=1`` env override — for polling /
-           benchmark sessions that explicitly opt out.
+        1. ``CONCINNO_NO_AUTOCOMMIT=1`` (or alias
+           ``CONCINNO_SKIP_AUTO_COMMIT=1``, the name documented in
+           ``rules/official/L1/switches.md`` row #5) env override — for
+           polling / benchmark sessions that explicitly opt out. The
+           alias was added 2026-04-26 because the docs and the code had
+           drifted to different env var names since 2.x.
         2. Working tree contains only hook-internal state — see
            ``_is_trivial_path``. Without this, a 5-minute polling
            session burns one commit per turn on cache/marker writes
@@ -632,8 +636,13 @@ def auto_commit(
     Returns:
         Commit message on success, or None if nothing to commit / failed.
     """
-    # Skip gate 1: explicit opt-out
+    # Skip gate 1: explicit opt-out. Both env var names accepted —
+    # ``CONCINNO_NO_AUTOCOMMIT`` is the original; ``CONCINNO_SKIP_AUTO_COMMIT``
+    # is the name documented in switches.md row #5. User setting either
+    # must work, otherwise the documented opt-out is illusory.
     if os.environ.get("CONCINNO_NO_AUTOCOMMIT") == "1":
+        return None
+    if os.environ.get("CONCINNO_SKIP_AUTO_COMMIT") == "1":
         return None
 
     if cwd is None:

@@ -61,6 +61,75 @@ class TestHasExternalConstraints:
 # ── PremiseGate.check() ────────────────────────────────────────────────────────
 
 
+class TestPremiseGateEnvOptOut:
+    """Verify CONCINNO_PREMISE_GATE=0 (and aliases) actually disables the
+    gate. switches.md row #10 has documented this env var since well before
+    the implementation existed; 2026-04-26 wiring audit added the check."""
+
+    def test_env_zero_skips_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CONCINNO_PREMISE_GATE", "0")
+        guard = PremiseGate()
+        store = StateStore(str(tmp_path))
+        # Set up a state that WOULD trigger a deny.
+        store.write("premise_gate", "s", {
+            "has_external_constraints": True,
+            "premise_verified": False,
+        })
+        ctx = _ctx(tmp_path, session_id="s")
+        # Env var off → gate must return None even with constraints pending.
+        assert guard.check(ctx) is None
+
+    def test_env_false_skips_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CONCINNO_PREMISE_GATE", "false")
+        guard = PremiseGate()
+        store = StateStore(str(tmp_path))
+        store.write("premise_gate", "s", {
+            "has_external_constraints": True,
+            "premise_verified": False,
+        })
+        assert guard.check(_ctx(tmp_path, session_id="s")) is None
+
+    def test_env_off_skips_gate(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CONCINNO_PREMISE_GATE", "OFF")
+        guard = PremiseGate()
+        store = StateStore(str(tmp_path))
+        store.write("premise_gate", "s", {
+            "has_external_constraints": True,
+            "premise_verified": False,
+        })
+        assert guard.check(_ctx(tmp_path, session_id="s")) is None
+
+    def test_env_unset_does_not_skip(self, tmp_path, monkeypatch):
+        # Confirm the default (env unset) path still enforces the gate —
+        # otherwise we would have made the gate permanently off.
+        monkeypatch.delenv("CONCINNO_PREMISE_GATE", raising=False)
+        guard = PremiseGate()
+        store = StateStore(str(tmp_path))
+        store.write("premise_gate", "s", {
+            "has_external_constraints": True,
+            "premise_verified": False,
+        })
+        # State indicates pending verification → guard MUST fire.
+        result = guard.check(_ctx(tmp_path, session_id="s"))
+        assert result is not None
+        assert result.action == GuardAction.DENY
+
+    def test_env_one_does_not_skip(self, tmp_path, monkeypatch):
+        # Truthy values keep the gate ON; only the explicit off-set
+        # (0/false/no/off) opts out. Avoids accidental "set to anything
+        # = disable" footgun.
+        monkeypatch.setenv("CONCINNO_PREMISE_GATE", "1")
+        guard = PremiseGate()
+        store = StateStore(str(tmp_path))
+        store.write("premise_gate", "s", {
+            "has_external_constraints": True,
+            "premise_verified": False,
+        })
+        result = guard.check(_ctx(tmp_path, session_id="s"))
+        assert result is not None
+        assert result.action == GuardAction.DENY
+
+
 class TestPremiseGateCheck:
     def test_no_cache_dir_returns_none(self):
         guard = PremiseGate()

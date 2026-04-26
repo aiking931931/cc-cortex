@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- handoff_engine: generic+specialized template system + ZIQ router +
+  FieldRead auto-fill + on-start inject hook (replaces ad-hoc 交接
+  markdown writing). 4 initial specialized templates (benchmark /
+  release / research / build). kb_handoff Skill rewritten.
+- prompt_hooks: `parallel_spawn_reminder` — UserPromptSubmit hook that
+  detects active-waiting phrasing while a background sub-agent is
+  in-flight and suggests spawning a parallel sub-agent for non-
+  overlapping ⬜ items instead of idling. Sediments
+  `feedback_idle_waiting_is_anti_pattern.md` (2026-04-26).
+- prompt_hooks: `time_steward` — DAG-aware time-scheduling hook for
+  autonomous agent. 6 capabilities (visualize ⬜ DAG / pre-spawn
+  contention check / idle detection / sub-agent budget tracker /
+  re-triage on completion / cancel-restart heuristic). Feature flag
+  `time_steward.enabled` default True. Supersedes the placeholder
+  `parallel_spawn_reminder` hook from earlier same-day commit (main
+  agent merges & deletes the placeholder).
+
 ### Changed
 
 - Rename feature flags `bassclef_wordreverse` → `gaia_music_image_upscale`,
@@ -16,6 +35,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GAIA test-set answer paths; new names describe actual behavior
   (LANCZOS image upscale gate). Actual code path unchanged — pure
   preprocess, no prompt injection.
+
+## [3.1.2] - 2026-04-26
+
+### Fixed — opt-out wiring round 2 (env var doc-vs-code drift)
+
+User-driven audit ("我說關了就要真的關了 — 全面檢查類似關閉還亂擋的問題"):
+
+- ``concinno.premise_gate.PremiseGate.check``: implemented the
+  ``CONCINNO_PREMISE_GATE`` env var opt-out. The switches.md row #10
+  has documented this env var since well before any code path read it
+  — setting ``CONCINNO_PREMISE_GATE=0`` (or ``false`` / ``no`` / ``off``,
+  case-insensitive) now actually skips the gate. 5 new tests cover
+  the truthy / falsy / unset paths to prove the documented opt-out
+  works as advertised.
+- ``concinno.git_assist.auto_commit``: added
+  ``CONCINNO_SKIP_AUTO_COMMIT=1`` as an alias for the existing
+  ``CONCINNO_NO_AUTOCOMMIT=1`` env var. The switches.md row #5 has
+  documented the ``SKIP`` name for ages but the code only honoured
+  the ``NO`` name. Both now work; 4 new tests cover the alias path.
+
+### Audit notes (no shipped code change)
+
+- ``rules/official/L1/switches.md`` row #24 ``git_health`` — confirmed
+  vaporware: the hook script, env vars (``CC_GIT_HEALTH_DISABLED`` /
+  ``CC_GIT_HEALTH_THRESHOLD``), and ``cc_config.json::git_health.*``
+  config keys are all referenced by docs but unimplemented (operator's
+  personal ``~/.claude/rules/switches.md`` has the row; OSS canonical
+  is clean). Not shipped here — operator owns the personal-rules cleanup.
+- 22 other documented opt-outs verified against code: all functional
+  (env vars from rows #1, #6, #7, #21, #23 traced to live code; rows
+  #2, #3, #4, #11, #12-20, #22 use FEATURE_META + cc_config.json or
+  ``~/.concinno/<feature>.json`` paths that are wired correctly).
+
+### Verification
+
+- 178/178 premise_gate + git_assist tests pass (5 + 4 new)
+- 113/113 destruction_guard tests still pass (3.1.1 fix preserved)
+- ruff clean across all changed files
 
 ## [3.1.1] - 2026-04-26
 
