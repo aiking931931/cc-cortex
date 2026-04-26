@@ -1969,6 +1969,65 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # 4.1.0 — polling watcher: detect "agent is waiting on X" patterns
+    # at PostToolUse, register a poll-able wait record, fan-in active
+    # waits + drained alerts at UserPromptSubmit. Backed by a daemon
+    # thread that re-runs check commands every interval_seconds.
+    # NOT in DEFAULT_OFF_4_0_0 — productivity feature, ships on by default.
+    "polling_watcher": {
+        "category": "behavioral",
+        "description": (
+            "Auto-detect wait states (sub-agent dispatch, background bash, "
+            "upload/deploy/CI) and run a real OS-timer daemon polling "
+            "loop. Surfaces active waits + drained status alerts on "
+            "every UserPromptSubmit. Independent of sub-agent "
+            "notifications — the agent always knows what's pending."
+        ),
+        "description_zh": (
+            "自動偵測等待狀態（子代理派發 / 背景 bash / 上傳 / 部署 / "
+            "CI），啟動真實 OS-timer daemon 輪巡。每次 UserPromptSubmit "
+            "fan-in active waits + 狀態變化 alerts。**不依賴**子代理通知 — "
+            "agent 永遠知道有什麼 pending。"
+        ),
+        "ziq_autotunable": False,  # behavioural; binary judgement
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "等待狀態（上傳 / 部署 / 子代理）無自動 polling，agent 需手動"
+            "ScheduleWakeup 或盯著背景任務"
+        ),
+        "consequences_if_off_en": (
+            "Waits (upload / deploy / sub-agent) have no auto-polling; "
+            "agent must remember ScheduleWakeup or babysit background "
+            "tasks."
+        ),
+        "params": {
+            "interval_seconds": {
+                "type": "int",
+                "default": 60,
+                "min": 30,
+                "max": 600,
+                "recommended": 60,
+                "risk_low": (
+                    "Below 30 spams the daemon thread + check_cmd "
+                    "subprocess at no benefit (status changes don't "
+                    "happen sub-30s for these workloads)."
+                ),
+                "risk_high": (
+                    "Above 600 (10 min) lets transitions linger past the "
+                    "point a human-in-the-loop would have noticed manually."
+                ),
+            },
+            "stale_age_seconds": {
+                "type": "int",
+                "default": 86400,
+                "min": 3600,
+                "max": 7 * 86400,
+                "recommended": 86400,
+            },
+        },
+    },
 }
 
 

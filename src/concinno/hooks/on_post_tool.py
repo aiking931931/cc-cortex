@@ -769,6 +769,15 @@ def main(hook_data: dict | None = None) -> None:
     # 5. Sentinel outcome recording
     _run_sentinel(hook_data, tool_name)
 
+    # 5.4 polling-watcher — register wait state for async ops (4.1.0)
+    try:
+        from concinno.hooks.wait_watcher import maybe_register_wait
+        polling_ctx = maybe_register_wait(tool_name, tool_input)
+        if polling_ctx:
+            fragments.append(polling_ctx)
+    except Exception:
+        pass  # never block the hook
+
     # 5.5 ThinkingDepthGuard — record ALL tools, warn only on Edit
     try:
         if _CACHE_DIR:

@@ -392,6 +392,17 @@ def handle_prompt_submit(
     if time_steward_ctx:
         contexts.append(time_steward_ctx)
 
+    # 11. polling-watcher — surface active waits + drained alerts
+    #     so the agent sees pending async work at every prompt without
+    #     depending on sub-agent notifications.
+    try:
+        from concinno.hooks.wait_inject import build_context as _wi_build
+        polling_ctx = _wi_build()
+        if polling_ctx:
+            contexts.append(polling_ctx)
+    except Exception:
+        pass  # never block prompt submission on this
+
     return {"contexts": contexts}
 
 

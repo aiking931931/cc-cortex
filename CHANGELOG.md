@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-04-26 — polling watcher (real timer + ScheduleWakeup self-wake)
+
+### Added — `concinno.polling` module
+
+Auto-detect "agent is waiting" patterns at PostToolUse, fan-in active
+waits + drained alerts at every UserPromptSubmit. Backed by a real
+daemon thread that re-runs status check commands every 60 s
+**independent of sub-agent notifications** — the user directive
+2026-04-26 ("設真定時輪巡 + ScheduleWakeup 自醒 query，不依賴
+sub-agent 通知") is now enforced infrastructure, not a rule the
+agent has to remember.
+
+* `concinno.polling.classifier.classify_wait` — recognises
+  `Bash(twine upload | npm publish | cargo publish | docker push |
+  scp | rsync | gh release upload | gh pr checks | gh run watch |
+  deploy.py | ansible-playbook | npm install | cargo build |
+  pytest --timeout | git clone | runpod ...)` plus `Agent` and
+  `Bash(run_in_background=True)`. Returns
+  `WaitClassification(kind, check_cmd, eta_seconds)`.
+* `concinno.polling.wait_queue` — atomic JSON CRUD on
+  `~/.concinno/state/wait_queue.json` + `poll_alerts.json`. File
+  lock via `fcntl` (Unix) / `msvcrt` (Windows) with no-op fallback.
+  Tolerant load (corrupt JSON → backup + start fresh).
+* `concinno.polling.daemon` — daemon thread, 60 s default interval
+  (`CONCINNO_POLLING_INTERVAL` env override). Auto-purges records
+  older than 24 h every 30 min. atexit-registered for clean shutdown.
+* `concinno.hooks.wait_watcher.maybe_register_wait` — wired into
+  `on_post_tool.py` after sentinel recording. Detects + registers +
+  emits an `additionalContext` hint to the agent including a suggested
+  `ScheduleWakeup(delaySeconds=…)` invocation.
+* `concinno.hooks.wait_inject.build_context` — wired into
+  `on_prompt_submit.py` as fragment #11. Surfaces active waits + drains
+  poll alerts at every prompt so the agent always knows what's pending.
+
+### Feature gate
+
+* New `polling_watcher` FEATURE_META entry — category `behavioral`,
+  recommended on, severity `minor`. **NOT in `DEFAULT_OFF_4_0_0`** —
+  this is a productivity feature and ships default-ON.
+* Per-feature opt-out: `concinno config set features.polling_watcher.enabled false`.
+* Daemon-level kill switch: `CONCINNO_POLLING_DISABLED=1`.
+* Tunable: `interval_seconds` (default 60, min 30, max 600) +
+  `stale_age_seconds` (default 24 h).
+
+### Tests
+
+* `tests/test_polling.py` — 26 tests covering classifier, CRUD,
+  alerts drain semantics, hook integration, FEATURE_META wiring,
+  stale purge, daemon lifecycle.
+
+### Files added / modified
+
+```text
+src/concinno/polling/__init__.py        (new)
+src/concinno/polling/classifier.py      (new)
+src/concinno/polling/wait_queue.py      (new)
+src/concinno/polling/daemon.py          (new)
+src/concinno/hooks/wait_watcher.py      (new)
+src/concinno/hooks/wait_inject.py       (new)
+src/concinno/hooks/on_post_tool.py      (+step 5.4 polling-watcher)
+src/concinno/hooks/on_prompt_submit.py  (+step 11 polling-inject)
+src/concinno/feature_config.py          (+polling_watcher entry)
+tests/test_polling.py                   (new — 26 tests)
+```
+
 ## [4.0.0] - 2026-04-26 — default-off feature gates (SEMVER-MAJOR breaking) + GAIA Phase-5 bundle + memory_relief perf
 
 ### Changed (BREAKING) — feature gate defaults
