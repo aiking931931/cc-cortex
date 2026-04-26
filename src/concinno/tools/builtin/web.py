@@ -17,7 +17,7 @@
 
 Design notes
 ------------
-Ported from Sancio (``projects/persona-api/src/persona/tools/``) to become
+Ported from Sancio (``projects/sancio-runtime/src/persona/tools/``) to become
 the canonical location for network-read tools in the Concinno library.
 
 Differences from the Sancio originals:

@@ -132,6 +132,20 @@ def _git_changed_handoff_files(project_dir: str) -> list[str]:
     return handoff_files
 
 
+def _is_disabled() -> bool:
+    """Resolve opt-out: env var or ``cfg.feature(...)``. 2026-04-26 wiring fix."""
+    raw = os.environ.get("CONCINNO_HANDOFF_CLAIM_GUARD_DISABLED", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        from concinno.core.config import get_config
+        if get_config().feature("handoff_claim_guard", "enabled") is False:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def on_stop(hook_data: dict) -> Optional[str]:
     """Stop hook entry point.
 
@@ -139,6 +153,9 @@ def on_stop(hook_data: dict) -> Optional[str]:
         - "HANDOFF_CLAIM_BLOCK:<reason>" if handoff claimed but not written
         - None otherwise
     """
+    if _is_disabled():
+        return None
+
     session_id = hook_data.get("session_id", "")
 
     # Circuit breaker

@@ -7,24 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — wiring-audit round 3 (orphan guards + missing opt-out toggles)
+
+A 26-minute Opus audit of the 3.1.2 codebase produced five findings,
+each one a doc/runtime drift: a feature toggle was advertised somewhere
+(``rules/L1/switches.md`` / a ``FEATURE_META`` entry / a published
+module docstring) but no code path actually consulted it, so the user
+could turn the switch and observe no behavioural change. All five are
+now wired through. ``release_authorization`` was the most consequential
+of the five — its ``check_authorization`` function had been live since
+2026-04-21 but no PreToolUse hook ever called it, meaning
+``release_auth.disabled=True`` and ``False`` produced identical agent
+behaviour at hook time.
+
+- ``concinno.release_authorization``: new ``ReleaseAuthorizationGuard``
+  (SECURITY layer) registered in ``guards.registry._register_security``.
+  Detects ``twine upload`` / ``cargo publish`` / ``git tag push remote``
+  bash commands, parses target ``(package, version)`` from PEP 427/440/
+  625-shaped artifact filenames (wheel / sdist / glob / pre/post/dev
+  tags), reads the recent user transcript, and denies until the
+  canonical ``go publish <pkg> <ver>`` string is detected (or
+  ``release_auth.disabled=True`` short-circuits to allow). 18 new tests
+  in ``tests/test_release_authorization_guard.py``.
+- ``concinno.publish_scan.PublishScanGuard`` and ``SemverGuard``:
+  previously orphaned — both classes existed and were ``BaseGuard``
+  subclasses, but neither was registered in the default pipeline. Both
+  now register in ``guards.registry`` (``PublishScanGuard`` next to
+  ``DestructionGuard`` in SECURITY; ``SemverGuard`` after
+  ``VersionSyncGuard`` in QUALITY). ``feature_config.FEATURE_META``
+  gains ``publish_scan_guard`` and ``semver_gate`` entries so the
+  per-guard ``enabled`` toggle takes effect via the standard 6-source
+  resolution chain.
+- ``concinno.destruction_guard``: ``r"npm\s+publish\b"`` regex removed
+  from R2_PATTERNS. The 2026-04-21 reshuffle moved publish-time gates
+  (``twine upload`` / ``docker push <public-registry>``) out into
+  ``release_authorization`` so the publish-toggle could opt them out
+  without weakening data-deletion protection; ``npm publish`` was
+  overlooked at the time and the audit caught it. Inline NOTE updated
+  to record the full scope of the move.
+- ``concinno.excuse_scanner`` /
+  ``concinno.sedimentation_gate`` /
+  ``concinno.handoff_claim_guard``: each now reads
+  ``CONCINNO_<FEATURE>_DISABLED`` env vars and consults
+  ``cfg.feature(<name>, "enabled")`` at the entry point of its
+  ``on_stop`` hook. Before this fix the modules were hard-coded to
+  enforce, ignoring the toggles other parts of the codebase advertised.
+- ``concinno.git_size_monitor``: gains
+  ``CONCINNO_GIT_SIZE_MONITOR_DISABLED`` env opt-out plus the legacy
+  ``CC_GIT_HEALTH_DISABLED`` alias documented in ``switches.md`` row
+  #24 (which previously read like a working toggle but the code never
+  consulted it). Threshold env var ``CONCINNO_GIT_SIZE_WARN_GB``
+  unchanged.
+- ``concinno.feature_config``: seven new ``FEATURE_META`` entries
+  (``release_authorization``, ``publish_scan_guard``, ``semver_gate``,
+  ``excuse_scanner``, ``sedimentation_gate``, ``handoff_claim_guard``,
+  ``git_size_monitor``) so the GUI toggle list and ``concinno features
+  get`` CLI both surface the audit-fixed switches.
+- 32 new tests across ``tests/test_release_authorization_guard.py``
+  (18) and ``tests/test_stop_gate_optouts.py`` (14) pin the wiring so
+  doc / runtime drift is caught at CI time on any future regression.
+
+### Note
+
+Pre-existing structural-debt warnings on ``destruction_guard.evaluate``
+(137 lines > 120) and ``feature_config.py`` (2280 lines > 1500) are
+not introduced by this patch and are explicitly carry-over (planned
+``main.py``-style refactor, separate work item).
+
 ### Added
 
+- gaia_agent: three L1 domain-typed procedure anchors
+  (`_MUSIC_NOTATION_PROCEDURE` / `_ORTHOGONAL_POLYGON_PROCEDURE` /
+  `_WEB_ONLY_PROCEDURE`) replacing the older L2 generic visual-reasoning
+  scaffold. Anchors contain only generic textbook / Wikipedia-level
+  domain knowledge — no GAIA answer paths. Anti-leakage assertions in
+  tests ensure no test-set strings (`DECADE` / `90` / `39` /
+  `Dastardly Mash`) appear verbatim in anchor bodies.
 - handoff_engine: generic+specialized template system + ZIQ router +
   FieldRead auto-fill + on-start inject hook (replaces ad-hoc 交接
   markdown writing). 4 initial specialized templates (benchmark /
   release / research / build). kb_handoff Skill rewritten.
-- prompt_hooks: `parallel_spawn_reminder` — UserPromptSubmit hook that
-  detects active-waiting phrasing while a background sub-agent is
-  in-flight and suggests spawning a parallel sub-agent for non-
-  overlapping ⬜ items instead of idling. Sediments
-  `feedback_idle_waiting_is_anti_pattern.md` (2026-04-26).
 - prompt_hooks: `time_steward` — DAG-aware time-scheduling hook for
-  autonomous agent. 6 capabilities (visualize ⬜ DAG / pre-spawn
+  autonomous agent. Six capabilities: ⬜ DAG visualiser / pre-spawn
   contention check / idle detection / sub-agent budget tracker /
-  re-triage on completion / cancel-restart heuristic). Feature flag
-  `time_steward.enabled` default True. Supersedes the placeholder
-  `parallel_spawn_reminder` hook from earlier same-day commit (main
-  agent merges & deletes the placeholder).
+  re-triage on completion / cancel-restart heuristic. Wired into
+  `on_prompt_submit` step 10 (replacing the same-day single-purpose
+  `parallel_spawn_reminder` placeholder, which is deleted) and into
+  `on_subagent_start` / `on_subagent_stop` for spawn-lifecycle
+  registry updates. Feature flag `time_steward.enabled` default True.
+  Sediments `feedback_idle_waiting_is_anti_pattern.md` (2026-04-26).
 
 ### Changed
 

@@ -113,11 +113,27 @@ def _is_valid_feedback(path: str, cutoff: float) -> bool:
         return False
 
 
+def _is_disabled() -> bool:
+    """Resolve opt-out: env var or ``cfg.feature(...)``. 2026-04-26 wiring fix."""
+    raw = os.environ.get("CONCINNO_SEDIMENTATION_GATE_DISABLED", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        from concinno.core.config import get_config
+        if get_config().feature("sedimentation_gate", "enabled") is False:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def on_stop(hook_data: dict) -> Optional[str]:
     """On-stop entry point. Returns block string or None.
 
     Called by concinno.hooks.on_stop pipeline via _build_sedimentation_gate.
     """
+    if _is_disabled():
+        return None
     session_id = os.environ.get("CC_SESSION_ID", "")
     if not session_id:
         return None

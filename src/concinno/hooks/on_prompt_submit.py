@@ -376,4 +376,83 @@ def handle_prompt_submit(
     # 8. Auto-capture session goal from first prompt (side-effect only)
     _auto_capture_goal(user_prompt, cache_dir, session_id)
 
+    # 9. Handoff resume — when user says "交接 X" / "/handoff resume X",
+    #    detect intent and inject §0/§1/§5 from the existing handoff.
+    handoff_ctx = _handoff_resume_inject(user_prompt)
+    if handoff_ctx:
+        contexts.append(handoff_ctx)
+
+    # 10. time_steward — DAG visualiser / pre-spawn contention / idle
+    #     detection / sub-agent budget tracker / re-triage on completion /
+    #     cancel-restart heuristic. Wired in Phase 2 of 3.2.0 ship-prep
+    #     (replaces the older single-purpose parallel_spawn_reminder).
+    time_steward_ctx = _time_steward_inject(
+        user_prompt, session_id=session_id,
+    )
+    if time_steward_ctx:
+        contexts.append(time_steward_ctx)
+
     return {"contexts": contexts}
+
+
+def _handoff_resume_inject(user_prompt: str) -> str | None:
+    """Best-effort §0/§1/§5 inject for resumed handoffs.
+
+    Catches every exception so a missing handoff dir / unreadable file
+    cannot break prompt submission. The handoff path is derived from
+    ``$HOME/_AI_BRAIN/06_Handoffs/<project>/`` glob; if no file matches
+    the project name the underlying ``build_resume_inject`` returns the
+    "not found" advisory which is still useful to the agent.
+    """
+    try:
+        from pathlib import Path
+
+        from concinno.handoff_resume_hook import (
+            build_resume_inject,
+            detect_resume_intent,
+        )
+        proj = detect_resume_intent(user_prompt)
+        if not proj:
+            return None
+        # Resolve handoff dir: $HOME/_AI_BRAIN/06_Handoffs/<proj>/.
+        # In environments without _AI_BRAIN (e.g. fresh strangers),
+        # advisory still fires with a "not found" message.
+        base = Path.home() / "_AI_BRAIN" / "06_Handoffs" / proj
+        if base.is_dir():
+            candidates = sorted(base.glob("交接_*.md"), reverse=True)
+            if not candidates:
+                candidates = sorted(base.glob("*.md"), reverse=True)
+            handoff_path = candidates[0] if candidates else (base / "交接.md")
+        else:
+            handoff_path = base / "交接.md"
+        return build_resume_inject(proj, handoff_path)
+    except Exception:
+        return None
+
+
+def _time_steward_inject(
+    user_prompt: str, *, session_id: str | None = None,
+) -> str | None:
+    """Best-effort time_steward inject.
+
+    Calls ``run_time_steward`` with the current prompt + session id and
+    returns the inject text (or ``None`` if no advice this turn). Catches
+    every exception so a state-file glitch / missing dir cannot break
+    prompt submission. Supersedes the older single-purpose
+    ``parallel_spawn_reminder`` (now collapsed into one of six
+    time_steward capabilities — idle detection — alongside DAG
+    visualiser, pre-spawn contention, budget tracker, re-triage,
+    cancel-restart, and the polling watchdog landed in Phase 3).
+    """
+    try:
+        from concinno.time_steward import run_time_steward
+        result = run_time_steward(
+            agent_recent_turns=[user_prompt] if user_prompt else [],
+            session_id=session_id or "unknown",
+            turn_index=0,
+        )
+        if isinstance(result, dict):
+            return result.get("inject") or None
+        return None
+    except Exception:
+        return None

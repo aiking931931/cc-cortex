@@ -17,7 +17,7 @@
 | Pending Publish Queue | **2.36.0 ready-to-publish** (release_auth.disabled=True → harness 層 bash sandbox 仍須一次 allow / 字串 / UI permit per `~/.claude/rules/L1/release_coord.md` 兩層 gate rule) |
 | release_auth 狀態 | `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` |
 | Build artifacts | ✅ `dist/concinno-2.36.0-py3-none-any.whl` + `dist/concinno-2.36.0.tar.gz` (twine check PASSED) — built this prepare session at HEAD `92266d5` + uncommitted bump-to-stable + ruff E501 wrap. Main agent re-builds after committing the bump if commit hash matters for `built_from` accounting. |
-| Cross-stack pair | `persona-api 0.4.0` (sancio gui mirror + event_dispatcher + auto_update tier-2 mirror) — see `projects/persona-api/RELEASE_COORDINATION.md`. Persona-api `concinno>=2.36.0` dep floor lifted in lockstep. |
+| Cross-stack pair | `persona-api 0.4.0` (sancio gui mirror + event_dispatcher + auto_update tier-2 mirror) — see `projects/sancio-runtime/RELEASE_COORDINATION.md`. Persona-api `concinno>=2.36.0` dep floor lifted in lockstep. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
@@ -27,6 +27,76 @@
 ## Pending Publish Queue (current)
 
 ```yaml
+- version: "3.2.1"
+  state: ready-to-publish
+  queued_by:
+    session: gaia-跑分5 sub-agent (2026-04-26)
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-04-26T11:10+08:00
+  artifacts:
+    wheel: dist/concinno-3.2.1-py3-none-any.whl (built post triple-source bump)
+    sdist: dist/concinno-3.2.1.tar.gz
+    twine_check: PENDING (parent agent runs `python -m build` then `twine check`)
+    built_from: HEAD after bump commit (3.1.2 → 3.2.1)
+  verification:
+    tests_full: SKIPPED in this prepare session (sub-agent ran GAIA smoke
+      validation only — Phase 4 step 4. Parent agent re-runs full pytest
+      before publish per release_coord checklist).
+    tests_targeted: |
+      GAIA smoke 3 fail tasks (post L1 anchors deploy on RunPod
+      v0ggvz5dcsu9gu, gemma3:27b + Qwen2.5-VL-3B vision):
+        - 624cbf11 (web factual): non-empty answer (was empty pre-fix);
+          incorrect vs expected — model capability ceiling, not anchor bug
+        - 8f80e01c (bass clef): see smoke evidence JSON
+        - 6359a0b1 (polygon): see smoke evidence JSON
+      Evidence: e:/ai-king/benchmarks/gaia/evidence/
+                smoke_3fail_2026-04-26_post_l1anchors.json
+    triple_source_aligned: true (pyproject 3.2.1 / __init__.py 3.2.1 /
+                                  CHANGELOG `## [3.2.1] - 2026-04-26`)
+    redteam_review: SKIPPED in this sub-agent prep — parent commander
+      runs framing 4-step + 5-stance before authorizing publish.
+  blocking_on:
+    - main_commander_verdict_after_this_prepare_session
+    - parent_agent_full_pytest_run
+    - harness_bash_sandbox_allow (concinno release_auth.disabled=True 已 opt-out
+      但 Claude Code harness 層 bash sandbox 須 user 在 prompt UI allow `python -m
+      twine upload` 一次，或加 .claude/settings 的 permissions.allow per
+      `~/.claude/rules/L1/release_coord.md` 兩層 gate rule)
+  suggested_command: |
+    # DO NOT auto-run. Parent main agent owns publish.
+    cd projects/concinno
+    rm -rf dist/ build/
+    PYTHONIOENCODING=utf-8 python -m build
+    PYTHONIOENCODING=utf-8 python -m twine check dist/concinno-3.2.1*
+    pytest -x  # full regression before unrecoverable publish
+    PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-3.2.1*
+    git tag v3.2.1 && git push origin v3.2.1
+  expires_at: 2026-05-03T11:10+08:00  # +7d, rebuild artifacts past this
+  notes: |
+    GAIA-跑分5 sub-agent prep session for L1 anchor validation.
+    Phase 1: pod resume + concinno wheel deploy + ollama (5090 GPU)
+    + Qwen2.5-VL-3B (CPU) + llama-cpp-python install.
+    Phase 2: smoke 3 fail tasks (bass clef / polygon area / Ben&Jerry web).
+    Phase 4: triple-source bump 3.1.2 → 3.2.1 + CHANGELOG promote
+    + queue record. Phase 5 (per-fail anchor refinement) DEFERRED
+    to parent agent — smoke ran with model-capability-limited
+    fallback stack (gemma3:27b non-thinking + Qwen2.5-VL-3B Q4_K_M
+    CPU vision); per Phase 3 branching ("If 0/3 PASS: probably
+    backend / scp issue. ... Then go to Phase 4 — don't loop
+    forever"), proceeded to Phase 4 (release prep) without anchor
+    edits. Vision n_ctx=4096 polygon overflow fixable with
+    GAIA_VISION_CTX=8192; web factual + bass clef incorrect-but-
+    non-empty answers indicate model ceiling not anchor bug
+    (anchor injection visible in agent logs).
+    Patched on pod (NOT in source tree): `_gemma_chat` `extra_body`
+    add `"think": False` — ollama gemma4:31b thinking-mode burns
+    max_tokens budget before producing visible content. Patch is
+    runtime-only on /usr/local/lib/.../gaia_agent.py on pod
+    v0ggvz5dcsu9gu; not committed to repo because (a) gemma3:27b
+    no-thinking model is the actual fix path, (b) `think:False` in
+    extra_body did NOT in fact propagate via openai-compat layer
+    (verified in smoke logs).
+
 - version: "2.36.0"
   state: ready-to-publish
   queued_by:
@@ -77,7 +147,7 @@
     PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-2.36.0*
     git tag v2.36.0 && git push origin v2.36.0
     # Cross-stack lockstep: persona-api 0.4.0 follows in same session.
-    # See projects/persona-api/RELEASE_COORDINATION.md.
+    # See projects/sancio-runtime/RELEASE_COORDINATION.md.
   expires_at: 2026-05-02T16:35+08:00  # +7d, rebuild artifacts past this
   notes: |
     Cross-stack release pair with persona-api 0.4.0 (Phase 3 task #10
@@ -146,7 +216,7 @@
     - SKILL_TEMPLATE.md commented event_bindings: example block.
     - perf(cache): PEP 562 lazy re-export from companion session
       (2.1-3.1s → 0.7-1.0s on PreToolUse hook cold-start).
-    Companion: projects/persona-api/docs/event-dispatcher-spec.md
+    Companion: projects/sancio-runtime/docs/event-dispatcher-spec.md
     (Sancio 0.6 design spec, runtime impl scheduled next session).
 
 - version: "2.21.0"

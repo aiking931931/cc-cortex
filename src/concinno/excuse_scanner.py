@@ -19,6 +19,7 @@ Detection strategy:
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -190,6 +191,31 @@ def _build_block_reason(unresolved: list[ExcuseHit]) -> str:
     return "\n".join(lines)
 
 
+_DISABLE_ENV_VARS = ("CONCINNO_EXCUSE_SCANNER_DISABLED",)
+
+
+def _is_disabled() -> bool:
+    """Resolve opt-out: env var first, then ``cfg.feature(...)``.
+
+    Either ``CONCINNO_EXCUSE_SCANNER_DISABLED`` (case-insensitive
+    ``1``/``true``/``yes``/``on``) **or** the feature toggle
+    ``cfg.feature("excuse_scanner", "enabled")`` returning False
+    suppresses the gate. Documented in ``rules/L1/switches.md`` since
+    well before the env var existed (2026-04-26 wiring audit fix).
+    """
+    for name in _DISABLE_ENV_VARS:
+        raw = os.environ.get(name, "").strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+    try:
+        from concinno.core.config import get_config
+        if get_config().feature("excuse_scanner", "enabled") is False:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def scan_excuses(hook_data: dict | None = None) -> ExcuseResult:
     """Scan conversation messages for unresolved excuse patterns.
 
@@ -200,6 +226,8 @@ def scan_excuses(hook_data: dict | None = None) -> ExcuseResult:
     Returns:
         ExcuseResult with hits and block decision.
     """
+    if _is_disabled():
+        return ExcuseResult()
     if not hook_data:
         return ExcuseResult()
     messages = hook_data.get("messages", [])
@@ -221,6 +249,8 @@ def on_stop(hook_data: dict) -> str | None:
     Returns a string starting with ``EXCUSE_BLOCK:`` if blocking is needed,
     compatible with the on-stop pipeline's block detection.
     """
+    if _is_disabled():
+        return None
     result = scan_excuses(hook_data)
     if result.should_block:
         return f"EXCUSE_BLOCK:{result.block_reason}"

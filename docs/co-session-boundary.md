@@ -1,7 +1,7 @@
 # Co-Session Boundary — GAIA × Sancio parallel work on Concinno
 
 > Two concurrent Claude Code sessions are both editing `projects/concinno/` +
-> `projects/persona-api/` in the 2026-04-23 cycle. This file is the
+> `projects/sancio-runtime/` in the 2026-04-23 cycle. This file is the
 > **mechanical** boundary to prevent merge conflicts. Read before touching
 > any file listed below.
 
@@ -36,7 +36,7 @@ Owns — edits freely, GAIA must not touch:
 - `src/concinno/tools/builtin/*.py` except `fetch_image.py` — those reference
   tools land in the shared zone because both sides touched them this cycle.
 - `projects/concinno-skills-*/` — all 20 sub-packages.
-- `projects/persona-api/` — **whole repo is Sancio territory**. Sancio =
+- `projects/sancio-runtime/` — **whole repo is Sancio territory**. Sancio =
   persona-api per MEMORY #18. pyproject `concinno>=` dep bump, tools
   adapters, providers, routes, agent_api, MCP wiring.
 - `~/.claude/skills/credentials/`, `~/.claude/skills/new-feature/`,
@@ -72,7 +72,7 @@ can reconcile.
 ## Conflict SOP
 
 1. **Before starting a chunk of work**: run `git status` + `git log --oneline
-   HEAD~5..HEAD` in both `projects/concinno/` and `projects/persona-api/` to
+   HEAD~5..HEAD` in both `projects/concinno/` and `projects/sancio-runtime/` to
    see what the other session did recently.
 2. **Before editing a shared-zone file**: re-read the file top to bottom so
    your edit is aware of the other session's changes.

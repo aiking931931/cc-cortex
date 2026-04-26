@@ -19,6 +19,27 @@ from pathlib import Path
 DEFAULT_WARN_GB = 5.0
 
 _ENV_THRESHOLD = "CONCINNO_GIT_SIZE_WARN_GB"
+_ENV_DISABLED = "CONCINNO_GIT_SIZE_MONITOR_DISABLED"
+# Legacy alias from ``rules/L1/switches.md`` row #24, where the doc
+# referred to a ``CC_GIT_HEALTH_DISABLED`` env var that the code never
+# actually read. Honoured 2026-04-26+ for backward compat with anyone
+# who set it on faith of the docs.
+_ENV_DISABLED_LEGACY = "CC_GIT_HEALTH_DISABLED"
+
+
+def _is_disabled() -> bool:
+    """Resolve opt-out: env vars (modern + legacy alias) or ``cfg.feature(...)``."""
+    for name in (_ENV_DISABLED, _ENV_DISABLED_LEGACY):
+        raw = os.environ.get(name, "").strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+    try:
+        from concinno.core.config import get_config
+        if get_config().feature("git_size_monitor", "enabled") is False:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _resolve_threshold_gb(override: float | None) -> float:
@@ -81,6 +102,8 @@ def check_git_size(
         ``"git_size_monitor: .git pack size 6.3 GB exceeds 5.0 GB threshold"``
         or ``None`` if below threshold / no ``.git`` present.
     """
+    if _is_disabled():
+        return None
     if not project_dir:
         return None
     root = Path(project_dir)

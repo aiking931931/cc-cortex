@@ -130,7 +130,15 @@ def _check_memory(
     total_mb: int, result: GuardResult,
     memory_critical_percent: float, dry_run: bool,
 ) -> None:
-    """Check RAM and trigger emergency relief if needed."""
+    """Check RAM and trigger emergency relief if needed.
+
+    Wave 1-3 (kill processes) runs first. If RAM is still ≥ threshold
+    after the kill waves, wave 4 (memory_relief — Win32 standby /
+    working-set trim) is invoked when ``memory_relief`` feature has
+    ``auto_trigger_after_process_guard=True`` (the default). Wave 4
+    never auto-escalates beyond ``safe`` mode; the operator must opt
+    into standby/aggressive tiers via FEATURE_META ``auto_trigger_mode``.
+    """
     mem_pct = _get_system_memory_percent()
     if mem_pct >= memory_critical_percent:
         relief_actions, relief_killed, relief_freed = _emergency_memory_relief(
@@ -152,10 +160,72 @@ def _check_memory(
                 f"freed {relief_freed}MB. "
                 f"Mother agent preserved for handoff."
             )
+
+        # Wave 4: Win32 standby / working-set trim via memory_relief.
+        # Only fires if wave 1-3 left RAM still pressured. Lazy-import
+        # so an older Concinno install without memory_relief keeps the
+        # guard chain operational.
+        post_kill_pct = _get_system_memory_percent()
+        if post_kill_pct >= memory_critical_percent:
+            _try_memory_relief_wave4(result, post_kill_pct, dry_run)
     elif total_mb > CLAUDE_MAX_MB:
         result.warnings.append(
             f"Claude processes using {total_mb}MB > {CLAUDE_MAX_MB}MB limit"
         )
+
+
+def _try_memory_relief_wave4(
+    result: GuardResult, mem_pct: float, dry_run: bool,
+) -> None:
+    """Invoke ``memory_relief.run_cleanup`` as wave 4. Best-effort: any
+    failure is recorded in ``result.actions`` but never aborts the guard.
+    Reads tier + thresholds from FEATURE_META so operators can disable
+    via ``concinno features set memory_relief.auto_trigger_after_process_guard false``."""
+    try:
+        from concinno.feature_config import get_feature
+        from concinno.memory_relief import run_cleanup
+    except ImportError as exc:
+        result.actions.append(
+            f"WAVE4-SKIP: memory_relief unavailable ({exc})"
+        )
+        return
+
+    cfg = get_feature("memory_relief") or {}
+    params = cfg.get("params") or {}
+
+    def _param_default(key: str, fallback):
+        entry = params.get(key)
+        if isinstance(entry, dict) and "default" in entry:
+            return entry["default"]
+        return entry if entry is not None else fallback
+
+    if not bool(_param_default("auto_trigger_after_process_guard", True)):
+        return  # Opted out at FEATURE_META level.
+    auto_mode = str(_param_default("auto_trigger_mode", "safe"))
+    top_n = int(_param_default("top_n_per_process_trim", 8))
+    min_mb = int(_param_default("min_trim_mb", 50))
+
+    try:
+        report = run_cleanup(
+            mode=auto_mode,
+            dry_run=dry_run,
+            top_n=top_n,
+            min_bytes=min_mb * 1024 * 1024,
+        )
+    except Exception as exc:  # noqa: BLE001 — wave 4 never aborts guard
+        result.actions.append(
+            f"WAVE4-ERROR: memory_relief raised {type(exc).__name__}: {exc}"
+        )
+        return
+
+    mode_label = "DRY-RUN" if dry_run else "TRIM"
+    result.actions.append(
+        f"WAVE4 {mode_label}: memory_relief mode={auto_mode} "
+        f"reclaimed={report.reclaimed_mb}MB "
+        f"trimmed_processes={len(report.process_trims)} "
+        f"ram_before_wave4={mem_pct:.0f}%"
+    )
+    result.freed_mb += report.reclaimed_mb
 
 
 def _cleanup_lock(

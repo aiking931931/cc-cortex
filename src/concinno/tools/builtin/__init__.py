@@ -26,6 +26,7 @@ from .file_io import (
     ReadBeforeWriteError,
 )
 from .html import HtmlToolError, HtmlToText
+from .memory_relief import MemoryReliefTool
 from .pdf import PdfExtract, PdfRead, PdfToolError
 from .python_exec import PythonExecError, PythonExecTool
 from .read_attachment import ReadAttachmentError, ReadAttachmentTool
@@ -72,6 +73,8 @@ __all__ = [
     # html
     "HtmlToText",
     "HtmlToolError",
+    # memory_relief
+    "MemoryReliefTool",
     # sql
     "DuckDbQuery",
     "SqlToolError",

@@ -386,6 +386,212 @@ def describe_current_config() -> str:
     return "\n".join(lines)
 
 
+# ── PreToolUse guard adapter (3.1.3, 2026-04-26) ────────────────────
+#
+# Until 3.1.3 ``check_authorization`` was only called by the user-side
+# CLI (``concinno publish``). The agent's own ``Bash(twine upload …)``
+# tool calls were *not* gated — meaning ``release_auth.disabled=True``
+# vs ``False`` had no observable difference at hook time. The
+# 2026-04-26 wiring audit caught this; the fix is below.
+
+
+def _extract_pkg_version_from_command(cmd: str, operation: str) -> tuple[str, str]:
+    """Best-effort extraction of (package, version) from a publish command.
+
+    Returns ``("", "")`` when the target cannot be unambiguously
+    determined; callers must treat that as "skip the gate" rather than
+    "hard deny" so legitimate publish scripts (e.g. ``npm publish`` from
+    a ``package.json`` directory) are not mass-blocked.
+    """
+    if operation in ("twine_upload", "cargo_publish"):
+        # twine artifact filenames follow PEP 427/625:
+        #   pkg-ver-py3-none-any.whl     (wheel)
+        #   pkg-ver.tar.gz               (sdist)
+        # Plus user-glob shortcuts:
+        #   pkg-ver*                     (shell glob)
+        # Version per PEP 440: ``\d+(\.\d+)+`` with optional pre/post/dev tag.
+        m = re.search(
+            r"(?:dist[\\/])([A-Za-z0-9_.\-]+?)-"
+            # Version: numeric core + optional rc/a/b/alpha/beta + optional .postN / .devN
+            r"(\d+(?:\.\d+)+"
+            r"(?:(?:rc|a|b|alpha|beta)\d+)?"
+            r"(?:\.(?:post|dev)\d+)?)"
+            # Terminator: wheel suffix, sdist suffix, glob, whitespace, EOL
+            r"(?=-(?:py|cp|pp|jp|ip)\d|\.tar|\.zip|\.whl|\.tgz|\*|\s|$)",
+            cmd,
+        )
+        if m:
+            pkg = m.group(1).lower().replace("_", "-")
+            return pkg, m.group(2)
+    if operation == "git_tag_push_remote":
+        # `git push origin v3.1.3` / `git push origin 3.1.3`
+        m = re.search(
+            r"\bgit\s+push\s+\S+\s+v?(\d+\.\d+\.\d+(?:[a-z0-9.\-]*))",
+            cmd,
+            re.IGNORECASE,
+        )
+        if m:
+            # Package name not in command — best-effort read from cwd
+            # pyproject. Defer to runtime because cwd is process-local.
+            try:
+                pyproject = Path.cwd() / "pyproject.toml"
+                if pyproject.is_file():
+                    text = pyproject.read_text(encoding="utf-8")
+                    pm = re.search(
+                        r"\[project\][^\[]*?name\s*=\s*\"([^\"]+)\"",
+                        text,
+                        re.DOTALL,
+                    )
+                    if pm:
+                        return pm.group(1).lower(), m.group(1)
+            except OSError:
+                pass
+    # npm_publish / docker_push_public / unrecognized: extraction not
+    # implemented in 3.1.3. Returning ("", "") makes the guard skip
+    # rather than overblock; tracked for later rev.
+    return "", ""
+
+
+def _read_recent_user_transcript_text(session_id: str, max_chars: int = 100_000) -> str:
+    """Read recent user-authored text from the Claude Code transcript JSONL.
+
+    Returns at most ``max_chars`` of concatenated user text (most recent
+    last). Returns ``""`` on any error so the guard fails-closed to
+    deny (caller knows transcript scan didn't find the auth string).
+    """
+    try:
+        from concinno.core.path_utils import find_transcript
+    except Exception:
+        return ""
+    if not session_id:
+        return ""
+    path = find_transcript(session_id)
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return ""
+    parts: list[str] = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        # CC transcript format: {"type": "user", "message": {"content": "..."}}
+        if entry.get("type") != "user":
+            continue
+        msg = entry.get("message", {})
+        content = msg.get("content", "") if isinstance(msg, dict) else ""
+        if isinstance(content, list):
+            text_parts = [
+                p.get("text", "")
+                for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            ]
+            text = "\n".join(text_parts)
+        elif isinstance(content, str):
+            text = content
+        else:
+            text = ""
+        if text:
+            parts.append(text)
+        if sum(len(p) for p in parts) >= max_chars:
+            break
+    parts.reverse()
+    out = "\n".join(parts)
+    return out[-max_chars:]
+
+
+def _try_import_guard_base():
+    """Lazy-import guard base classes — release_authorization is a stdlib-
+    only module by design; the guard adapter is the one place that
+    pulls in ``concinno.guards.base``. Done lazily so direct imports of
+    ``release_authorization`` (e.g. from the CLI) don't drag in the
+    whole guard machinery."""
+    from concinno.guards.base import (
+        BaseGuard,
+        GuardCategory,
+        GuardContext,
+        GuardResult,
+    )
+    return BaseGuard, GuardCategory, GuardContext, GuardResult
+
+
+_BaseGuard, _GuardCategory, _GuardContext, _GuardResult = _try_import_guard_base()
+
+
+class ReleaseAuthorizationGuard(_BaseGuard):
+    """Block irreversible publish operations until the user types
+    ``go publish <pkg> <ver>`` in chat (or selects an equivalent
+    AskUserQuestion option in ``ASKUSER_ANSWER`` mode).
+
+    Honours ``release_auth.disabled=True`` — when opt-out is on, the
+    guard short-circuits to ALLOW so the harness layer's own
+    permissions list is the only remaining check (two-layer-gate
+    principle from ``rules/L1/release_coord.md``).
+
+    3.1.3 (2026-04-26): wired in for the first time. Before this fix
+    the gate function existed but no PreToolUse hook actually called
+    it — the disabled toggle had no observable effect, which is what
+    the user repeatedly complained about. See
+    ``feedback_release_auth_gate_was_vaporware.md``.
+    """
+
+    name = "release_authorization"
+    feature_name = "release_authorization"
+    category = _GuardCategory.SECURITY
+
+    def check(self, ctx):  # type: ignore[override]
+        if ctx.tool_name != "Bash":
+            return None
+        cmd = ""
+        if isinstance(ctx.tool_input, dict):
+            cmd = ctx.tool_input.get("command", "") or ""
+        if not cmd:
+            return None
+
+        operation = detect_publish_operation(cmd)
+        if not operation:
+            return None
+
+        cfg = load_config()
+        if cfg.disabled:
+            # User has opted out at the concinno layer — the harness
+            # permissions list remains the only check. This is the
+            # whole point of the disabled toggle.
+            return None
+
+        package, version = _extract_pkg_version_from_command(cmd, operation)
+        if not package or not version:
+            # Can't determine target unambiguously — skip rather than
+            # overblock. A future revision can scan ``pyproject.toml`` /
+            # ``package.json`` for npm/cargo coverage.
+            return None
+
+        transcript_text = _read_recent_user_transcript_text(ctx.session_id)
+        allowed, reason = check_authorization(
+            operation,
+            package,
+            version,
+            transcript_text=transcript_text,
+            config=cfg,
+        )
+        if allowed:
+            return None
+        return _GuardResult.deny(
+            reason,
+            check_type="release_authorization",
+            operation=operation,
+            package=package,
+            version=version,
+        )
+
+
 __all__ = [
     "AuthorizationMode",
     "AuthorizationConfig",
@@ -395,6 +601,7 @@ __all__ = [
     "format_required_string",
     "check_authorization",
     "describe_current_config",
+    "ReleaseAuthorizationGuard",
 ]
 
 

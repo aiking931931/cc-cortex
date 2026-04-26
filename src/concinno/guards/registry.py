@@ -20,6 +20,8 @@ def _register_security(pipe: GuardPipeline) -> None:
     from concinno.git_safety import GitSafetyGuard
     from concinno.identity_guard import IdentityGuard
     from concinno.prompt_injection_guard import PromptInjectionGuard
+    from concinno.publish_scan import PublishScanGuard
+    from concinno.release_authorization import ReleaseAuthorizationGuard
     from concinno.secret_scan import SecretScanGuard
 
     pipe.register(PromptInjectionGuard())
@@ -29,6 +31,11 @@ def _register_security(pipe: GuardPipeline) -> None:
     pipe.register(ExfilGuard())
     pipe.register(IdentityGuard())
     pipe.register(DestructionGuard())
+    # 3.1.3: previously orphaned — defined as BaseGuard subclasses but
+    # never registered, so the publish-time secret scan + the publish
+    # authorisation gate were both dead code. Wiring audit 2026-04-26.
+    pipe.register(PublishScanGuard())
+    pipe.register(ReleaseAuthorizationGuard())
 
 
 def _register_quality(pipe: GuardPipeline) -> None:
@@ -125,6 +132,11 @@ def _register_quality(pipe: GuardPipeline) -> None:
     # 2.2.0: edit-time version-drift gate (pairs with CI test_version_sync).
     from concinno.version_sync_guard import VersionSyncGuard
     pipe.register(VersionSyncGuard())
+    # 3.1.3: previously orphaned — defined in publish_scan.py but never
+    # registered. Warns on breaking API changes when an api_snapshot.json
+    # baseline is committed; otherwise no-op.
+    from concinno.publish_scan import SemverGuard
+    pipe.register(SemverGuard())
 
 
 def _register_cognitive(pipe: GuardPipeline) -> None:

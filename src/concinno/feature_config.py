@@ -939,6 +939,172 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # ── 3.1.3 (2026-04-26): wiring-audit fixes ──
+    # All five entries below were added by the audit that discovered the
+    # corresponding modules / docs claimed an opt-out toggle that no code
+    # actually consulted. They expose the standard 6-source enabled chain
+    # so ``concinno features set <name> enabled false`` (or the matching
+    # env var documented in each module) really turns the gate off.
+    "release_authorization": {
+        "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": (
+            "publish 不可逆操作（twine upload / cargo publish / git tag push remote）"
+            "不再要求 chat 內 'go publish <pkg> <ver>' 字串確認；"
+            "等同把全套 release 授權交給 harness 層獨自把關"
+        ),
+        "description": (
+            "Block irreversible publish operations until the user types "
+            "'go publish <pkg> <ver>' in chat (STRING_MATCH) or selects "
+            "the equivalent AskUserQuestion option (ASKUSER_ANSWER). "
+            "Honours release_auth.disabled=True as a global bypass."
+        ),
+        "description_zh": (
+            "阻擋 twine upload / cargo publish / git tag push remote 等"
+            "不可逆 publish 操作，直到用戶在 chat 打出"
+            "'go publish <pkg> <ver>' 字串確認。"
+            "若 ~/.concinno/release_auth.json::disabled=True 則整層跳過。"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "publish_scan_guard": {
+        # Distinct from the existing ``publish_scan`` entry above —
+        # ``publish_scan`` is the doc-level toggle for the scanner CLI;
+        # ``publish_scan_guard`` is the BaseGuard wiring that the audit
+        # discovered was orphaned (now registered in 3.1.3).
+        "category": "hard_gate",
+        "severity_if_off": "critical",
+        "consequences_if_off": (
+            "publish 前 dist/ 不掃 secrets/keys/personal-paths，可能外洩到 PyPI"
+        ),
+        "description": (
+            "Pre-twine PreToolUse scan of dist/ artifacts for secrets, "
+            "keys, and personal absolute paths. Hard-deny on CRITICAL hits."
+        ),
+        "description_zh": (
+            "twine upload 前 PreToolUse hook 掃 dist/ 是否夾帶密鑰/憑證/"
+            "個人絕對路徑；CRITICAL 命中直接 hard deny"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "semver_gate": {
+        "category": "soft_gate",
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "publish 前不檢查 public API 移除 / 重命名，可能 patch / minor "
+            "版本暗藏 breaking change"
+        ),
+        "description": (
+            "Compare current public API against committed snapshot; "
+            "deny twine upload when breaking changes detected without "
+            "a major version bump. No-op when no api_snapshot.json exists."
+        ),
+        "description_zh": (
+            "publish 前比對當前 public API 與 commit 過的 snapshot；"
+            "偵測 breaking change 但版號未升 major 時 deny。"
+            "無 api_snapshot.json 時 no-op"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "excuse_scanner": {
+        "category": "soft_gate",
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "蝴蝶效應未沉澱 excuse（'不是我的問題' / 'pre-existing'）不再被 stop "
+            "hook 阻擋，pre-existing bug 可累積"
+        ),
+        "description": (
+            "Scan assistant transcript for 'not-my-fault' excuses about "
+            "pre-existing issues that were acknowledged but never fixed. "
+            "Block stop until those issues are addressed or recorded."
+        ),
+        "description_zh": (
+            "掃 assistant 訊息找 '不是我的問題 / pre-existing / 先跳過' "
+            "等推卸詞，若該問題沒被後續 Edit/Write 處理則阻擋停止"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "sedimentation_gate": {
+        "category": "soft_gate",
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "用戶糾正不再強制沉澱進 feedback_*.md / KB；"
+            "三次糾正同錯誤的學習迴圈會中斷"
+        ),
+        "description": (
+            "CBUA Law #5 enforcement: when corrections logged this "
+            "session but no feedback_*.md modified, block stop until "
+            "sedimentation evidence appears."
+        ),
+        "description_zh": (
+            "本 session 偵測到用戶糾正但未寫入 feedback_*.md / KB 時"
+            "阻擋停止；連續 2 次 block 後降級為 warning（防 deadlock）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "handoff_claim_guard": {
+        "category": "soft_gate",
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "Agent 講 '已寫入交接' 但 git 沒交接檔變動的情境不再被擋；"
+            "假交接會通過 stop"
+        ),
+        "description": (
+            "Detect 'wrote handoff' / '交接已更新' claim in last assistant "
+            "message; verify git diff actually contains a handoff_*.md / "
+            "交接_*.md change. Block stop on mismatch (1 block per session)."
+        ),
+        "description_zh": (
+            "偵測 assistant 最後一段是否聲稱'已寫入交接'但 git 中無對應"
+            "交接檔變動；不一致時阻擋（每 session 最多 block 1 次）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "git_size_monitor": {
+        "category": "info",
+        "severity_if_off": "none",
+        "consequences_if_off": (
+            ".git/objects/pack 超過閾值不再警告；repo 變肥變慢時無提示"
+        ),
+        "description": (
+            "Stop-hook warning when .git/objects/pack/*.pack sums above "
+            "CONCINNO_GIT_SIZE_WARN_GB (default 5 GB). "
+            "Honours CONCINNO_GIT_SIZE_MONITOR_DISABLED + the legacy "
+            "CC_GIT_HEALTH_DISABLED alias documented in switches.md."
+        ),
+        "description_zh": (
+            "stop hook 偵測 .git/objects/pack/ 超過閾值（預設 5 GB）時警告；"
+            "可由 CONCINNO_GIT_SIZE_MONITOR_DISABLED 或舊 alias "
+            "CC_GIT_HEALTH_DISABLED 關閉"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "warn_gb": {
+                "type": "float",
+                "default": 5.0,
+                "min": 0.5,
+                "max": 100.0,
+                "recommended": 5.0,
+                "risk_low": "Below 0.5 GB warns on healthy repos (noise)",
+                "risk_high": "Above 100 GB never fires for any human repo",
+                "risk_low_zh": "低於 0.5 GB 對健康 repo 也警告（噪音）",
+                "risk_high_zh": "高於 100 GB 永遠不會觸發",
+            },
+        },
+    },
     # ── Pipeline Mode ──
     "pipeline_mode": {
         "category": "context",
