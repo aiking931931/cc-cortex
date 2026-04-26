@@ -3,17 +3,18 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-26 — **4.0.0 LIVE on PyPI** — SEMVER-MAJOR ship-level default-off flip + GAIA Phase-5 + memory_relief perf）
+## 現況 snapshot（2026-04-26 — **4.1.0 LIVE on PyPI** — polling watcher (real timer + ScheduleWakeup self-wake)）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | **`4.0.0`** ✅ (uploaded 2026-04-26 — <https://pypi.org/project/concinno/4.0.0/>) |
-| `pyproject.toml` version | `4.0.0` ✅ aligned |
-| `src/concinno/__init__.py __version__` | `4.0.0` ✅ aligned |
-| CHANGELOG.md 最新 release heading | `## [4.0.0] - 2026-04-26` (default-off feature gates SEMVER-MAJOR + GAIA Phase-5 bundle + memory_relief perf) |
-| 三源對齊狀態 | ✅ aligned at 4.0.0 |
-| Git tag | ✅ `v4.0.0` pushed (commit `1173552` on branch `feat/2.3.0-red-team-round-3`) |
-| Inner concinno HEAD | `1173552 release(4.0.0): default-off feature gates + GAIA Phase-5 bundle + memory_relief perf` |
+| Registry latest (PyPI) | **`4.1.0`** ✅ (uploaded 2026-04-26 — <https://pypi.org/project/concinno/4.1.0/>) |
+| `pyproject.toml` version | `4.1.0` ✅ aligned |
+| `src/concinno/__init__.py __version__` | `4.1.0` ✅ aligned |
+| CHANGELOG.md 最新 release heading | `## [4.1.0] - 2026-04-26` (polling watcher) → `## [4.0.0] - 2026-04-26` (default-off SEMVER-MAJOR) |
+| 三源對齊狀態 | ✅ aligned at 4.1.0 |
+| Git tag | ✅ `v4.1.0` pushed (commit `33c5ec5` on branch `feat/2.3.0-red-team-round-3`) |
+| Inner concinno HEAD | `33c5ec5 release(4.1.0): polling watcher — real timer + ScheduleWakeup self-wake` |
+| Previous release | `4.0.0` (1173552 — SEMVER-MAJOR default-off + GAIA Phase-5 + memory_relief perf) |
 | Pending Publish Queue | empty (4.0.0 published) |
 | release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)`) green |
 | Build artifacts | ✅ `dist/concinno-4.0.0-py3-none-any.whl` (1.7 MB) + `dist/concinno-4.0.0.tar.gz` (1.5 MB) published. Stale `concinno-3.2.1*` / `3.0.x` / `3.1.x` left on disk, not on PyPI. |
