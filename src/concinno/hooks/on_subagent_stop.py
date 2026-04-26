@@ -276,6 +276,32 @@ def main(hook_data: dict | None = None) -> None:
     if supervisor_ctx:
         manifest = manifest + "\n" + supervisor_ctx
 
+    # Mark sub-agent complete in time_steward registry + ask for
+    # re-triage advice (capability #5). Best-effort — registration
+    # / advice failure must never break the host hook.
+    agent_id = ""
+    if isinstance(hook_data, dict):
+        agent_id = (
+            hook_data.get("subagentId")
+            or hook_data.get("subagent_id")
+            or hook_data.get("agent_id")
+            or ""
+        )
+    if agent_id:
+        try:
+            from concinno.time_steward import (
+                TimeSteward,
+                register_subagent_complete,
+            )
+            register_subagent_complete(agent_id=agent_id)
+            retriage = TimeSteward().advise_retriage(
+                completed_agent_id=agent_id,
+            )
+            if isinstance(retriage, dict) and retriage.get("inject"):
+                manifest = manifest + "\n" + str(retriage["inject"])
+        except Exception:
+            pass
+
     _write_output("SubagentStop", manifest)
 
 

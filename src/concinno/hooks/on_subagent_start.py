@@ -121,6 +121,29 @@ def main(hook_data: dict | None = None) -> None:
         parts.append(cognitive_ctx)
     context = "\n\n".join(parts)
 
+    # Register sub-agent spawn with time_steward registry so the
+    # prompt-submit hook's six time-aware capabilities (DAG visualiser
+    # / pre-spawn contention / idle detection / budget tracker /
+    # re-triage / cancel-restart) have a fresh source of truth.
+    # Best-effort — registration failure must never break the host hook.
+    try:
+        from concinno.time_steward import register_subagent_spawn
+        agent_id = ""
+        if isinstance(hook_data, dict):
+            agent_id = (
+                hook_data.get("agent_id")
+                or hook_data.get("subagent_id")
+                or hook_data.get("subagentId")
+                or ""
+            )
+        if agent_id:
+            register_subagent_spawn(
+                agent_id=agent_id,
+                brief=task_prompt or agent_type or "",
+            )
+    except Exception:
+        pass
+
     output = json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "SubagentStart",
