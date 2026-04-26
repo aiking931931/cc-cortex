@@ -241,8 +241,15 @@ R3_PATTERNS = [
     # Other
     r"helm\s+uninstall\s+.*prod",
     r"redis-cli\s+(FLUSHALL|FLUSHDB)",
-    r"docker\s+push\s+",
-    r"twine\s+upload\s+",
+    # NOTE 2026-04-21: ``twine upload`` and ``docker push <public-registry>``
+    # moved out of destruction_guard into ``concinno.release_authorization``
+    # so the publish authorisation toggle (``~/.concinno/release_auth.json::disabled``)
+    # can opt out of the publish gate without disabling the data-deletion
+    # patterns in this module. The rule docstring in
+    # ``rules/official/L1/release_coord.md`` was updated 2026-04-21; the
+    # regex below was overlooked until 2026-04-26 (concinno 3.1.x). Keeping
+    # ``docker push`` private-registry-only matches is unnecessary because
+    # the destination registry is a runtime arg, not a token.
     r"cp\s+.*\s+/etc/(ssh|passwd|shadow|cron)",
     r"xargs\s+rm\s+-rf",
     r"export\s+(HOME|PYTHONPATH)\s*=",

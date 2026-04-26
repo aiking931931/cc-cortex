@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "3.0.0"
+version = "3.1.1"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -111,6 +111,13 @@ windows = [
     "mss>=9.0",
     "pyperclip>=1.8",
 ]
+# Windows RAM cleanup tray app — pystray icon + Pillow render. Core
+# memory_relief module (CLI / Tool / engine) works without these; only
+# the tray surface needs them. See ``src/concinno/memory_relief/tray.py``.
+memory-relief-tray = [
+    "pystray>=0.19; platform_system == 'Windows'",
+    "Pillow>=10.0; platform_system == 'Windows'",
+]
 # Windows full: everything (core + llm + rag + control-anything + windows)
 windows-full = [
     "concinno[all]",
@@ -156,6 +163,7 @@ Changelog = "https://github.com/aiking931931/concinno/blob/main/CHANGELOG.md"
 concinno = "concinno.cli:main"
 concinno-daemon = "concinno.daemon:main"
 concinno-guard = "concinno.process_guard:main"
+concinno-mem-tray = "concinno.memory_relief.tray:main"
 concinno-scheduler = "concinno.scheduler:main"
 concinno-skills = "concinno.skills.installer:main"
 concinno-rag = "concinno.rag:cli_main"
