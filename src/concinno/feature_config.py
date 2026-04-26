@@ -1605,7 +1605,52 @@ FEATURE_META: dict[str, dict] = {
             "conflicting files, or miss stuck sub-agents past their "
             "estimate."
         ),
-        "params": {},
+        "params": {
+            # Capability #7 — polling watchdog (3.2.0). Surfaces stale
+            # polling state when a sub-agent has been running long enough
+            # to warrant a status check but the operator's polling
+            # script either hasn't run, has gone stale, or is reporting
+            # a non-RUNNING pod state. Reads
+            # ``~/.concinno/state/poll_status.json``.
+            "polling_watchdog_enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Stuck sub-agents on dead pods may go unnoticed for "
+                    "hours; operator does not get the inline reminder to "
+                    "resume / re-poll."
+                ),
+                "risk_off_zh": (
+                    "Pod 死掉後 stuck 子代理可能數小時無人察覺，operator"
+                    "拿不到 inline 提醒去 resume / 重 poll。"
+                ),
+            },
+            "polling_stale_minutes": {
+                "type": "int",
+                "default": 10,
+                "min": 1,
+                "max": 240,
+                "recommended": 10,
+                "risk_low": (
+                    "Below 5 fires too eagerly on healthy long-running "
+                    "sub-agents — noise."
+                ),
+                "risk_high": (
+                    "Above 60 lets dead-pod incidents linger far past the "
+                    "point a human would have noticed manually."
+                ),
+                "risk_low_zh": "低於 5 對健康長跑子代理 false-positive 太多",
+                "risk_high_zh": "高於 60 會讓死 pod 事件拖很久才被發現",
+            },
+            "polling_inject_token_budget": {
+                "type": "int",
+                "default": 120,
+                "min": 40,
+                "max": 400,
+                "recommended": 120,
+            },
+        },
     },
 }
 

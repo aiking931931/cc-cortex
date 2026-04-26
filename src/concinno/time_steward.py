@@ -131,6 +131,7 @@ CAP_IDLE_DETECTION = "idle_detection"
 CAP_BUDGET_TRACKER = "budget_tracker"
 CAP_RETRIAGE_ON_COMPLETE = "retriage_on_complete"
 CAP_CANCEL_RESTART = "cancel_restart"
+CAP_POLLING_WATCHDOG = "polling_watchdog"
 
 ALL_CAPABILITIES: tuple[str, ...] = (
     CAP_DAG_VISUALIZER,
@@ -139,7 +140,15 @@ ALL_CAPABILITIES: tuple[str, ...] = (
     CAP_BUDGET_TRACKER,
     CAP_RETRIAGE_ON_COMPLETE,
     CAP_CANCEL_RESTART,
+    CAP_POLLING_WATCHDOG,
 )
+
+# Capability #7 — polling watchdog defaults (overridable via
+# FEATURE_META['time_steward'].params['polling_*']).
+POLL_STATUS_FILENAME = "poll_status.json"
+DEFAULT_POLLING_STALE_MINUTES = 10
+DEFAULT_POLLING_INJECT_TOKEN_BUDGET = 120
+POLLING_WATCHDOG_COOLDOWN_TURNS = 3
 
 
 # ── Sub-agent record ───────────────────────────────────────
@@ -842,6 +851,208 @@ class TimeSteward:
             },
         }
 
+    # ── Capability 7 — polling watchdog ──
+
+    def _polling_param(self, key: str, default: Any) -> Any:
+        """Read ``time_steward.params.<key>``, with fail-safe fallback chain.
+
+        Resolution order: cc_config.json override (Config.feature) →
+        FEATURE_META params default → caller-supplied ``default``.
+
+        FEATURE_META params are dicts shaped ``{"type": ..., "default":
+        ..., "min": ..., ...}``; ``Config.feature(name, key)`` only
+        returns the user-set override (if any) and otherwise returns
+        None — it does *not* read FEATURE_META defaults. This helper
+        bridges the two.
+        """
+        # 1. cc_config.json user override.
+        try:
+            from concinno.core.config import get_config
+            entry = get_config().feature(self.feature_name, key)
+            if entry is not None:
+                return entry
+        except Exception:
+            pass
+        # 2. FEATURE_META params default.
+        try:
+            from concinno.feature_config import FEATURE_META
+            meta = FEATURE_META.get(self.feature_name) or {}
+            params = meta.get("params") or {}
+            param_def = params.get(key)
+            if isinstance(param_def, dict) and "default" in param_def:
+                return param_def["default"]
+            if param_def is not None and not isinstance(param_def, dict):
+                return param_def
+        except Exception:
+            pass
+        return default
+
+    def _read_poll_status(self) -> dict[str, Any]:
+        """Return the latest poll_status entry + file mtime, or ``{}``.
+
+        Reads ``~/.concinno/state/poll_status.json``. Tolerates malformed
+        JSON, missing file, and empty file (graceful degrade — never
+        raises into the hook system).
+        """
+        path = self.state_dir / POLL_STATUS_FILENAME
+        try:
+            if not path.is_file():
+                return {}
+            mtime = path.stat().st_mtime
+            data = _safe_read_json(path)
+            if not data:
+                return {"_mtime": mtime}
+            # Schema is operator-defined; we only care about a few keys.
+            data["_mtime"] = mtime
+            return data
+        except Exception:
+            return {}
+
+    def advise_polling_watchdog(
+        self,
+        *,
+        session_id: str = "",
+        turn_index: int = 0,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Capability #7 — surface stale polling state when sub-agents are stuck.
+
+        Fires when (a) ≥1 active sub-agent is older than the configured
+        stale threshold (default 10 min) AND (b) the polling state file
+        is missing / older than the same threshold / reports a non-
+        RUNNING pod or an ``err:`` prefix. Stronger inject when the pod
+        is detected as EXITED — call out the recoverable next action
+        (resume immediately, compute cost ≠ authorization).
+
+        Cooldown: at most one fire per ``POLLING_WATCHDOG_COOLDOWN_TURNS``
+        turns of the same session (and at most once per poll_status.json
+        mtime change — a fresh poll value implies the operator just
+        polled and need not be reminded again).
+
+        All failures degrade silently to no-fire so the hook host never
+        crashes on a missing state directory.
+        """
+        if not _feature_enabled(self.feature_name):
+            return {}
+        if not self._polling_param(
+            "polling_watchdog_enabled", True,
+        ):
+            return {}
+        try:
+            stale_minutes = float(self._polling_param(
+                "polling_stale_minutes",
+                DEFAULT_POLLING_STALE_MINUTES,
+            ))
+        except (TypeError, ValueError):
+            stale_minutes = float(DEFAULT_POLLING_STALE_MINUTES)
+        # State dir absent → graceful no-fire (per spec).
+        if not self.state_dir.is_dir():
+            return {}
+        now_ts = now if now is not None else time.time()
+        stale_secs = stale_minutes * 60.0
+        active = self._active_records(now=now_ts)
+        long_running = [
+            r for r in active
+            if (now_ts - r.spawned_at) >= stale_secs
+        ]
+        if not long_running:
+            return {}
+        poll = self._read_poll_status()
+        poll_mtime = float(poll.get("_mtime", 0.0)) if poll else 0.0
+        poll_age_secs = (now_ts - poll_mtime) if poll_mtime else float("inf")
+        pod_status_raw = str(poll.get("pod_status", "")) if poll else ""
+        pod_exited = pod_status_raw.upper() == "EXITED"
+        pod_err = pod_status_raw.lower().startswith("err:")
+        poll_stale = (not poll) or (poll_age_secs >= stale_secs)
+        if not (poll_stale or pod_exited or pod_err
+                or (pod_status_raw and pod_status_raw.upper() != "RUNNING")):
+            return {}
+        # Cooldown: same session can only fire once per N turns AND not
+        # again until poll_mtime changes.
+        cd = _safe_read_json(self.cooldown_path)
+        sess_state = (
+            cd.get(session_id, {}) if isinstance(cd, dict) else {}
+        )
+        if not isinstance(sess_state, dict):
+            sess_state = {}
+        last_turn = sess_state.get("last_polling_turn")
+        last_mtime = sess_state.get("last_polling_poll_mtime")
+        try:
+            last_turn_int = int(last_turn) if last_turn is not None else None
+        except (TypeError, ValueError):
+            last_turn_int = None
+        if (
+            last_turn_int is not None
+            and (turn_index - last_turn_int) < POLLING_WATCHDOG_COOLDOWN_TURNS
+            and last_mtime == poll_mtime
+        ):
+            return {}
+        # Build inject (≤ polling_inject_token_budget tokens, soft cap by
+        # using ~4 chars per token rule of thumb).
+        try:
+            token_budget = int(self._polling_param(
+                "polling_inject_token_budget",
+                DEFAULT_POLLING_INJECT_TOKEN_BUDGET,
+            ))
+        except (TypeError, ValueError):
+            token_budget = DEFAULT_POLLING_INJECT_TOKEN_BUDGET
+        char_budget = max(120, token_budget * 4)
+        n = len(long_running)
+        if poll_mtime:
+            poll_age_min = poll_age_secs / 60.0
+            poll_str = f"{poll_age_min:.0f}min ago"
+        else:
+            poll_str = "missing"
+        pod_str = pod_status_raw or "unknown"
+        if pod_exited:
+            body = (
+                f"⚠ Polling watchdog: {n} sub-agent(s) running >"
+                f"{stale_minutes:.0f}min. Last poll: {poll_str}. Pod "
+                f"status: {pod_str}. POD EXITED — resume IMMEDIATELY "
+                "(compute cost ≠ authorization, autonomous.md #8). "
+                "Then read ~/.concinno/state/poll_status.json full "
+                "history. Per feedback_idle_polling_required_for_"
+                "silent_crash.md."
+            )
+        else:
+            body = (
+                f"⚠ Polling watchdog: {n} sub-agent(s) running >"
+                f"{stale_minutes:.0f}min. Last poll: {poll_str}. Pod "
+                f"status: {pod_str}. Action: (a) read ~/.concinno/"
+                "state/poll_status.json full history (b) check if any "
+                "in-flight sub-agent likely stuck (c) if pod EXITED → "
+                "resume immediately (compute cost ≠ authorization, "
+                "autonomous.md #8) (d) if no polling script running → "
+                "spawn one now via bash run_in_background. Per "
+                "feedback_idle_polling_required_for_silent_crash.md."
+            )
+        inject = body if len(body) <= char_budget else body[:char_budget - 1].rstrip() + "…"
+        # Persist cooldown.
+        if isinstance(cd, dict):
+            new_cd = dict(cd)
+        else:
+            new_cd = {}
+        sess_state.update(
+            last_polling_turn=int(turn_index),
+            last_polling_poll_mtime=poll_mtime,
+        )
+        new_cd[session_id] = sess_state
+        try:
+            _atomic_write_json(self.cooldown_path, new_cd)
+        except Exception:
+            pass
+        return {
+            "inject": inject,
+            "metadata": {
+                "capability": CAP_POLLING_WATCHDOG,
+                "active_count": n,
+                "poll_age_minutes": (
+                    poll_age_secs / 60.0 if poll_mtime else None
+                ),
+                "pod_status": pod_status_raw or None,
+            },
+        }
+
 
 # ── Top-level orchestrator (UserPromptSubmit hot path) ─────
 
@@ -874,6 +1085,16 @@ def run_time_steward(
     budget = steward.advise_budget(backlog_hints=backlog_hints)
     if budget.get("inject"):
         return budget
+    # Polling watchdog (capability 7) — surfaces stale polling state when
+    # a sub-agent has been running long enough to warrant a status check
+    # but the operator's polling script either hasn't run, has gone
+    # stale, or is reporting a non-RUNNING pod state.
+    polling = steward.advise_polling_watchdog(
+        session_id=session_id,
+        turn_index=turn_index,
+    )
+    if polling.get("inject"):
+        return polling
     if agent_recent_turns is not None:
         idle = steward.advise_idle(
             agent_recent_turns=agent_recent_turns,
@@ -893,8 +1114,12 @@ __all__ = [
     "CAP_CANCEL_RESTART",
     "CAP_DAG_VISUALIZER",
     "CAP_IDLE_DETECTION",
+    "CAP_POLLING_WATCHDOG",
     "CAP_PRE_SPAWN_CONTENTION",
     "CAP_RETRIAGE_ON_COMPLETE",
+    "DEFAULT_POLLING_INJECT_TOKEN_BUDGET",
+    "DEFAULT_POLLING_STALE_MINUTES",
+    "POLL_STATUS_FILENAME",
     "SubagentRecord",
     "TimeSteward",
     "register_subagent_complete",

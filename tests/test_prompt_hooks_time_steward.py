@@ -569,3 +569,148 @@ class TestRunTimeStewardOrchestrator:
             state_dir=sd,
         )
         assert result["metadata"]["capability"] == CAP_IDLE_DETECTION
+
+
+# ── Test 16-21 — capability 7 (polling watchdog) ──────────
+
+
+from concinno.time_steward import (  # noqa: E402
+    CAP_POLLING_WATCHDOG,
+    POLL_STATUS_FILENAME,
+)
+
+
+def _write_poll_status(
+    state_dir: Path,
+    *,
+    pod_status: str = "RUNNING",
+    age_seconds: float = 0.0,
+    extra: dict | None = None,
+) -> Path:
+    """Write a poll_status.json with controlled mtime offset."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    path = state_dir / POLL_STATUS_FILENAME
+    payload: dict[str, Any] = {"pod_status": pod_status}
+    if extra:
+        payload.update(extra)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    if age_seconds > 0:
+        ts = time.time() - age_seconds
+        import os as _os
+        _os.utime(path, (ts, ts))
+    return path
+
+
+class TestCapability7PollingWatchdog:
+    def test_fires_when_active_subagent_stale_and_poll_stale(
+        self, tmp_path: Path,
+    ):
+        sd = tmp_path / "state"
+        steward = TimeSteward(state_dir=sd)
+        _seed_active_agent(steward, agent_id="long-running", minutes_ago=15)
+        # Stale poll_status (older than default 10 min threshold).
+        _write_poll_status(sd, pod_status="RUNNING", age_seconds=20 * 60)
+        result = steward.advise_polling_watchdog(
+            session_id="watch1", turn_index=0,
+        )
+        assert result.get("inject")
+        assert result["metadata"]["capability"] == CAP_POLLING_WATCHDOG
+        assert result["metadata"]["active_count"] == 1
+
+    def test_no_fire_when_poll_fresh(self, tmp_path: Path):
+        sd = tmp_path / "state"
+        steward = TimeSteward(state_dir=sd)
+        _seed_active_agent(steward, agent_id="long-running", minutes_ago=15)
+        # Fresh poll_status.
+        _write_poll_status(sd, pod_status="RUNNING", age_seconds=0)
+        result = steward.advise_polling_watchdog(
+            session_id="watch2", turn_index=0,
+        )
+        assert result == {}
+
+    def test_no_fire_when_no_active_subagent(self, tmp_path: Path):
+        sd = tmp_path / "state"
+        steward = TimeSteward(state_dir=sd)
+        # No subagent registered → graceful no-fire even with stale poll.
+        _write_poll_status(sd, pod_status="RUNNING", age_seconds=20 * 60)
+        result = steward.advise_polling_watchdog(
+            session_id="watch3", turn_index=0,
+        )
+        assert result == {}
+
+    def test_pod_exited_triggers_stronger_inject(self, tmp_path: Path):
+        sd = tmp_path / "state"
+        steward = TimeSteward(state_dir=sd)
+        _seed_active_agent(steward, agent_id="dead-pod", minutes_ago=15)
+        # Even a fresh poll fires because pod_status != RUNNING.
+        _write_poll_status(sd, pod_status="EXITED", age_seconds=0)
+        result = steward.advise_polling_watchdog(
+            session_id="watch4", turn_index=0,
+        )
+        assert result.get("inject")
+        # Stronger variant must mention immediate resume / EXITED.
+        text = result["inject"]
+        assert "EXITED" in text or "exited" in text.lower()
+        assert "resume" in text.lower()
+        assert result["metadata"]["pod_status"] == "EXITED"
+
+    def test_malformed_poll_status_does_not_crash(self, tmp_path: Path):
+        sd = tmp_path / "state"
+        sd.mkdir(parents=True, exist_ok=True)
+        steward = TimeSteward(state_dir=sd)
+        _seed_active_agent(steward, agent_id="long-running", minutes_ago=15)
+        # Write garbage JSON.
+        (sd / POLL_STATUS_FILENAME).write_text(
+            "not-valid-json-{{",
+            encoding="utf-8",
+        )
+        # Make it appear stale.
+        ts = time.time() - 20 * 60
+        import os as _os
+        _os.utime(sd / POLL_STATUS_FILENAME, (ts, ts))
+        result = steward.advise_polling_watchdog(
+            session_id="watch5", turn_index=0,
+        )
+        # Garbage = stale-equivalent → fires, never raises.
+        assert result.get("inject")
+
+    def test_state_dir_absent_no_fire(self, tmp_path: Path):
+        # state_dir does not exist on disk at all.
+        sd = tmp_path / "no-such-dir"
+        steward = TimeSteward(state_dir=sd)
+        result = steward.advise_polling_watchdog(
+            session_id="watch6", turn_index=0,
+        )
+        assert result == {}
+
+    def test_cooldown_blocks_repeat_within_window(self, tmp_path: Path):
+        sd = tmp_path / "state"
+        steward = TimeSteward(state_dir=sd)
+        _seed_active_agent(steward, agent_id="long-running", minutes_ago=15)
+        _write_poll_status(sd, pod_status="RUNNING", age_seconds=20 * 60)
+        # First call fires.
+        r1 = steward.advise_polling_watchdog(
+            session_id="watch-cd", turn_index=0,
+        )
+        assert r1.get("inject")
+        # Within cooldown window + same poll_mtime → silent.
+        r2 = steward.advise_polling_watchdog(
+            session_id="watch-cd", turn_index=1,
+        )
+        assert r2 == {}
+
+    def test_run_time_steward_routes_through_polling_watchdog(
+        self, tmp_path: Path,
+    ):
+        sd = tmp_path / "state"
+        steward = TimeSteward(state_dir=sd)
+        _seed_active_agent(
+            steward, agent_id="long-running", minutes_ago=15, est_minutes=0,
+        )
+        _write_poll_status(sd, pod_status="EXITED", age_seconds=0)
+        result = run_time_steward(
+            agent_recent_turns=["doing other things"],
+            session_id="orch-poll", turn_index=0, state_dir=sd,
+        )
+        assert result.get("inject")
+        assert result["metadata"]["capability"] == CAP_POLLING_WATCHDOG
