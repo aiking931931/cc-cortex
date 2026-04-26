@@ -1136,20 +1136,37 @@ def _is_polygon_counting_question(question: str) -> bool:
 
 _MUSIC_NOTATION_PROCEDURE = (
     "[Music notation procedure]\n"
-    "- Identify the clef first (bass / treble / alto / tenor).\n"
-    "- Bass clef lines, bottom to top: G - B - D - F - A.\n"
-    "- Bass clef spaces, bottom to top: A - C - E - G.\n"
-    "- Treble clef lines, bottom to top: E - G - B - D - F.\n"
-    "- Treble clef spaces, bottom to top: F - A - C - E.\n"
-    "- For each notehead, decide whether it sits ON a line or IN a "
-    "space, then translate via the chart above. Notes on ledger "
-    "lines extend the same alphabetical pattern.\n"
-    "- \"Notes on lines\" / \"notes in spaces\" are common counting "
-    "cues — count them separately if asked.\n"
-    "- Common time-unit words (English): decade = 10 years, "
-    "score = 20 years, century = 100 years, millennium = 1000 years. "
-    "If the spelled word is a time-unit, the question may be about "
-    "an age computed in that unit.\n"
+    "Multi-step decomposition required — DO NOT short-circuit. For each "
+    "step, write the intermediate result before moving on.\n"
+    "Step 1. Identify the clef first (bass / treble / alto / tenor).\n"
+    "  - Bass clef lines, bottom to top: G - B - D - F - A.\n"
+    "  - Bass clef spaces, bottom to top: A - C - E - G.\n"
+    "  - Treble clef lines, bottom to top: E - G - B - D - F.\n"
+    "  - Treble clef spaces, bottom to top: F - A - C - E.\n"
+    "Step 2. For each notehead, decide ON a line vs IN a space, then "
+    "translate via the chart above. Notes on ledger lines extend the "
+    "same alphabetical pattern. Output the letter sequence verbatim.\n"
+    "Step 3. Spell out the word formed by the letter sequence.\n"
+    "Step 4. Check if the spelled word is a time-unit. Common English "
+    "time-unit words and their year values:\n"
+    "  - decade = 10 years\n"
+    "  - score = 20 years\n"
+    "  - century = 100 years\n"
+    "  - millennium = 1000 years\n"
+    "  Use the value for the word you spelled — do NOT default to "
+    "100 years (century) when the spelled word is a different unit.\n"
+    "Step 5. Count required quantities — these are typically DIFFERENT "
+    "counts in the same image, so count each separately:\n"
+    "  - total number of staff lines\n"
+    "  - total number of notes\n"
+    "  - notes positioned ON lines\n"
+    "  - notes positioned IN spaces\n"
+    "Step 6. Apply the arithmetic the question describes verbatim "
+    "(sum / subtract / multiply by the time-unit value from Step 4). "
+    "Show the formula with numbers substituted before computing.\n"
+    "Step 7. The final answer is usually a single number. Do NOT "
+    "append units (\"years\", \"y\") unless the question explicitly "
+    "asks for them.\n"
 )
 
 
@@ -1166,9 +1183,18 @@ _ORTHOGONAL_POLYGON_PROCEDURE = (
     "computing.\n"
     "- Step 4: Decompose into non-overlapping rectangles (orthogonal "
     "polygons can always be split this way).\n"
+    "  IMPORTANT: count the rectangles after decomposition. An "
+    "orthogonal L-shape, T-shape or staircase will yield MORE "
+    "rectangles than you might first guess — concave (inward) "
+    "corners create extra rectangles. A polygon with N concave "
+    "corners decomposes into at least (N + 1) rectangles. Re-count "
+    "the rectangles before computing area, and verify each "
+    "rectangle's 4 sides individually.\n"
     "- Step 5: Compute each rectangle's area; sum.\n"
     "- Step 6: Sanity check — bounding-box area minus negative-space "
-    "area should equal your sum.\n"
+    "area should equal your sum. If your sum is off by a small "
+    "amount (1-5 units) you most likely missed one rectangle in the "
+    "decomposition; re-decompose before answering.\n"
 )
 
 
@@ -1180,14 +1206,34 @@ _WEB_ONLY_PROCEDURE = (
     "named events.\n"
     "- This is a web research question. You MUST call the "
     "web_search tool.\n"
+    "- BEFORE searching, re-read the question and detect chained "
+    "references — these are easy to miss and lead to answering "
+    "about the WRONG entity:\n"
+    "  - \"X visible BEHIND/BESIDE/NEXT TO/IN THE BACKGROUND OF Y\" "
+    "→ Y is the locator, X is the answer-bearing entity. Find Y "
+    "first, then look for X within / near Y, then extract from X "
+    "(NOT from Y).\n"
+    "  - \"the [adjective] [thing] of [Y]\" → first identify Y, "
+    "then find the [adjective] [thing] within Y, that becomes the "
+    "new query target.\n"
+    "  - Nested possessives like \"the X of the Y of Z\" must be "
+    "resolved inside-out (Z → Y → X).\n"
+    "  Write out the resolution chain explicitly (\"locator = …, "
+    "intermediate = …, final answer-bearing entity = …\") before "
+    "you query, so you do not extract from the locator by mistake.\n"
     "- Multi-hop strategy:\n"
     "  1. Search engine query (use the named entity verbatim).\n"
     "  2. Open the most authoritative URL from results.\n"
     "  3. Navigate within the page (scroll / click sub-links) to "
-    "find the specific datum.\n"
+    "find the specific datum. For chained-reference questions, "
+    "navigate to the LOCATOR entity's page first, then extract the "
+    "answer-bearing entity name, then navigate to THAT entity's "
+    "page to copy the final datum.\n"
     "  4. For time-bounded queries (\"as of 2022 / end of 2023\"), "
     "cross-verify with Wayback Machine snapshot of the URL at that "
     "date.\n"
+    "- Do NOT grab the first plausible match — verify the chain "
+    "depth before extracting the answer.\n"
     "- Do NOT answer from memory for question containing named "
     "entities + temporal qualifiers — your training cutoff may not "
     "match.\n"
@@ -1473,7 +1519,12 @@ def _solve_vision_local(question: str, image_path: str) -> str:
                      "image_url": {"url": data_uri}},
                 ],
             }],
-            max_tokens=2500,
+            # 2500 → 5000: multi-step music / polygon decomposition
+            # procedures (post 2026-04-26 anchor refresh) need more
+            # headroom — 2500 truncates mid-reasoning before the
+            # FINAL ANSWER line, especially on bass-clef multi-step
+            # arithmetic and L-shape rectangle-by-rectangle area sums.
+            max_tokens=5000,
             temperature=0.2,
         )
         raw = resp["choices"][0]["message"]["content"] or ""
