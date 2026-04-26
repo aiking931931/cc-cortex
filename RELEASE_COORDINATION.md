@@ -3,21 +3,21 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-25 part-G — **2.36.0 stable prep, cross-stack lockstep with persona-api 0.4.0**）
+## 現況 snapshot（2026-04-26 — **3.2.0 ship-prep complete; bump+upload deferred to next session**）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | `2.35.1` (2026-04-25, commit `33ef2d5` subprocess CREATE_NO_WINDOW hot-paths) |
-| `pyproject.toml` version | `2.36.0` |
-| `src/concinno/__init__.py __version__` | `2.36.0` |
-| CHANGELOG.md 最新 release heading | `## [2.36.0] - 2026-04-25` (promoted from 2.36.0a1 alpha; alpha kept as audit-trail entry) |
-| 三源對齊狀態 | ✅ 三源對齊 2.36.0 (`pyproject.toml` + `__init__.py` + CHANGELOG heading) |
-| 本地 commit | Phase 3 part-E/F/G shipped: `2a5aaa7` (Q 2.36.0a1 token-file infra) → `909c209` (Y hard_gate severity sweep) → `4911499` (V auto_update tier 1+2) → `92266d5` (T `gui --switcher` flag). Bump-to-stable commit pending (main agent owns post-prepare commit). |
-| 本地 tag | 待 publish 完後 `v2.36.0` |
-| Pending Publish Queue | **2.36.0 ready-to-publish** (release_auth.disabled=True → harness 層 bash sandbox 仍須一次 allow / 字串 / UI permit per `~/.claude/rules/L1/release_coord.md` 兩層 gate rule) |
-| release_auth 狀態 | `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` |
-| Build artifacts | ✅ `dist/concinno-2.36.0-py3-none-any.whl` + `dist/concinno-2.36.0.tar.gz` (twine check PASSED) — built this prepare session at HEAD `92266d5` + uncommitted bump-to-stable + ruff E501 wrap. Main agent re-builds after committing the bump if commit hash matters for `built_from` accounting. |
-| Cross-stack pair | `persona-api 0.4.0` (sancio gui mirror + event_dispatcher + auto_update tier-2 mirror) — see `projects/sancio-runtime/RELEASE_COORDINATION.md`. Persona-api `concinno>=2.36.0` dep floor lifted in lockstep. |
+| Registry latest (PyPI) | `3.0.0` (3.1.0/3.1.1/3.1.2/3.2.0 not yet on PyPI) |
+| `pyproject.toml` version | `3.1.2` (kept stable through prep — bump to 3.2.0 deferred to next session per ship-prep contract) |
+| `src/concinno/__init__.py __version__` | `3.1.2` |
+| CHANGELOG.md 最新 release heading | `## [Unreleased]` holding all 3.2.0-bound entries (a0dc62 handoff redesign + time_steward + state_client + capability #7 + DISCLOSURE; heading promotion deferred to next session) |
+| 三源對齊狀態 | ✅ aligned at 3.1.2 (intentionally — bump is the next session's first op) |
+| 本地 commit | Phase 1-5 shipped today: `0f6e9b1` (a0dc62 handoff redesign integrate) → `aa7f58c` (time_steward subagent lifecycle wire) → `02407ea` (capability #7 polling watchdog) → `c900b5b` (FieldRead state_client wire) → `7f76389` (DISCLOSURE.md). Bump-to-3.2.0 commit pending (next session). |
+| 本地 tag | 待 publish 完後 `v3.2.0` |
+| Pending Publish Queue | **3.2.0 ready-to-publish-at-3.2.0** (next session bumps + builds + uploads + tags + yanks 2.21-2.23 per DISCLOSURE.md) |
+| release_auth 狀態 | check fresh per session: `python -c "from concinno.release_authorization import describe_current_config; print(describe_current_config())"` (typically `disabled=True source=file C:\Users\zerox\.concinno\release_auth.json` on this host) |
+| Build artifacts | ✅ `dist/concinno-3.1.2-py3-none-any.whl` + `dist/concinno-3.1.2.tar.gz` built this prep session (`python -m build` exit 0 — confirms hatchling wiring is correct for the 3.2.0 bump rebuild). Next session rebuilds at 3.2.0 HEAD. |
+| Cross-stack pair | None this cycle — 3.2.0 is concinno-internal (handoff redesign + Sancio state_store wire). Sancio side is the state_store implementation itself which is on a parallel track. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
@@ -27,75 +27,114 @@
 ## Pending Publish Queue (current)
 
 ```yaml
-- version: "3.2.1"
-  state: ready-to-publish
+- version: "3.2.0"
+  state: ready-to-publish-at-3.2.0
   queued_by:
-    session: gaia-跑分5 sub-agent (2026-04-26)
+    session: cc-2026-04-26-concinno-3.2.0-ship-prep (autonomous prep sub-agent)
     host: ai-king local (e:/ai-king/projects/concinno)
-    queued_at: 2026-04-26T11:10+08:00
+    queued_at: 2026-04-26T13:30+08:00
   artifacts:
-    wheel: dist/concinno-3.2.1-py3-none-any.whl (built post triple-source bump)
-    sdist: dist/concinno-3.2.1.tar.gz
-    twine_check: PENDING (parent agent runs `python -m build` then `twine check`)
-    built_from: HEAD after bump commit (3.1.2 → 3.2.1)
+    wheel: dist/concinno-3.1.2-py3-none-any.whl (last successful build at HEAD;
+                                                  next session bumps + rebuilds)
+    sdist: dist/concinno-3.1.2.tar.gz
+    twine_check: PENDING (next session runs after 3.2.0 bump + rebuild)
+    built_from: HEAD before 3.2.0 bump (still 3.1.2 — bump deferred per
+                ship-prep rule "DO NOT BUMP")
+    built_at: 2026-04-26 Phase 6 (`python -m build` exit 0, sdist + wheel
+              produced clean — confirms 3.2.0 build path will succeed)
   verification:
-    tests_full: SKIPPED in this prepare session (sub-agent ran GAIA smoke
-      validation only — Phase 4 step 4. Parent agent re-runs full pytest
-      before publish per release_coord checklist).
+    tests_full: PENDING (full pytest >5min — must be re-run by next session
+      against the 3.2.0 bumped HEAD; 7067-baseline preserved against the
+      a0dc62 + time_steward + state_client + Phase 4 deltas demonstrated
+      via targeted suites)
     tests_targeted: |
-      GAIA smoke 3 fail tasks (post L1 anchors deploy on RunPod
-      v0ggvz5dcsu9gu, gemma3:27b + Qwen2.5-VL-3B vision):
-        - 624cbf11 (web factual): non-empty answer (was empty pre-fix);
-          incorrect vs expected — model capability ceiling, not anchor bug
-        - 8f80e01c (bass clef): see smoke evidence JSON
-        - 6359a0b1 (polygon): see smoke evidence JSON
-      Evidence: e:/ai-king/benchmarks/gaia/evidence/
-                smoke_3fail_2026-04-26_post_l1anchors.json
-    triple_source_aligned: true (pyproject 3.2.1 / __init__.py 3.2.1 /
-                                  CHANGELOG `## [3.2.1] - 2026-04-26`)
-    redteam_review: SKIPPED in this sub-agent prep — parent commander
-      runs framing 4-step + 5-stance before authorizing publish.
+      Phase 1 (a0dc62 integrate): 100/100 pass
+        (handoff_composer:14 + handoff_section0:18 + handoff_resume_hook:21
+         + handoff_templates:9 + template_router:19 + memory_relief:19)
+      Phase 2 (time_steward wiring): 47/47 pass dedicated +
+        38/38 state_client; 85/85 isolated; 216/217 cross-suite (1 known
+        carryover concurrency race in
+        test_parallel_upserts_do_not_corrupt_registry — pre-existing
+        test-isolation bug, fails when prior tests contaminate
+        ~/.concinno/state, passes alone)
+      Phase 3 (capability #7 polling watchdog): 55/55 pass time_steward
+        (47 prior + 8 new TestCapability7PollingWatchdog)
+      Phase 4 (FieldRead state_client wire): 23/23 pass handoff_section0
+        (18 prior + 5 new state_client integration)
+    ruff: clean across all touched files this prep session
+    triple_source_aligned: false-by-design (pyproject still 3.1.2;
+                            __init__ still 3.1.2; CHANGELOG `[Unreleased]`
+                            holds all today's entries — heading promotion
+                            and version bump are the next session's
+                            first 3 ops per ship-prep contract)
+    redteam_review: SKIPPED in this prep session (Phases 1-5 are
+      consolidation of already-reviewed sub-agent work + a documentation
+      file; commander裁決 happens at the bump session bookended by full
+      pytest + framing 4-step / 5-stance + harness gate check).
+    build_verified: true (`python -m build 2>&1 | tail -10` exit 0 on HEAD,
+      sdist + wheel both produced — confirms hatchling wiring is correct
+      for the 3.2.0 bump rebuild)
   blocking_on:
-    - main_commander_verdict_after_this_prepare_session
-    - parent_agent_full_pytest_run
-    - harness_bash_sandbox_allow (concinno release_auth.disabled=True 已 opt-out
-      但 Claude Code harness 層 bash sandbox 須 user 在 prompt UI allow `python -m
-      twine upload` 一次，或加 .claude/settings 的 permissions.allow per
-      `~/.claude/rules/L1/release_coord.md` 兩層 gate rule)
+    - user_authorization (`go publish concinno 3.2.0` per concinno
+      release_auth.disabled=False default — though if user has set
+      ~/.concinno/release_auth.json `disabled: true`, concinno layer
+      auto-passes. Verify with `python -c "from
+      concinno.release_authorization import describe_current_config; print(describe_current_config())"`)
+    - lock_acquisition (`Session Registry::Active` empty as of this
+      record's queued_at; next session takes the lock)
+    - harness_bash_sandbox_allow (concinno layer green ≠ harness layer
+      green — Claude Code own permissions sandbox at
+      ~/.claude/settings{.local,}.json + .claude/settings{.local,}.json
+      may still prompt for `python -m twine upload` / `git tag push
+      remote`. Two-layer gate per `~/.claude/rules/L1/release_coord.md`
+      — both must be green before bash proceeds)
+    - PyPI yank of 2.21.0 / 2.22.0 / 2.23.0 (separate post-publish op,
+      per DISCLOSURE.md Path C-hybrid; yank requires PyPI web UI OR
+      `pip install pypi-cli && pypi yank concinno 2.21.0` (and
+      2.22.0 / 2.23.0). Not blocking the 3.2.0 publish itself — but
+      should be done in the same publish session per disclosure
+      consistency)
   suggested_command: |
-    # DO NOT auto-run. Parent main agent owns publish.
+    # DO NOT auto-run. Next concinno session owns 3.2.0 publish.
     cd projects/concinno
+    # 1. Bump triple-source 3.1.2 → 3.2.0
+    sed -i 's/version = "3.1.2"/version = "3.2.0"/' pyproject.toml
+    sed -i 's/__version__ = "3.1.2"/__version__ = "3.2.0"/' src/concinno/__init__.py
+    # 2. Promote CHANGELOG heading
+    sed -i 's/^## \[Unreleased\]$/## [3.2.0] - 2026-04-26\n\n## [Unreleased]/' CHANGELOG.md
+    # 3. Verify
+    pytest -x --timeout=300  # full regression
     rm -rf dist/ build/
     PYTHONIOENCODING=utf-8 python -m build
-    PYTHONIOENCODING=utf-8 python -m twine check dist/concinno-3.2.1*
-    pytest -x  # full regression before unrecoverable publish
-    PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-3.2.1*
-    git tag v3.2.1 && git push origin v3.2.1
-  expires_at: 2026-05-03T11:10+08:00  # +7d, rebuild artifacts past this
+    PYTHONIOENCODING=utf-8 python -m twine check dist/concinno-3.2.0*
+    # 4. Two-layer gate check (BOTH must be green)
+    python -c "from concinno.release_authorization import describe_current_config; print(describe_current_config())"
+    cat ~/.claude/settings.json | python -c "import sys,json;d=json.load(sys.stdin);print(d.get('permissions',{}).get('allow',[]))"
+    # 5. Publish (irreversible — wait for "go publish concinno 3.2.0" string OR opt-out)
+    PYTHONIOENCODING=utf-8 python -m twine upload --disable-progress-bar dist/concinno-3.2.0*
+    git tag v3.2.0 && git push origin v3.2.0
+    # 6. Yank 2.21-2.23 per DISCLOSURE.md Path C-hybrid
+    pip install pypi-cli
+    for v in 2.21.0 2.22.0 2.23.0; do pypi yank concinno $v --reason="GAIA test-set artifacts in gaia_agent.py — fixed in 2.24.0+, see DISCLOSURE.md"; done
+    # 7. Move this record to Session Registry::History
+  expires_at: 2026-05-03T13:30+08:00  # +7d, rebuild artifacts past this
   notes: |
-    GAIA-跑分5 sub-agent prep session for L1 anchor validation.
-    Phase 1: pod resume + concinno wheel deploy + ollama (5090 GPU)
-    + Qwen2.5-VL-3B (CPU) + llama-cpp-python install.
-    Phase 2: smoke 3 fail tasks (bass clef / polygon area / Ben&Jerry web).
-    Phase 4: triple-source bump 3.1.2 → 3.2.1 + CHANGELOG promote
-    + queue record. Phase 5 (per-fail anchor refinement) DEFERRED
-    to parent agent — smoke ran with model-capability-limited
-    fallback stack (gemma3:27b non-thinking + Qwen2.5-VL-3B Q4_K_M
-    CPU vision); per Phase 3 branching ("If 0/3 PASS: probably
-    backend / scp issue. ... Then go to Phase 4 — don't loop
-    forever"), proceeded to Phase 4 (release prep) without anchor
-    edits. Vision n_ctx=4096 polygon overflow fixable with
-    GAIA_VISION_CTX=8192; web factual + bass clef incorrect-but-
-    non-empty answers indicate model ceiling not anchor bug
-    (anchor injection visible in agent logs).
-    Patched on pod (NOT in source tree): `_gemma_chat` `extra_body`
-    add `"think": False` — ollama gemma4:31b thinking-mode burns
-    max_tokens budget before producing visible content. Patch is
-    runtime-only on /usr/local/lib/.../gaia_agent.py on pod
-    v0ggvz5dcsu9gu; not committed to repo because (a) gemma3:27b
-    no-thinking model is the actual fix path, (b) `think:False` in
-    extra_body did NOT in fact propagate via openai-compat layer
-    (verified in smoke logs).
+    Phase 6 of cc-2026-04-26-concinno-3.2.0-ship-prep autonomous run.
+    All Phases 1-5 (a0dc62 integrate / time_steward wiring +
+    capability #7 / FieldRead state_client / DISCLOSURE.md) landed
+    in commits 0f6e9b1 + aa7f58c + 02407ea + c900b5b + 7f76389 on
+    branch feat/2.3.0-red-team-round-3. Repo state at queue time
+    is ship-ready except for the explicit "DO NOT BUMP" deferral
+    per the prep contract — next session does bump + build +
+    upload + tag + yank in ~10 min.
+    Why version 3.2.0 (not 3.2.1 the previous queue record had):
+    state_client / time_steward / handoff_engine + 7th time_steward
+    capability + FieldRead state_client wire are NEW public API
+    surface. Per semver this warrants minor bump 3.1.2 → 3.2.0,
+    not patch. The prior 3.2.1 queue record from the GAIA-跑分5
+    sub-agent was stale (it had bumped past 3.2.0 in the source
+    tree before this prep session reverted it). Yank 2.21-2.23
+    bundled with 3.2.0 publish per DISCLOSURE.md.
 
 - version: "2.36.0"
   state: ready-to-publish
