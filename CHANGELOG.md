@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GAIA agent: 3 L1 domain-typed procedure anchors (music notation /
+  orthogonal polygon area / no-attachment web-only). Replaces previous
+  L2 totally-generic scaffold for these question types. Anchors contain
+  only domain knowledge findable in textbooks (clef line/space
+  mnemonics, polygon decomposition method, multi-hop web strategy) —
+  no GAIA answer paths. Anti-leakage assertion in tests guards against
+  L0 regression. Wired via feature toggles
+  ``gaia_music_procedure_anchor`` /
+  ``gaia_polygon_area_procedure_anchor`` /
+  ``gaia_web_only_procedure_anchor``.
+
 ## [3.0.0] - 2026-04-25
 
 License relicense from Apache-2.0 to AGPL-3.0-or-later (see
@@ -209,7 +222,7 @@ mode).
 - Cross-stack: ``persona-api 0.4.0`` ships in lockstep — sancio
   GUI mirror (port 8401), event-dispatcher wiring, and Tier-2 mirror
   ``sancio self-update``. See
-  ``projects/persona-api/RELEASE_COORDINATION.md``.
+  ``projects/sancio-runtime/RELEASE_COORDINATION.md``.
 
 ## [2.36.0a1] - 2026-04-25 — superseded by 2.36.0
 

@@ -156,11 +156,13 @@ class TestVisionLocalIntegration:
         )
         assert out == "90"
         text_block = fake.captured["messages"][0]["content"][0]["text"]
-        # Generic visual-reasoning scaffold is injected (no cheating strings)
-        assert "Step 1" in text_block
-        assert "Step 4" in text_block
-        # None of the old task-specific leaks appear.
-        for leak in ("Good Boys", "G B D F A", "decade=10", "right-to-left"):
+        # 2.x: music questions now get the L1 music-notation procedure
+        # anchor (textbook clef line/space mnemonics + time-units), not
+        # the generic L2 scaffold. Verify the L1 anchor is present.
+        assert "[Music notation procedure]" in text_block
+        assert "Bass clef lines" in text_block
+        # None of the L0 leakage paths appear.
+        for leak in ("DECADE", "Good Boys", "decade=10", "right-to-left"):
             assert leak not in text_block, f"solution leak: {leak!r}"
 
     def test_non_music_mode_omits_hint(
@@ -186,13 +188,16 @@ class TestVisionLocalIntegration:
             gaia_agent_mod, "_get_local_vision_llm", lambda: _FakeLLM(),
         )
         out = gaia_agent_mod._solve_vision_local(
-            "What percentage of the Dropbox plan is used?", str(img),
+            "What percentage of the chart is used?", str(img),
         )
         assert out == "0.03"
         text_block = captured["messages"][0]["content"][0]["text"]
-        # Non-music / non-polygon question gets no scaffold prelude.
-        assert "Step 1 — Describe" not in text_block
-        assert "Step 4 — Reason" not in text_block
+        # 2.x: a non-music / non-polygon-area question with an image
+        # falls through to the L2 generic visual-reasoning scaffold.
+        # No L1 domain anchor leaks in.
+        assert "[Music notation procedure]" not in text_block
+        assert "[Orthogonal polygon area procedure]" not in text_block
+        assert "[No-attachment web question procedure]" not in text_block
 
 
 class TestPolygonCounting:
@@ -292,8 +297,12 @@ class TestPolygonCounting:
             "How many edges are there?", str(img),
         )
         text_block = captured["messages"][0]["content"][0]["text"]
-        # Polygon feature off → no scaffold prelude for polygon-only Q.
-        assert "Step 1 — Describe" not in text_block
+        # 2.x: polygon_counting_hint feature only gates the upscale
+        # path. The dispatcher still falls through to the generic L2
+        # scaffold when an image is present (any image deserves the
+        # scaffold). What it does NOT inject is the L1 polygon-area
+        # anchor (different feature toggle, not triggered by this Q).
+        assert "[Orthogonal polygon area procedure]" not in text_block
 
 
 class TestFeatureSwitches:

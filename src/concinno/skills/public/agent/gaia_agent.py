@@ -1091,6 +1091,195 @@ def _is_polygon_counting_question(question: str) -> bool:
     return bool(_POLYGON_COUNTING_RE.search(question))
 
 
+# ── L1 domain-typed procedure anchors ─────────────────────────
+#
+# These anchors contain only generic domain knowledge (textbook /
+# Wikipedia level — clef line/space mnemonics, orthogonal-polygon
+# decomposition method, multi-hop web research strategy). They do NOT
+# contain GAIA answer paths — see ``generic-anchor-design.md`` 3-question
+# leakage test. The dispatcher ``_get_domain_procedure`` selects the
+# most-specific applicable anchor (music > polygon-area > web-only >
+# generic scaffold). Only ONE anchor is injected per question (no
+# stacking — anti-pattern in spec, lost-in-middle attention dilution).
+
+_MUSIC_NOTATION_PROCEDURE = (
+    "[Music notation procedure]\n"
+    "- Identify the clef first (bass / treble / alto / tenor).\n"
+    "- Bass clef lines, bottom to top: G - B - D - F - A.\n"
+    "- Bass clef spaces, bottom to top: A - C - E - G.\n"
+    "- Treble clef lines, bottom to top: E - G - B - D - F.\n"
+    "- Treble clef spaces, bottom to top: F - A - C - E.\n"
+    "- For each notehead, decide whether it sits ON a line or IN a "
+    "space, then translate via the chart above. Notes on ledger "
+    "lines extend the same alphabetical pattern.\n"
+    "- \"Notes on lines\" / \"notes in spaces\" are common counting "
+    "cues — count them separately if asked.\n"
+    "- Common time-unit words (English): decade = 10 years, "
+    "score = 20 years, century = 100 years, millennium = 1000 years. "
+    "If the spelled word is a time-unit, the question may be about "
+    "an age computed in that unit.\n"
+)
+
+
+_ORTHOGONAL_POLYGON_PROCEDURE = (
+    "[Orthogonal polygon area procedure]\n"
+    "- Step 1: List every numeric label visible. Mark each as either "
+    "(a) edge length next to a side, or (b) decoration (logo / year "
+    "/ watermark / scale bar). Decorations are not edges.\n"
+    "- Step 2: Walk the boundary clockwise from one corner. List "
+    "each edge as (direction, length). Use the labels.\n"
+    "- Step 3: Closure check — sum of right-going lengths must equal "
+    "sum of left-going lengths; sum of up = sum of down. If not "
+    "equal, some edge length is wrong or missing — re-examine before "
+    "computing.\n"
+    "- Step 4: Decompose into non-overlapping rectangles (orthogonal "
+    "polygons can always be split this way).\n"
+    "- Step 5: Compute each rectangle's area; sum.\n"
+    "- Step 6: Sanity check — bounding-box area minus negative-space "
+    "area should equal your sum.\n"
+)
+
+
+_WEB_ONLY_PROCEDURE = (
+    "[No-attachment web question procedure]\n"
+    "- Trigger: question has no attached file AND contains any of: "
+    "\"as of [year/date]\" / \"visible on/in\" / \"on [URL or "
+    "website]\" / \"the [thing] of [entity]\" / proper nouns / "
+    "named events.\n"
+    "- This is a web research question. You MUST call the "
+    "web_search tool.\n"
+    "- Multi-hop strategy:\n"
+    "  1. Search engine query (use the named entity verbatim).\n"
+    "  2. Open the most authoritative URL from results.\n"
+    "  3. Navigate within the page (scroll / click sub-links) to "
+    "find the specific datum.\n"
+    "  4. For time-bounded queries (\"as of 2022 / end of 2023\"), "
+    "cross-verify with Wayback Machine snapshot of the URL at that "
+    "date.\n"
+    "- Do NOT answer from memory for question containing named "
+    "entities + temporal qualifiers — your training cutoff may not "
+    "match.\n"
+)
+
+
+# Polygon-AREA detection (different from polygon-counting).
+# Counting (existing) is for "how many edges/sides/vertices?".
+# Area is for "what is the area of this polygon?" — needs the
+# decomposition procedure, not the boundary-walk-counting one.
+_POLYGON_AREA_RE = re.compile(
+    r"\b(area|surface)\b.{0,80}\b(polygon|shape|figure|region|"
+    r"label(?:s|ed)?|side\s*length|edges?|cm|mm|inch|inches|"
+    r"meters?|metres?|ft|feet|units?)\b|"
+    r"\b(polygon|shape|figure|region)\b.{0,80}\b(area|surface)\b",
+    re.I | re.S,
+)
+
+
+def _is_orthogonal_polygon_area_question(question: str) -> bool:
+    """Return True when the question asks for the area of a polygon.
+
+    Distinct from ``_is_polygon_counting_question`` which targets
+    edge/side/vertex *counting*. Area questions need the decomposition
+    procedure (closure check + non-overlapping rectangles + sum) rather
+    than a walk-the-boundary counter.
+    """
+    if not question:
+        return False
+    return bool(_POLYGON_AREA_RE.search(question))
+
+
+# Web-only detection — fires only when there is NO attached file AND
+# the question shows web-research telltales:
+#   - "as of <date/year>" temporal qualifier
+#   - "visible on/in [page/site]" / "on https://" / "on www."
+#   - "the X of <ProperNoun>" possessive of a named entity
+#   - 2+ proper nouns (rough heuristic for named-entity density)
+_WEB_TEMPORAL_RE = re.compile(r"\bas of\b", re.I)
+_WEB_VISIBLE_RE = re.compile(
+    r"\bvisible (?:in|on)\b|\bon (?:https?://|www\.)",
+    re.I,
+)
+_WEB_POSSESSIVE_RE = re.compile(
+    r"\bthe \w+ of [A-Z][\w&'.-]+",
+)
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]{2,}(?:[A-Z'\-&][a-z]+)*")
+
+
+def _is_web_only_question(question: str, file_path: str | None) -> bool:
+    """Return True when the question is web-research without attachment.
+
+    Conditions (ALL must hold):
+    1. ``file_path`` is empty / None (no attached file).
+    2. Either of the textual cues fires:
+       a. ``as of <date>`` temporal qualifier, OR
+       b. ``visible on/in <page>`` / ``on https://...`` cue, OR
+       c. ``the X of <ProperNoun>`` possessive cue, OR
+       d. ≥2 distinct proper-noun tokens (named-entity density).
+    """
+    if file_path:
+        return False
+    if not question:
+        return False
+    if _WEB_TEMPORAL_RE.search(question):
+        return True
+    if _WEB_VISIBLE_RE.search(question):
+        return True
+    if _WEB_POSSESSIVE_RE.search(question):
+        return True
+    # Proper-noun density: drop the leading sentence-start capital so
+    # "How" / "What" / "Which" don't count.
+    tokens = _PROPER_NOUN_RE.findall(question)
+    # Strip the first-token-capital false positives by counting unique
+    # tokens that are not common question words.
+    _Q_WORDS = {
+        "How", "What", "Which", "When", "Where", "Who", "Why",
+        "Is", "Are", "Was", "Were", "Do", "Does", "Did",
+        "Can", "Could", "Will", "Would", "Should",
+        "The", "This", "That", "These", "Those",
+    }
+    distinct = {t for t in tokens if t not in _Q_WORDS}
+    return len(distinct) >= 2
+
+
+def _get_domain_procedure(
+    question: str, file_path: str | None,
+) -> str:
+    """Return the most-specific applicable domain procedure anchor.
+
+    Routing precedence (most-specific first):
+      1. Music notation     → ``_MUSIC_NOTATION_PROCEDURE``
+      2. Polygon area       → ``_ORTHOGONAL_POLYGON_PROCEDURE``
+      3. No-attachment web  → ``_WEB_ONLY_PROCEDURE``
+      4. Generic scaffold   → ``_VISUAL_REASONING_SCAFFOLD`` (only
+                              when an image is attached, since the
+                              scaffold is visual-reasoning specific)
+      5. Otherwise          → empty string (no anchor)
+
+    Each L1 anchor respects its own feature toggle. When the most-
+    specific anchor's toggle is OFF, fall through to the next-specific
+    anchor (NOT to "no anchor" — fallback is the design intent).
+    Only one anchor is returned; stacking is forbidden by spec.
+    """
+    if (
+        _is_music_notation_question(question)
+        and _feature_enabled("gaia_music_procedure_anchor")
+    ):
+        return _MUSIC_NOTATION_PROCEDURE
+    if (
+        _is_orthogonal_polygon_area_question(question)
+        and _feature_enabled("gaia_polygon_area_procedure_anchor")
+    ):
+        return _ORTHOGONAL_POLYGON_PROCEDURE
+    if (
+        _is_web_only_question(question, file_path)
+        and _feature_enabled("gaia_web_only_procedure_anchor")
+    ):
+        return _WEB_ONLY_PROCEDURE
+    if file_path:
+        return _VISUAL_REASONING_SCAFFOLD
+    return ""
+
+
 def _upscale_image_if_small(
     image_path: str, min_side: int = 800, factor: int = 4,
 ) -> str:
@@ -1221,10 +1410,13 @@ def _solve_vision_local(question: str, image_path: str) -> str:
         return ""
     ext = os.path.splitext(effective_path)[1].lstrip(".").lower() or "png"
     data_uri = f"data:image/{ext};base64,{b64}"
-    # Both music-notation and polygon-counting questions now share the
-    # generic visual-reasoning scaffold (no task-specific solution paths
-    # hardcoded). Inject once regardless of which feature toggle fired.
-    prelude = f"{_VISUAL_REASONING_SCAFFOLD}\n\n" if (music_mode or polygon_mode) else ""
+    # Route to the most-specific L1 domain procedure anchor (music /
+    # polygon-area / web-only), falling back to the generic visual-
+    # reasoning scaffold for any other image. ``_get_domain_procedure``
+    # respects each anchor's feature toggle and returns at most ONE
+    # anchor (no stacking — anti-pattern per generic-anchor-design.md).
+    procedure = _get_domain_procedure(question, image_path)
+    prelude = f"{procedure}\n\n" if procedure else ""
     user_text = (
         f"{prelude}{question}\n\nAnalyze the image carefully and "
         "think step by step. After your reasoning, end with exactly "

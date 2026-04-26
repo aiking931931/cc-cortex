@@ -848,6 +848,97 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # ── Windows RAM Cleanup ──
+    "memory_relief": {
+        "category": "optional_optimization",
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "Long Claude sessions may accumulate standby pollution / "
+            "leaked working sets without auto-recovery; user must run "
+            "/memrelief manually"
+        ),
+        "description": (
+            "Windows-only RAM cleanup with before/after stats and per-"
+            "process trim list. SAFE tier needs no admin; STANDBY/"
+            "AGGRESSIVE/DESTRUCTIVE require elevated token. Auto-fires "
+            "as wave 4 of process_guard chain when wave 3 leaves RAM "
+            "above threshold."
+        ),
+        "description_zh": (
+            "Windows 記憶體清理：每進程 working set trim + standby/"
+            "modified list 漸進式釋放，含 before/after 統計與每進程明細。"
+            "預設 SAFE 不需 admin；aggressive 等級需要管理員。"
+            "自動接在 process_guard wave 3 之後當 wave 4 救援。"
+        ),
+        # ziq_autotunable=False per red-team H-2: ZIQ outcome signal
+        # ("MB freed") is blind to user IO penalty (disk re-read after
+        # standby purge). Threshold stays user-tuned to avoid Goodhart.
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "auto_trigger_after_process_guard": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "process_guard finishes wave 3 without escalating to "
+                    "memory_relief; user must trigger cleanup manually"
+                ),
+                "risk_off_zh": (
+                    "process_guard wave 3 跑完不會自動清 standby，"
+                    "用戶要手動觸發"
+                ),
+            },
+            "auto_trigger_mode": {
+                "type": "str",
+                "default": "safe",
+                "options": ["safe", "standby", "aggressive"],
+                "recommended": "safe",
+                "risk_off": (
+                    "Setting to 'aggressive' auto-purges standby on every "
+                    "process_guard escalation — IO penalty repeats"
+                ),
+                "risk_off_zh": (
+                    "設成 aggressive 每次升級都全清 standby — IO 損失反覆"
+                ),
+            },
+            "top_n_per_process_trim": {
+                "type": "int",
+                "default": 8,
+                "min": 1,
+                "max": 50,
+                "recommended": 8,
+                "risk_low": "Below 3 misses meaningful working-set heavyweights",
+                "risk_high": "Above 20 trims the user's foreground app, causing UI lag",
+                "risk_low_zh": "低於 3 漏掉真正吃 RAM 的 process",
+                "risk_high_zh": "高於 20 會 trim 到用戶活躍的應用，造成 UI 卡頓",
+            },
+            "min_trim_mb": {
+                "type": "int",
+                "default": 50,
+                "min": 10,
+                "max": 1000,
+                "recommended": 50,
+                "risk_low": "Below 10 trims trivial processes for negligible gain",
+                "risk_high": "Above 200 only trims giants, missing accumulated mid-size leaks",
+                "risk_low_zh": "低於 10 為微小收益 trim 一堆小 process",
+                "risk_high_zh": "高於 200 只 trim 巨無霸，漏掉累積的中型 leak",
+            },
+            "tray_enabled": {
+                "type": "bool",
+                "default": False,
+                "recommended": False,
+                "risk_off": (
+                    "Tray icon disabled — user invokes via /memrelief skill "
+                    "or python -m concinno.memory_relief instead"
+                ),
+                "risk_off_zh": (
+                    "系統匣 icon 關閉 — 用戶透過 /memrelief 或 "
+                    "python -m concinno.memory_relief 觸發"
+                ),
+            },
+        },
+    },
     # ── Pipeline Mode ──
     "pipeline_mode": {
         "category": "context",
@@ -1091,6 +1182,59 @@ FEATURE_META: dict[str, dict] = {
             "polygon / 邊數 / 頂點 類計數題注入沿邊走一遍的系統化 "
             "procedure + 標籤是 metadata 不納入計數的警告 "
             "（GAIA 6359a0b1 off-by-one 起源）"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gaia_music_procedure_anchor": {
+        "category": "context",
+        "description": (
+            "L1 domain-typed anchor: inject music-notation procedure "
+            "(clef line/space mnemonics + common time-units) for any "
+            "question referencing musical staff / clef / noteheads. "
+            "Generic textbook knowledge, no GAIA answer paths."
+        ),
+        "description_zh": (
+            "L1 領域型 anchor：樂譜題注入 clef line/space 通用記譜 "
+            "mnemonic + 常見時間單位字（decade/score/century/"
+            "millennium）。內容皆為樂理通識，不含 GAIA 答案路徑"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gaia_polygon_area_procedure_anchor": {
+        "category": "context",
+        "description": (
+            "L1 domain-typed anchor: inject orthogonal-polygon area "
+            "procedure (label-vs-decoration / boundary walk / closure "
+            "check / decompose / sum / sanity check) for area-of-"
+            "polygon questions. Generic geometry, no GAIA answer "
+            "paths."
+        ),
+        "description_zh": (
+            "L1 領域型 anchor：直角多邊形面積題注入通用解題程序 "
+            "（標籤 vs 裝飾 / 沿邊走 / 閉合檢查 / 分解 / 加總 / "
+            "sanity check）。內容皆為幾何通識"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gaia_web_only_procedure_anchor": {
+        "category": "context",
+        "description": (
+            "L1 domain-typed anchor: inject web-research procedure "
+            "(call web_search / multi-hop strategy / Wayback "
+            "fallback) for questions with no attachment + "
+            "temporal/named-entity cues. Generic research strategy, "
+            "no GAIA answer paths."
+        ),
+        "description_zh": (
+            "L1 領域型 anchor：無附件且有時間/命名實體線索的 web "
+            "research 題注入通用 web 研究程序（必呼 web_search / "
+            "multi-hop / Wayback fallback）。內容皆為通用研究策略"
         ),
         "ziq_autotunable": False,
         "cosmetic": False,
