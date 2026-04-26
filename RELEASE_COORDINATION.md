@@ -3,23 +3,25 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-26 — **3.2.0 LIVE on PyPI**; yank of 2.21-2.23 + 4.0.0 default-off pending）
+## 現況 snapshot（2026-04-26 — **4.0.0 LIVE on PyPI** — SEMVER-MAJOR ship-level default-off flip + GAIA Phase-5 + memory_relief perf）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | **`3.2.0`** ✅ (uploaded 2026-04-26 — <https://pypi.org/project/concinno/3.2.0/>) |
-| `pyproject.toml` version | `3.2.0` ✅ aligned |
-| `src/concinno/__init__.py __version__` | `3.2.0` ✅ aligned |
-| CHANGELOG.md 最新 release heading | `## [3.2.0] - 2026-04-26` (wiring-audit round 3 — 5 fixes); `## [Unreleased]` holds 4.0.0 default-off SPEC + plan |
-| 三源對齊狀態 | ✅ aligned at 3.2.0 |
-| Git tag | ✅ `v3.2.0` pushed (`git push origin v3.2.0` — branch feat/2.3.0-red-team-round-3) |
-| Pending Publish Queue | empty (3.2.0 published; 4.0.0 spec'd but not started — major breaking change, queued for next planning cycle) |
-| release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness Bash(*)) green for this host. |
-| Build artifacts | ✅ `dist/concinno-3.2.0-py3-none-any.whl` (1.76 MB) + `dist/concinno-3.2.0.tar.gz` published. (Stale `dist/concinno-3.2.1*` from earlier session — kept on disk, not on PyPI; safe to manually rm.) |
-| **Pending post-publish ops** | ⬜ **PyPI yank 2.21.0/2.22.0/2.23.0** per DISCLOSURE.md Path C-hybrid (web UI only — pypi-cli is broken on modern click; user does this in 3 minutes once via <https://pypi.org/manage/project/concinno/release/2.21.0/> + 2.22.0 + 2.23.0). |
-| **User local config** | ✅ ALL hard_gate / soft_gate features disabled per AI King 2026-04-26 directive ("除了刪除擋以外 把其他擋的功能預設關閉 我的也關閉"). 27 entries set to `enabled: false` in `~/.claude/hooks/cc_config.json`. DestructionGuard (R0-R4 hardcoded patterns) remains on always. See [feedback_default_off_gates_for_senior_devs.md](../../C:/Users/zerox/.claude/projects/e--ai-king/memory/feedback_default_off_gates_for_senior_devs.md). |
-| **Next major** | 4.0.0 — flip ship-level `FEATURE_META` defaults to match the user-local config (default-off for non-destruction gates). SEMVER-MAJOR breaking change. Spec in CHANGELOG `[Unreleased]`. Queued for proper red/blue review before bump. |
-| Cross-stack pair | None this cycle — 3.2.0 is concinno-internal. |
+| Registry latest (PyPI) | **`4.0.0`** ✅ (uploaded 2026-04-26 — <https://pypi.org/project/concinno/4.0.0/>) |
+| `pyproject.toml` version | `4.0.0` ✅ aligned |
+| `src/concinno/__init__.py __version__` | `4.0.0` ✅ aligned |
+| CHANGELOG.md 最新 release heading | `## [4.0.0] - 2026-04-26` (default-off feature gates SEMVER-MAJOR + GAIA Phase-5 bundle + memory_relief perf) |
+| 三源對齊狀態 | ✅ aligned at 4.0.0 |
+| Git tag | ✅ `v4.0.0` pushed (commit `1173552` on branch `feat/2.3.0-red-team-round-3`) |
+| Inner concinno HEAD | `1173552 release(4.0.0): default-off feature gates + GAIA Phase-5 bundle + memory_relief perf` |
+| Pending Publish Queue | empty (4.0.0 published) |
+| release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)`) green |
+| Build artifacts | ✅ `dist/concinno-4.0.0-py3-none-any.whl` (1.7 MB) + `dist/concinno-4.0.0.tar.gz` (1.5 MB) published. Stale `concinno-3.2.1*` / `3.0.x` / `3.1.x` left on disk, not on PyPI. |
+| **Post-publish ops** | ✅ PyPI yank 2.21.0/2.22.0/2.23.0 — user completed manually via web UI (per DISCLOSURE.md Path C-hybrid) before 4.0.0 ship. |
+| **User-directive deviation** | Per AI King 2026-04-26 ("把我現在的關閉 刪除檔案以外的 授權全部 deny 功能 預設也是關閉 全跑"): ALL 27 features ship default-OFF including `release_authorization` — overrides red/blue verdict #1 which had `release_authorization` stay default-on. User accepts publish-friction trade for fully friction-free senior-dev defaults. |
+| **Migration shim** | Intentionally not implemented — SEMVER-MAJOR is the right vehicle. Existing users restore strict mode via `concinno config set features.<name>.enabled true` per guard. `concinno features set-profile strict` shortcut deferred to 4.0.1. |
+| **Verification** | pytest 7374 passed / 1 known concurrency race (pre-existing test-isolation, not 4.0.0 fault) / 8 skipped / 3 xfailed in 11 minutes. ruff clean across all touched files. Triple-source aligned. |
+| Cross-stack pair | None this cycle — 4.0.0 is concinno-internal. Sancio (`sancio-runtime` 1.0.0) deploy-only, not on PyPI. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
