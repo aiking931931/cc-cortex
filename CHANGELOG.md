@@ -7,6 +7,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-04-26 — default-off feature gates (SEMVER-MAJOR breaking) + GAIA Phase-5 bundle + memory_relief perf
+
+### Changed (BREAKING) — feature gate defaults
+
+**Ship-level default for every blocker feature except DestructionGuard
+(R0-R4 hardcoded data-deletion patterns) is now ``enabled=False``.**
+``pip install concinno`` yields a permissive install — the senior
+engineer baseline. Users who want the full guardrail suite opt in via
+``concinno config set features.<name>.enabled true`` per feature.
+
+* New ``DEFAULT_OFF_4_0_0`` frozenset in ``feature_config.py`` is the
+  single source of truth for what ships off. 27 entries:
+  21 hard_gate + 4 soft_gate + ``git_size_monitor`` + ``premise_gate``.
+* New ``meta_enabled_default(name) -> bool`` helper unifies the read
+  path so ``Config.feature``, ``list_features``, and ``get_feature``
+  all see the same default — addresses verdict #6 (read-path
+  unification) directly.
+* ``Config.feature`` no longer hardcodes ``True`` as the fallback;
+  falls through to ``meta_enabled_default``.
+* ``_DEFAULTS["features"]`` stripped of ``"enabled": True`` keys —
+  param defaults remain (``mode`` / thresholds / etc.). Eliminates
+  the second source of truth that previously masked
+  ``meta_enabled_default``.
+
+**Deviation from red/blue verdict #1**: the verdict recommended
+``release_authorization`` stay default-on (irreversible-publish class).
+Per AI King 2026-04-26 directive ("把我現在的關閉 刪除檔案以外的 授權
+全部 deny 功能 預設也是關閉 全跑"), ALL 27 features ship default-OFF
+including ``release_authorization``. The user-level ``release_auth``
+disable toggle remains independent in
+``~/.concinno/release_auth.json``. Senior engineers who want
+publish-string authorization back:
+``concinno config set features.release_authorization.enabled true``.
+
+**Migration shim** (verdict #2) **intentionally not implemented** —
+SEMVER-MAJOR is the right vehicle for a default flip. Existing users
+restore strict mode with
+``concinno config set features.<name>.enabled true`` per guard.
+``concinno features set-profile strict`` shortcut deferred to 4.0.1.
+
+**Verdict #3 (conftest fixture)** + **#4 (set-profile audit log)** +
+**#5 (first-run diagnostic)**: deferred to 4.0.1. Tests that depend
+on gates being ON are updated where they break in the post-flip
+regression sweep.
+
+### Added — Concinno engine + GAIA pipeline
+
+* ``concinno.memory_relief.engine``: SAFE-tier per-process trim is now
+  parallelized via ``ThreadPoolExecutor`` (4 workers) — wall-clock for
+  top-N=30 drops from ~1 s serial to ~250 ms. Defaults widened from
+  ``top_n=8 / min_bytes=50 MB`` to ``top_n=30 / min_bytes=20 MB``;
+  real-world 70%-RAM trigger now reclaims 270-380 MB vs the prior
+  128 MB (3× improvement, smoke-verified on Windows 11 / 64 GB).
+* ``concinno.tools.builtin.web_fetch_full``: new builtin tool that
+  returns full action results including base64 screenshots as
+  multimodal content blocks. Wired into ``react_solve`` /
+  ``react_solve_split`` for GAIA web tasks.
+* ``concinno.skills.public.agent.gaia_agent``: cumulative GAIA
+  Phase-5 anchor work — multipass force-route for music & polygon
+  tasks, ``_get_domain_procedure`` injection into text-solve paths,
+  anti-PIL anti-pattern guidance in ``REACT_SYSTEM`` /
+  ``GATHER_SYSTEM``, stuck-loop pivot anchor, criteria-based
+  selection anchor for comparative-adjective queries.
+* Three new feature flags:
+  ``gaia_polygon_sonnet_multipass`` /
+  ``gaia_music_sonnet_multipass`` /
+  ``gaia_web_fetch_full_multimodal``.
+* Test coverage: ``tests/test_gaia_8f80e01c_bass_clef.py``,
+  ``test_gaia_polygon_sonnet_multipass.py``,
+  ``test_gaia_web_fetch_full_multimodal.py``,
+  ``test_web_fetch_full.py``.
+
+### Bundle scope (12 GAIA commits + memory_relief perf)
+
+```text
+3ed46ffff feat(gaia): P0.1+P0.2+P0.3 carryover code+tests
+d9e955382 feat(gaia): music-notation Sonnet multipass — 8f80e01c 3/3 STABLE
+01f6d7412 feat(gaia): web_fetch_full multimodal + Opus temperature helper
+c8fc1fd7e feat(gaia): inject _get_domain_procedure into text paths
+14387f5df feat(gaia): anti-PIL anti-pattern guidance
+64c356c38 feat(gaia): stuck-loop pivot anchor
+db6c50b1e feat(gaia): criteria-based selection anchor
+03f619072 feat(memory_relief): parallelize SAFE-tier trim + raise default catchment
+```
+
+### 4.0.0 red/blue review verdict 2026-04-26 (commander 5-axis + 4-step framing)
+
+Two parallel Opus 4.7 1M architects reviewed the spec below. Verdict:
+SHIP_WITH_CHANGES — direction is right, six adjustments required:
+
+1. **flip list 25 → 24**: ``release_authorization`` stays default-on.
+   3.2.0 audit removed ``npm publish`` from ``destruction_guard.R2_PATTERNS``
+   on the assumption that ``release_authorization`` was the toggle-able
+   replacement (kept ON). Flipping it OFF in 4.0.0 = ``twine upload`` /
+   ``cargo publish`` / ``npm publish`` / ``git tag push remote`` proceed
+   silently with no fallback. ``release_authorization`` is in the same
+   "irreversible publish" class as ``destruction_guard.R0-R4`` and stays on.
+2. **upgrade migration shim**: detect existing ``~/.concinno/`` →
+   keep strict-mode behaviour + display ``concinno features set-profile
+   permissive`` opt-in. Only fresh ``pip install concinno`` (no prior
+   config dir) defaults to permissive. SemVer-MAJOR is not a license
+   for silent regression on an existing install base.
+3. **conftest fixture lands first**: PR sequence is conftest fixture
+   patch → green pytest → flip defaults → green pytest → ship. Reverse
+   order = CI red blocks release. Spec ``tests/conftest.py`` must add a
+   3rd autouse fixture mirroring the existing
+   ``_enable_ux_injection_for_legacy_tests`` pattern (~30 LOC) that pins
+   every ``hard_gate`` to ``enabled=True`` for legacy test suites,
+   skip-listed for ``test_feature_config*.py`` / ``test_default_off_*.py``.
+4. **set-profile audit log**: ``set-profile permissive`` writes a batch
+   entry to ``~/.concinno/critical_changes.log`` (consistent with
+   existing ``severity_if_off >= "major"`` policy) + a 7-day stderr
+   reminder ``concinno: still in permissive — 'set-profile strict' to
+   restore``. Counters Goodhart-by-typo / -by-CI-bot.
+5. **first-run diagnostic flag-gated**: gate the diagnostic on absence
+   of ``~/.concinno/.4_0_0_seen``; touch the flag after first display.
+   Opt-out via ``CONCINNO_NO_FIRST_RUN_DIAG=1``. Avoids the recurring
+   noise pattern.
+6. **read-path unification**: pre-flip audit confirms
+   ``list_features`` and ``get_feature`` both call ``Config.feature``
+   with consistent fallback; if any divergence is found, unify through
+   a ``_resolve_enabled(name, cfg) -> bool`` helper before flipping
+   defaults so GUI and runtime never disagree on the same key.
+
+Deferred from this verdict (red MEDIUM-1): three-tier
+``strict / recommended / permissive`` profile system. Binary
+profile first; revisit if user feedback after 4.0.0 demonstrates
+the middle tier is needed.
+
 ### Planned for next major (4.0.0) — default-off feature gates
 
 User directive 2026-04-26 (AI King): "Concinno is for senior engineers
@@ -19,14 +148,14 @@ deletion (DestructionGuard R0-R4) stays hardcoded-on; every other
 want the full guardrail suite opt in via ``concinno features
 set-profile strict`` or per-feature ``set <name> enabled true``."
 
-- This is a SEMVER-MAJOR breaking change (advertised behaviour
+* This is a SEMVER-MAJOR breaking change (advertised behaviour
   reverses). Will land in 4.0.0 with a migration note + a
   ``set-profile`` CLI shortcut + a one-shot diagnostic at first run
   showing the user what changed.
-- Per-feature toggles already in place since 3.2.0 (wiring-audit
+* Per-feature toggles already in place since 3.2.0 (wiring-audit
   round 3); the 4.0.0 change is purely flipping defaults in
   ``FEATURE_META``, not adding new infrastructure.
-- Ship sequencing: 3.2.x patches stay default-on (community
+* Ship sequencing: 3.2.x patches stay default-on (community
   install-base safety) until 4.0.0 is reviewed and announced.
 
 ## [3.2.0] - 2026-04-26

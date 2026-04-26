@@ -39,6 +39,8 @@ from .shell import (
     ShellTimeoutError,
 )
 from .sql import DuckDbQuery, SqlToolError
+from .web import FetchUrlTool, WebSearchTool, strip_html
+from .web_fetch_full import WebFetchFullTool, web_fetch_full
 from .wiki import FetchWikipediaSectionTool
 
 __all__ = [
@@ -83,4 +85,11 @@ __all__ = [
     "RssToolError",
     # wiki
     "FetchWikipediaSectionTool",
+    # web
+    "FetchUrlTool",
+    "WebSearchTool",
+    "strip_html",
+    # web_fetch_full
+    "WebFetchFullTool",
+    "web_fetch_full",
 ]

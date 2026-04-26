@@ -68,6 +68,77 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+# ── 4.0.0 default-off catalogue ───────────────────────────
+#
+# Per AI King 2026-04-26 directive: every blocking feature except
+# ``DestructionGuard`` (R0-R4 hardcoded data-deletion patterns) ships
+# default-OFF in 4.0.0. ``pip install concinno`` then yields a permissive
+# install — the user opts into individual gates via ``concinno features
+# set <name> enabled true`` or the bulk ``concinno features set-profile
+# strict`` shortcut.
+#
+# This frozenset is the *single source of truth* — keeping it in one
+# place avoids the 26-edit scatter pattern and makes future audits
+# (which features ship default-on?) one ``DEFAULT_OFF_4_0_0`` lookup.
+#
+# Senior-dev rationale: see
+# ``feedback_default_off_gates_for_senior_devs.md`` (MEMORY index)
+# and the CHANGELOG ``[4.0.0]`` entry.
+#
+# **NOT in this set** = ships default-ON. Currently every other
+# FEATURE_META entry (UX, behavioural, context, hard_quality
+# enforcement, ZIQ infra, etc.) — these are observability /
+# coordination / rendering features that don't deny tool calls or
+# block agent flow.
+DEFAULT_OFF_4_0_0: frozenset[str] = frozenset({
+    # hard_gate (21)
+    "agent_cap", "bash_background_gate", "boundary_guard",
+    "butterfly_guard", "clarity_gate", "consecutive_fail_gate",
+    "delivery_gate", "handoff_required_guard", "hijack_gate",
+    "identity_guard", "prompt_guard", "proposal_guard",
+    "publish_scan", "publish_scan_guard", "python_c_gate",
+    "read_first_gate", "release_authorization", "sentinel_gate",
+    "token_gate", "ui_verify", "whitepaper_guard",
+    # soft_gate (4)
+    "excuse_scanner", "handoff_claim_guard", "sedimentation_gate",
+    "semver_gate",
+    # info / repo-hygiene (1) — user listed off in cc_config.json
+    "git_size_monitor",
+    # external module (no FEATURE_META entry; honoured via
+    # meta_enabled_default fallback chain)
+    "premise_gate",
+})
+
+
+def meta_enabled_default(name: str) -> bool:
+    """Single source of truth for ship-level default-enabled.
+
+    Lookup order:
+
+    1. ``DEFAULT_OFF_4_0_0`` membership → returns ``False`` (the 4.0.0
+       senior-dev permissive baseline). Includes ``premise_gate``
+       even though it has no FEATURE_META entry — the lookup happens
+       before the meta probe so this works.
+    2. ``FEATURE_META[name]["enabled"]`` if explicitly declared.
+    3. ``True`` (legacy default for entries that pre-date 4.0.0).
+
+    Used by :meth:`concinno.core.config.Config.feature`,
+    :func:`list_features`, and :func:`get_feature` so all three read
+    paths agree on the same default — eliminates the GUI-vs-runtime
+    divergence flagged by the 4.0.0 red/blue review verdict #6.
+
+    Lookup is name-canonical only (no legacy alias resolution); the
+    caller of :meth:`Config.feature` already canonicalises the name
+    before consulting this helper.
+    """
+    if name in DEFAULT_OFF_4_0_0:
+        return False
+    meta = FEATURE_META.get(name)
+    if meta is None:
+        return True
+    return bool(meta.get("enabled", True))
+
+
 # ── Risk Metadata ─────────────────────────────────────────
 
 FEATURE_META: dict[str, dict] = {
@@ -1426,6 +1497,183 @@ FEATURE_META: dict[str, dict] = {
         "cosmetic": False,
         "params": {},
     },
+    "gaia_music_sonnet_multipass": {
+        "category": "context",
+        "description": (
+            "Force-route music-notation image questions (bass / treble "
+            "clef arithmetic with spelled time-unit puzzles) from local "
+            "gemma backend to Anthropic Sonnet vision (multi-pass "
+            "majority vote, default N=3). Empirical N=3 sonnet on "
+            "8f80e01c bass-clef returns 67% per-call PASS; majority "
+            "vote stabilises to deterministic PASS. Generic infra "
+            "routing — prompt content sourced from the L1 "
+            "_MUSIC_NOTATION_PROCEDURE anchor, no per-task answer paths."
+        ),
+        "description_zh": (
+            "音符圖片題（高音/低音譜號 + 時間單位拼字算術）從本地 "
+            "gemma 強制改走 Anthropic Sonnet vision（多輪 majority "
+            "vote，預設 N=3）。實測 8f80e01c 單次 sonnet 67% PASS；"
+            "多輪投票後穩定 PASS。通用 infra 路由 — prompt 內容沿用 "
+            "L1 音符 procedure anchor，不含題型專屬答案路徑"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "passes_count": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 7,
+                "recommended": 3,
+                "risk_low": (
+                    "passes_count<3 forfeits majority-vote noise "
+                    "reduction; single-shot sonnet variance flips "
+                    "the answer (~33% of the time on bass-clef)"
+                ),
+                "risk_high": (
+                    "passes_count>5 multiplies API cost without "
+                    "marginal accuracy gain on this image class"
+                ),
+            },
+            "model": {
+                "type": "str",
+                "default": "claude-sonnet-4-6",
+                "recommended": "claude-sonnet-4-6",
+                "risk_low": (
+                    "older sonnet checkpoints have weaker spatial / "
+                    "musical-notation reasoning; haiku tier "
+                    "insufficient for clef-mnemonic decomposition"
+                ),
+                "risk_high": (
+                    "opus is 5x cost for marginal lift on this image "
+                    "class; reserve for true Chaotic radius"
+                ),
+            },
+        },
+    },
+    "gaia_polygon_sonnet_multipass": {
+        "category": "context",
+        "description": (
+            "Force-route orthogonal-polygon area image questions from "
+            "local gemma backend to Anthropic Sonnet vision (multi-pass "
+            "majority vote, default N=3). Local Gemma 4 Q4_K_M mmproj "
+            "under-counts on polygon decomposition (concave-corner "
+            "rectangles missed); Sonnet's native multimodal encoder "
+            "preserves edge geometry. Generic infra routing — relies on "
+            "the L1 orthogonal-polygon procedure anchor for prompt "
+            "content; no per-task answer paths."
+        ),
+        "description_zh": (
+            "直角多邊形面積圖題從本地 gemma 強制改走 Anthropic Sonnet "
+            "vision（多輪 majority vote，預設 N=3）。本地 Gemma 4 "
+            "Q4_K_M mmproj 對多邊形分解低估邊數（concave-corner "
+            "rectangle 漏抓）；Sonnet 原生多模態編碼器較能保留邊緣 "
+            "幾何。通用 infra 路由 — prompt 內容沿用 L1 直角多邊形 "
+            "程序 anchor，不含題型專屬答案路徑"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "passes_count": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 7,
+                "recommended": 3,
+                "risk_low": (
+                    "passes_count<3 forfeits majority-vote noise "
+                    "reduction; single-shot Sonnet variance can flip "
+                    "the answer"
+                ),
+                "risk_high": (
+                    "passes_count>5 multiplies API cost without "
+                    "marginal accuracy gain on this image class"
+                ),
+            },
+            "model": {
+                "type": "str",
+                "default": "claude-sonnet-4-6",
+                "recommended": "claude-sonnet-4-6",
+                "risk_low": (
+                    "older sonnet checkpoints have weaker spatial "
+                    "geometry; haiku tier insufficient for "
+                    "decomposition counting"
+                ),
+                "risk_high": (
+                    "opus is 5x cost for marginal lift on this image "
+                    "class; reserve for true Chaotic radius"
+                ),
+            },
+        },
+    },
+    "gaia_polygon_structured_multipass": {
+        "category": "context",
+        "description": (
+            "Closure-validated structured-JSON multipass for orthogonal "
+            "polygon area image questions. Asks Sonnet/Opus for a strict "
+            "JSON object {labels_visible, rectangles[], edge_sums, "
+            "computed_area}; Python verifies horizontal_right == "
+            "horizontal_left and vertical_down == vertical_up closure, "
+            "then re-derives area from sum(width*height). Only passes "
+            "whose closure holds AND whose self-claimed area matches the "
+            "re-derived area within 0.5 are kept; median-of-valid is "
+            "returned. Preferred over the legacy free-form polygon "
+            "multipass because schematic geometry diagrams are NOT "
+            "drawn-to-scale (pixel-counting fails) and arithmetic-in-"
+            "head is the recurring failure sub-spec — closure check + "
+            "Python re-sum offload that burden. Falls through to the "
+            "legacy free-form multipass on zero valid passes. Generic "
+            "for any axis-aligned polygon area question."
+        ),
+        "description_zh": (
+            "Orthogonal polygon area 圖題的結構化 JSON multipass + "
+            "closure 驗證。要 Sonnet/Opus 出嚴格 JSON {labels_visible, "
+            "rectangles[], edge_sums, computed_area}；Python 驗 "
+            "horizontal_right==horizontal_left 與 vertical_down=="
+            "vertical_up 閉合 + 用 sum(w*h) 重算面積。closure 通過且 "
+            "claimed 面積對齊重算（±0.5）才採；取 valid pass 中位數。"
+            "比舊 free-form multipass 強，因 schematic 圖非按比例（像 "
+            "素計數會錯），算術在頭內做是反覆 fail 的子規格 — closure "
+            "驗證 + Python 重算把這負擔卸下。zero valid 才 fall-through "
+            "到舊 multipass。通用適用任何 axis-aligned polygon 面積題"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "passes_count": {
+                "type": "int",
+                "default": 5,
+                "min": 1,
+                "max": 9,
+                "recommended": 5,
+                "risk_low": (
+                    "passes_count<3 has too few candidates for the "
+                    "closure filter to recover a valid majority when "
+                    "the model decomposes inconsistently"
+                ),
+                "risk_high": (
+                    "passes_count>7 multiplies API cost without "
+                    "marginal accuracy lift; once a closure-valid pass "
+                    "lands the area is already deterministic"
+                ),
+            },
+            "model": {
+                "type": "str",
+                "default": "claude-sonnet-4-6",
+                "recommended": "claude-sonnet-4-6",
+                "risk_low": (
+                    "older sonnet checkpoints have weaker JSON "
+                    "instruction-following and may drop schema fields, "
+                    "starving the closure filter"
+                ),
+                "risk_high": (
+                    "opus tier is more expensive without a measured lift "
+                    "on closure-pass rate for this image class; reserve "
+                    "for true Chaotic radius"
+                ),
+            },
+        },
+    },
     "gaia_web_only_force_anthropic": {
         "category": "context",
         "description": (
@@ -1442,6 +1690,54 @@ FEATURE_META: dict[str, dict] = {
             "Action: web_search(...) 而會幻覺答案；Sonnet 有原生 "
             "web_search_20250305 tool。通用 infra 路由，無 GAIA "
             "答案路徑"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gaia_web_fetch_full": {
+        "category": "context",
+        "description": (
+            "Expose the Playwright-backed web_fetch_full tool to the "
+            "GAIA gather loop alongside web_search. web_fetch_full "
+            "renders one URL in headless chromium and returns rendered "
+            "text + a full-page PNG screenshot, enabling multi-hop "
+            "questions whose answer depends on what is visible on the "
+            "page (small text in a background image, tombstone, chart "
+            "label) rather than the search-engine summary. Generic "
+            "infra capability, no GAIA answer paths; falls back to the "
+            "web_search-only path when disabled."
+        ),
+        "description_zh": (
+            "在 GAIA gather loop 同時暴露 Playwright 版 web_fetch_full "
+            "工具。回傳渲染後的純文字 + 整頁 PNG 截圖，讓 multi-hop "
+            "題（答案藏在頁面圖片裡的小字 / 墓碑 / 圖表標籤）不再被 "
+            "search summary 吃掉。通用 infra 能力，無 GAIA 答案路徑；"
+            "關掉時自動 fallback 回只有 web_search 的路徑"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {},
+    },
+    "gaia_web_fetch_full_multimodal": {
+        "category": "context",
+        "description": (
+            "Attach the web_fetch_full screenshot to the next agent "
+            "turn as an Anthropic multimodal image content block when "
+            "the active backend tier is Sonnet or Opus. Without this, "
+            "the model only sees text mentioning the screenshot path "
+            "and degenerates trying to PIL-print the file (verified "
+            "regression on 624cbf11 Ben & Jerry's flavor graveyard). "
+            "Generic infra capability — only the routing decides; the "
+            "screenshot is always captured by web_fetch_full itself."
+        ),
+        "description_zh": (
+            "當 backend tier = Sonnet / Opus 時，把 web_fetch_full 的"
+            "截圖以 Anthropic 多模態 image content block 附到下一輪 "
+            "agent message。沒開時，模型只看到 screenshot path 提到"
+            "的文字觀察就 degenerate（624cbf11 graveyard 已驗證 "
+            "regression）。通用 infra 能力 — 只決定路由，截圖本身"
+            "由 web_fetch_full 一律抓"
         ),
         "ziq_autotunable": False,
         "cosmetic": False,
@@ -1983,7 +2279,7 @@ def list_features(lang: str = "en") -> list[dict]:
             "name": name,
             "category": meta["category"],
             "description": desc,
-            "enabled": current.get("enabled", meta.get("enabled", True)),
+            "enabled": current.get("enabled", meta_enabled_default(name)),
             "source": origin,
             "params": {
                 k: {
@@ -2029,7 +2325,7 @@ def get_feature(name: str, lang: str = "en") -> Optional[dict]:
         "name": name,
         "category": meta["category"],
         "description": desc,
-        "enabled": current.get("enabled", True),
+        "enabled": current.get("enabled", meta_enabled_default(name)),
         "params": params,
     }
 

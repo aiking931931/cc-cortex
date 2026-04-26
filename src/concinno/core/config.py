@@ -73,78 +73,80 @@ _DEFAULTS = {
         "streak_fmt": "\U0001f525x{streak} clean edits",
         "fix_fmt": "\u2705 {fname} fixed {fixed}/{total} | \U0001f525x{streak} clean edits",
     },
-    # ── Feature toggles (all default ON, all configurable) ──
+    # ── Feature toggles ──
+    #
+    # 4.0.0: ``enabled`` key intentionally absent from ship-level
+    # defaults. The runtime read path (:meth:`Config.feature` with
+    # ``key="enabled"``) falls through to
+    # :func:`concinno.feature_config.meta_enabled_default` which is
+    # the single source of truth for ship-level on/off (see
+    # ``DEFAULT_OFF_4_0_0`` frozenset there).
+    #
+    # Param defaults (mode / thresholds / etc.) DO live here — they
+    # don't gate the feature, just pre-fill its tuning knobs when
+    # the user edits cc_config.json.
     "features": {
         # Hard gates (PreToolUse deny)
         "token_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "agent_threshold": 140000,
             "critical_threshold": 160000,
         },
         "read_first_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "min_lines": 50,
         },
         "agent_cap": {
-            "enabled": True,
             "mode": "step_back_first",
             "max_spawns": 5,
         },
         "sentinel_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "max_repeats": 5,
             "lint_exception": True,
         },
         "consecutive_fail_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "max_fails": 3,
         },
         "hijack_gate": {
-            "enabled": True,
             "mode": "hard_deny",
             "l2_threshold": 0.3,
             "l3_threshold": 0.6,
             "l4_threshold": 0.8,
         },
-        "identity_guard": {"enabled": True, "mode": "hard_deny"},
-        "publish_scan": {"enabled": True, "mode": "hard_deny"},
-        "delivery_gate": {"enabled": True, "mode": "hard_deny", "max_iterations": 5},
-        "bash_background_gate": {"enabled": True, "mode": "step_back_first"},
-        "python_c_gate": {"enabled": True, "mode": "step_back_first"},
-        "whitepaper_guard": {"enabled": True, "mode": "hard_deny"},
-        "clarity_gate": {"enabled": True, "mode": "step_back_first", "min_clarity": 0.4},
-        # Hard quality (PostToolUse lint-level)
-        "code_guard": {"enabled": True},
-        "typescript": {"enabled": True},
-        "linting": {"enabled": True},
-        "handoff_format": {"enabled": True},
+        "identity_guard": {"mode": "hard_deny"},
+        "publish_scan": {"mode": "hard_deny"},
+        "delivery_gate": {"mode": "hard_deny", "max_iterations": 5},
+        "bash_background_gate": {"mode": "step_back_first"},
+        "python_c_gate": {"mode": "step_back_first"},
+        "whitepaper_guard": {"mode": "hard_deny"},
+        "clarity_gate": {"mode": "step_back_first", "min_clarity": 0.4},
+        # Hard quality (PostToolUse lint-level) — params only; no
+        # ``enabled`` key (ship-level default decided by
+        # meta_enabled_default → DEFAULT_OFF_4_0_0).
+        "code_guard": {},
+        "typescript": {},
+        "linting": {},
+        "handoff_format": {},
         # UX (user-visible)
         "streak_ux": {
-            "enabled": True,
             "milestone_interval": 5,
         },
-        "session_summary": {"enabled": True},
-        "deny_marker": {"enabled": True},
-        # Boundary guard (hard gate)
-        "boundary_guard": {"enabled": True},
+        "session_summary": {},
+        "deny_marker": {},
+        "boundary_guard": {},
         # Language enforcement
         "language_enforce": {
-            "enabled": True,
             "language": "English",
         },
         # 2.16.0 — SessionStart switch summary
         "session_switches": {
-            "enabled": True,
             "top_n": 10,
             "hook_format_compact": True,
         },
         # 2.16.0 — one-shot safe allowlist bootstrap
         "configure_permissions": {
-            "enabled": True,
             "publish_opt_in": False,
             "preserve_destructive": True,
         },
@@ -395,7 +397,16 @@ class Config:
                         _warn_legacy_alias(legacy, canonical)
                         break
         if key == "enabled":
-            return feat.get("enabled", True)
+            if "enabled" in feat:
+                return feat["enabled"]
+            # Fall through to FEATURE_META ship-level default. Lazy
+            # import to avoid concinno.core.config ↔ concinno.feature_config
+            # circular dependency at module load.
+            try:
+                from concinno.feature_config import meta_enabled_default
+                return meta_enabled_default(canonical)
+            except Exception:
+                return True
         return feat.get(key)
 
     def feature_all(self, name: str) -> dict:

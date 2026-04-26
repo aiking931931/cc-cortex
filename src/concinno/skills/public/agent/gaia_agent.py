@@ -425,6 +425,128 @@ class ModelBackend:
 
 
 # ── Tools ─────────────────────────────────────────────────
+def _web_fetch_full_summary(out: dict, url: str) -> str:
+    """Compose the text-only observation from a web_fetch_full result.
+
+    Shared by both the text-only :func:`web_fetch_full_action` legacy
+    path (Gemma backend) and the multimodal
+    :func:`web_fetch_full_action_multimodal` path (Sonnet/Opus backend),
+    so both surfaces describe the same page identically — only the
+    image attachment differs.
+    """
+    parts: list[str] = []
+    if out.get("error"):
+        parts.append(f"[note] {out['error']}")
+    parts.append(f"final_url: {out.get('final_url') or url}")
+    if out.get("title"):
+        parts.append(f"title: {out['title']}")
+    if out.get("screenshot_path"):
+        parts.append(f"screenshot_saved: {out['screenshot_path']}")
+    text = out.get("text") or ""
+    if text:
+        parts.append(f"--- page text ---\n{text}")
+    return "\n".join(parts)
+
+
+def web_fetch_full_action(url: str) -> str:
+    """Playwright-backed deep-extraction tool — text-only observation.
+
+    Used by Gemma backends (no native multimodal turn input) and as a
+    fallback when the multimodal variant cannot attach the screenshot.
+    Returns a single text string. The screenshot is captured and saved
+    to disk (so a human reviewer can inspect it) but the base64 payload
+    is omitted — it would dwarf the Gemma gather history budget.
+
+    For Sonnet/Opus paths, prefer :func:`web_fetch_full_action_multimodal`
+    so the model can actually see the screenshot rather than read about
+    its existence.
+    """
+    if not _feature_enabled("gaia_web_fetch_full"):
+        return (
+            "Error: web_fetch_full is disabled "
+            "(feature flag gaia_web_fetch_full=False); "
+            "use web_search instead."
+        )
+    try:
+        from concinno.tools.builtin.web_fetch_full import (
+            web_fetch_full as _wff,
+        )
+    except ImportError as exc:
+        return f"Error: web_fetch_full unavailable: {exc}"
+
+    try:
+        out = _wff(url, screenshot=True)
+    except Exception as exc:  # noqa: BLE001 — surface as observation
+        return f"Error: web_fetch_full crashed: {exc}"
+
+    return _web_fetch_full_summary(out, url)
+
+
+def web_fetch_full_action_multimodal(url: str) -> dict:
+    """Playwright-backed deep-extraction tool — multimodal observation.
+
+    Returns a dict suitable for attaching to an Anthropic multimodal
+    user turn. Keys:
+
+    - ``text_summary``: same prose as :func:`web_fetch_full_action`,
+      so the model has structured metadata + page text alongside the
+      image.
+    - ``screenshot_b64``: base64 PNG payload, or ``None`` when capture
+      failed / was skipped / size exceeded the inline cap.
+    - ``screenshot_path``: on-disk PNG path (always present when a
+      screenshot was captured), so loops can re-attach later.
+    - ``mime``: image media-type for the SDK content block. Always
+      ``image/png`` because :func:`web_fetch_full` only emits PNG.
+    - ``error``: ``None`` on success, else the error string from the
+      underlying ``web_fetch_full`` call (mirrors the soft-fail
+      contract).
+
+    Callers (e.g. ``react_solve``) inspect ``screenshot_b64`` and
+    decide whether to send a multimodal user turn (image + text) or
+    fall back to plain ``text_summary`` when no screenshot is
+    available.
+    """
+    result: dict = {
+        "text_summary": "",
+        "screenshot_b64": None,
+        "screenshot_path": None,
+        "mime": "image/png",
+        "error": None,
+    }
+    if not _feature_enabled("gaia_web_fetch_full"):
+        result["error"] = (
+            "feature flag gaia_web_fetch_full=False"
+        )
+        result["text_summary"] = (
+            "Error: web_fetch_full is disabled "
+            "(feature flag gaia_web_fetch_full=False); "
+            "use web_search instead."
+        )
+        return result
+    try:
+        from concinno.tools.builtin.web_fetch_full import (
+            web_fetch_full as _wff,
+        )
+    except ImportError as exc:
+        result["error"] = f"import: {exc}"
+        result["text_summary"] = f"Error: web_fetch_full unavailable: {exc}"
+        return result
+
+    try:
+        out = _wff(url, screenshot=True)
+    except Exception as exc:  # noqa: BLE001 — surface as observation
+        result["error"] = f"crash: {exc}"
+        result["text_summary"] = f"Error: web_fetch_full crashed: {exc}"
+        return result
+
+    result["text_summary"] = _web_fetch_full_summary(out, url)
+    result["screenshot_b64"] = out.get("screenshot_b64")
+    result["screenshot_path"] = out.get("screenshot_path")
+    if out.get("error"):
+        result["error"] = out["error"]
+    return result
+
+
 def execute_code(code: str) -> str:
     """Full Python subprocess — any package OK."""
     try:
@@ -561,7 +683,19 @@ REACT_SYSTEM = """You are an expert assistant that solves questions using tools.
 
 TOOLS:
 1. web_search("query") — search the web. Use specific, precise queries.
-2. code_exec("python code") — run Python (any package). MUST use print() for output.
+2. web_fetch_full("https://...") — headless-browser one URL, returns
+   rendered text + a saved full-page screenshot path. Use AFTER
+   web_search has surfaced a candidate URL when the answer depends on
+   what is VISIBLE on the page (small text in an image, a tombstone,
+   a chart label, a background object) rather than the search summary.
+   IMPORTANT — image handling: when the next user turn after your
+   web_fetch_full call carries an image content block (you can see it
+   above the observation text), READ THAT IMAGE DIRECTLY using your
+   built-in visual reasoning. Do NOT call code_exec to open / decode /
+   PIL-process / OCR the saved screenshot path; the image is already
+   in your context. Use code_exec for arithmetic / text manipulation
+   on what you have read, not for image I/O.
+3. code_exec("python code") — run Python (any package). MUST use print() for output.
 
 PROTOCOL:
 Each turn, output EXACTLY:
@@ -723,6 +857,17 @@ def react_solve(question: str, file_content: str, file_path: str,
             f"Recommended: {', '.join(type_info['tools'])}. "
             f"Strategy: {type_info['search_strategy']}]\n\n"
         )
+    # L1 domain-procedure anchor (chained-reference resolution / music
+    # / polygon / web-only) was historically only injected on the
+    # vision paths. Without it on the text path, sonnet's react loop
+    # mis-parses nested possessives like "the X of Y of [photo of Z]"
+    # and answers about Z (the locator) instead of pivoting to Y. The
+    # anchor is generic — it describes the resolution procedure, not
+    # any specific task. Single-anchor (no stacking) is enforced by
+    # _get_domain_procedure.
+    procedure = _get_domain_procedure(question, file_path)
+    if procedure:
+        user_msg += f"{procedure}\n\n"
     if initial:
         user_msg += f"Context:\n{initial}\n\n"
     user_msg += f"Question: {question}"
@@ -740,7 +885,8 @@ def react_solve(question: str, file_content: str, file_path: str,
 
         # Parse Action
         action_match = re.search(
-            r"Action:\s*(web_search|code_exec)\((.+?)\)\s*$",
+            r"Action:\s*(web_search|web_fetch_full|code_exec)"
+            r"\((.+?)\)\s*$",
             raw, re.M | re.DOTALL,
         )
         if not action_match:
@@ -749,8 +895,9 @@ def react_solve(question: str, file_content: str, file_path: str,
             history.append({
                 "role": "user",
                 "content": (
-                    "Use Action: web_search(\"query\") or "
-                    "code_exec(\"code\") or FINAL ANSWER: <value>"
+                    "Use Action: web_search(\"query\"), "
+                    "web_fetch_full(\"https://...\"), "
+                    "code_exec(\"code\"), or FINAL ANSWER: <value>"
                 ),
             })
             continue
@@ -758,16 +905,59 @@ def react_solve(question: str, file_content: str, file_path: str,
         tool = action_match.group(1)
         arg = action_match.group(2).strip().strip('"\'')
 
-        # Execute tool
+        # Multimodal-aware tool dispatch. For Sonnet/Opus + web_fetch_full
+        # we attach the page screenshot as an image content block so the
+        # model can SEE the page (small text in images, headstones,
+        # background labels) instead of just reading metadata about the
+        # screenshot file. Other tool/backend combos take the legacy
+        # text-only path.
+        tag = f"{tool}({arg[:40]})"
+        print(f"    step {step}: {tag}", flush=True)
+
+        if (
+            tool == "web_fetch_full"
+            and backend.tier in ("sonnet", "opus")
+            and _feature_enabled("gaia_web_fetch_full_multimodal")
+        ):
+            mm = web_fetch_full_action_multimodal(arg)
+            history.append({"role": "assistant", "content": raw})
+            text_obs = f"Observation: Fetch '{arg[:80]}':\n" \
+                       f"{mm.get('text_summary', '')[:5000]}"
+            if mm.get("screenshot_b64"):
+                # Multimodal user turn — image first, then text.
+                print(
+                    f"      [multimodal=on b64_len={len(mm['screenshot_b64'])}]",
+                    flush=True,
+                )
+                history.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {
+                            "type": "base64",
+                            "media_type": mm.get("mime", "image/png"),
+                            "data": mm["screenshot_b64"],
+                        }},
+                        {"type": "text", "text": text_obs},
+                    ],
+                })
+            else:
+                print(
+                    f"      [multimodal=off err={mm.get('error')!r}]",
+                    flush=True,
+                )
+                history.append({"role": "user", "content": text_obs})
+            continue
+
+        # Execute tool (text-only path)
         if tool == "web_search":
             obs = backend.web_search(arg)
             obs_text = f"Search '{arg[:60]}':\n{obs[:3000]}"
+        elif tool == "web_fetch_full":
+            obs = web_fetch_full_action(arg)
+            obs_text = f"Fetch '{arg[:80]}':\n{obs[:5000]}"
         else:  # code_exec
             obs = execute_code(arg)
             obs_text = f"Code output:\n{obs[:2000]}"
-
-        tag = f"{tool}({arg[:40]})"
-        print(f"    step {step}: {tag}", flush=True)
 
         history.append({"role": "assistant", "content": raw})
         history.append({
@@ -791,11 +981,23 @@ def react_solve(question: str, file_content: str, file_path: str,
 GATHER_SYSTEM = """You are a research assistant that gathers information.
 
 TOOLS:
-1. web_search("query") — search the web
-2. code_exec("python code") — run Python, MUST print() output
+1. web_search("query") — search the web (returns text summary).
+2. web_fetch_full("https://...") — headless-browser one URL,
+   returns rendered text + saves a full-page screenshot
+   (path is included in the observation). Use AFTER web_search
+   when the answer depends on what is VISIBLE on the page —
+   small text in an image, a headstone, a chart label, a
+   background object — that a search summary will lose.
+   IMPORTANT — image handling: when the next user turn after
+   your web_fetch_full call carries an image content block (you
+   can see it above the observation text), READ THAT IMAGE
+   DIRECTLY using your built-in visual reasoning. Do NOT call
+   code_exec to open / decode / PIL-process / OCR the saved
+   screenshot path; the image is already in your context.
+3. code_exec("python code") — run Python, MUST print() output.
 
 Each turn:
-Thought: <what to search/compute next>
+Thought: <what to search/compute/fetch next>
 Action: <tool>("argument")
 
 When you have gathered ENOUGH information, say:
@@ -803,6 +1005,10 @@ DONE
 
 Rules:
 - Search at least once. Try different queries if first fails.
+- For chained-reference questions ("X visible behind/beside Y"),
+  resolve the chain in order: locate Y first, then identify the
+  X within Y, then fetch the X-specific page; do not extract
+  from the locator Y itself.
 - For math: use code_exec to compute.
 - Keep gathering until you have what's needed. Then say DONE."""
 
@@ -888,12 +1094,20 @@ def react_solve_split(question: str, file_content: str,
     # transcripts) so the gatherer can plan actions instead of searching
     # blind. Without this, observations are only visible to the synthesizer
     # and the gatherer thinks no file was attached.
+    # L1 domain-procedure anchor (chained-reference resolution / web-only
+    # / etc.) injected into the gatherer's first turn so multi-hop
+    # nested-possessive questions get the locator-pivot procedure
+    # before the model picks its first search query. Same anchor as
+    # vision paths use; routing is generic via _get_domain_procedure.
+    procedure = _get_domain_procedure(question, file_path)
     preamble = "\n\n".join(observations)
-    initial_user = (
-        f"Context:\n{preamble}\n\nQuestion: {question}"
-        if preamble
-        else f"Question: {question}"
-    )
+    parts = []
+    if procedure:
+        parts.append(procedure)
+    if preamble:
+        parts.append(f"Context:\n{preamble}")
+    parts.append(f"Question: {question}")
+    initial_user = "\n\n".join(parts)
     history = [{"role": "user", "content": initial_user}]
     for step in range(max_steps):
         raw = backend.chat(GATHER_SYSTEM, history, max_tokens=1000)
@@ -906,24 +1120,73 @@ def react_solve_split(question: str, file_content: str,
 
         # Parse action
         action_match = re.search(
-            r"Action:\s*(web_search|code_exec)\((.+?)\)\s*$",
+            r"Action:\s*(web_search|web_fetch_full|code_exec)"
+            r"\((.+?)\)\s*$",
             raw, re.M | re.DOTALL,
         )
         if not action_match:
             history.append({"role": "assistant", "content": raw})
             history.append({
                 "role": "user",
-                "content": "Use Action: web_search(\"q\") or "
-                "code_exec(\"code\") or say DONE",
+                "content": (
+                    "Use Action: web_search(\"q\"), "
+                    "web_fetch_full(\"https://...\"), or "
+                    "code_exec(\"code\") — or say DONE"
+                ),
             })
             continue
 
         tool = action_match.group(1)
         arg = action_match.group(2).strip().strip('"\'')
 
+        # Multimodal-aware path mirrors react_solve. Force-route web-only
+        # questions on Gemma swap backend to Sonnet earlier in this
+        # function, so by the time we reach this branch backend.tier
+        # may already be sonnet/opus even when called from the Gemma
+        # split path. The image attaches only when the actual backend
+        # accepts multimodal turns.
+        if (
+            tool == "web_fetch_full"
+            and backend.tier in ("sonnet", "opus")
+            and _feature_enabled("gaia_web_fetch_full_multimodal")
+        ):
+            mm = web_fetch_full_action_multimodal(arg)
+            obs_text = (
+                f"[Fetch: {arg[:80]}]\n"
+                f"{mm.get('text_summary', '')[:5000]}"
+            )
+            observations.append(obs_text)
+            print(
+                f"    gather {step}: {tool}({arg[:40]}) "
+                f"[multimodal={'on' if mm.get('screenshot_b64') else 'off'}]",
+                flush=True,
+            )
+            history.append({"role": "assistant", "content": raw})
+            if mm.get("screenshot_b64"):
+                history.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {
+                            "type": "base64",
+                            "media_type": mm.get("mime", "image/png"),
+                            "data": mm["screenshot_b64"],
+                        }},
+                        {"type": "text", "text": f"Observation: {obs_text}"},
+                    ],
+                })
+            else:
+                history.append({
+                    "role": "user",
+                    "content": f"Observation: {obs_text}",
+                })
+            continue
+
         if tool == "web_search":
             obs = backend.web_search(arg)
             obs_text = f"[Search: {arg[:50]}]\n{obs[:3000]}"
+        elif tool == "web_fetch_full":
+            obs = web_fetch_full_action(arg)
+            obs_text = f"[Fetch: {arg[:80]}]\n{obs[:5000]}"
         else:
             obs = execute_code(arg)
             obs_text = f"[Code output]\n{obs[:2000]}"
@@ -1218,6 +1481,17 @@ _WEB_ONLY_PROCEDURE = (
     "new query target.\n"
     "  - Nested possessives like \"the X of the Y of Z\" must be "
     "resolved inside-out (Z → Y → X).\n"
+    "  - COMPARATIVE / SUPERLATIVE selection (\"the OLDEST X\", "
+    "\"the YOUNGEST X\", \"the FIRST X\", \"the LAST X\", \"the "
+    "LARGEST X\", \"the HIGHEST X\", \"the [adjective]-est X\"): "
+    "you MUST enumerate ALL candidates first, fetch the comparison "
+    "datum (date / value / rank) for EACH, sort by that datum, then "
+    "pick. Do NOT visually pick a candidate that \"looks "
+    "[adjective]\" or seems prominent in an image without "
+    "verifying its comparison datum. Do NOT assume the candidate "
+    "you happened to read first is the right one. The full "
+    "candidate list + per-candidate datum table is required before "
+    "selection.\n"
     "  Write out the resolution chain explicitly (\"locator = …, "
     "intermediate = …, final answer-bearing entity = …\") before "
     "you query, so you do not extract from the locator by mistake.\n"
@@ -1229,7 +1503,27 @@ _WEB_ONLY_PROCEDURE = (
     "navigate to the LOCATOR entity's page first, then extract the "
     "answer-bearing entity name, then navigate to THAT entity's "
     "page to copy the final datum.\n"
-    "  4. For time-bounded queries (\"as of 2022 / end of 2023\"), "
+    "  4. STUCK-LOOP DETECTION: if you have fetched the SAME URL "
+    "twice without new information, do NOT fetch it a third time. "
+    "Pivot strategies (try in order): "
+    "(a) web_search for a more SPECIFIC URL — a sub-page / "
+    "deeper resource within the same site (e.g. a per-item page "
+    "rather than a list page); "
+    "(b) web_search for the answer-bearing entity directly by its "
+    "name once you have identified what it is; "
+    "(c) try a different source / snapshot date / mirror URL. "
+    "Repeating the same fetch is wasted budget after 2 attempts.\n"
+    "  5. When the answer depends on what is VISIBLE on a page "
+    "(small text in an image, label on an object in a photo, "
+    "background detail) and a search summary is not enough, call "
+    "web_fetch_full(\"<url>\") to render the page in a headless "
+    "browser. The returned observation includes the page text AND "
+    "a saved full-page screenshot path you can examine. After "
+    "identifying the answer-bearing entity FROM the rendered page "
+    "or screenshot, run a NEW web_search for that entity by name "
+    "and either fetch its dedicated page (web_fetch_full) or rely "
+    "on the search summary if the datum is short.\n"
+    "  6. For time-bounded queries (\"as of 2022 / end of 2023\"), "
     "cross-verify with Wayback Machine snapshot of the URL at that "
     "date.\n"
     "- Do NOT grab the first plausible match — verify the chain "
@@ -1454,6 +1748,437 @@ def _get_local_vision_llm():
     return _local_vision_llm
 
 
+def _polygon_multipass_params() -> tuple[int, str]:
+    """Return ``(passes_count, model)`` for polygon Sonnet multi-pass.
+
+    Reads ``gaia_polygon_sonnet_multipass`` feature params from the
+    Concinno config cascade with safe defaults (3 passes, sonnet 4.6)
+    when the config layer is absent (e.g. unit tests).
+    """
+    return _multipass_params("gaia_polygon_sonnet_multipass")
+
+
+def _music_multipass_params() -> tuple[int, str]:
+    """Return ``(passes_count, model)`` for music-notation multi-pass.
+
+    Symmetric helper to :func:`_polygon_multipass_params`; gated by
+    ``gaia_music_sonnet_multipass`` feature key. Default 3 passes /
+    sonnet 4.6 because empirical N=3 sonnet runs on bass-clef arithmetic
+    show 67% per-call PASS (e.g. outputs ``['90','90','80']``); the
+    multi-pass majority vote brings it to deterministic PASS.
+    """
+    return _multipass_params("gaia_music_sonnet_multipass")
+
+
+def _multipass_params(feature_key: str) -> tuple[int, str]:
+    """Generic ``(passes_count, model)`` reader for any multi-pass feature.
+
+    Reads ``passes_count`` (int >= 1) and ``model`` (non-empty str) from
+    the named feature_config entry; safe defaults (3 / sonnet 4.6)
+    apply when the config layer is absent or values are missing/invalid.
+    """
+    passes_count = 3
+    model = "claude-sonnet-4-6"
+    try:
+        from concinno.core.config import get_config
+        cfg = get_config()
+        pc_raw = cfg.feature(feature_key, "passes_count")
+        if pc_raw is not None:
+            try:
+                pc_int = int(pc_raw)
+                if pc_int >= 1:
+                    passes_count = pc_int
+            except (TypeError, ValueError):
+                pass
+        m_raw = cfg.feature(feature_key, "model")
+        if isinstance(m_raw, str) and m_raw.strip():
+            model = m_raw.strip()
+    except Exception:
+        pass
+    return passes_count, model
+
+
+def _majority_vote_numeric(samples: list[str]) -> str | None:
+    """Return the mode of the last-integer extracted from each sample.
+
+    Each sample is the FINAL ANSWER value from one Sonnet vision pass
+    (already post-``_extract_answer``). We pull the last integer-looking
+    token from each, vote by count, and on a tie keep the earliest
+    sample's value (preserves causal order without a coin flip). Returns
+    ``None`` only when every sample is empty / has no integer token.
+
+    The helper is generic (any ordinal-counting question can use it);
+    no question-class-specific behaviour and no expected-answer reading.
+    """
+    if not samples:
+        return None
+    int_re = re.compile(r"-?\d+")
+    extracted: list[str] = []
+    for s in samples:
+        if not s:
+            continue
+        matches = int_re.findall(s)
+        if matches:
+            extracted.append(matches[-1])
+    if not extracted:
+        return None
+    counts: dict[str, int] = {}
+    first_idx: dict[str, int] = {}
+    for idx, val in enumerate(extracted):
+        counts[val] = counts.get(val, 0) + 1
+        first_idx.setdefault(val, idx)
+    # Sort by (-count, first_idx) so the most-voted wins; ties go to the
+    # value that appeared first.
+    best = sorted(counts.items(), key=lambda kv: (-kv[1], first_idx[kv[0]]))
+    return best[0][0]
+
+
+def _model_drops_temperature(model: str) -> bool:
+    """Return True when the named Anthropic model rejects ``temperature``.
+
+    Newer reasoning-tier models (claude-opus-4-7 onward) return HTTP 400
+    ``temperature is deprecated for this model`` when the parameter is
+    sent. Sonnet 4.6 and older models still accept it. The helper is a
+    name-prefix check so future opus minor releases (4-7-1, 4-7-2, ...)
+    are covered without further edits.
+    """
+    if not model:
+        return False
+    name = model.lower()
+    # Opus 4-7+ reject temperature. Anything claude-opus-4-7* or
+    # later major (4-8/5-x) opus releases match.
+    return name.startswith("claude-opus-4-7") or name.startswith(
+        ("claude-opus-4-8", "claude-opus-4-9", "claude-opus-5"),
+    )
+
+
+def _solve_vision_anthropic_multipass(
+    question: str,
+    image_path: str,
+    *,
+    model: str = "claude-sonnet-4-6",
+    passes_count: int = 3,
+) -> tuple[str, list[str]]:
+    """Run ``passes_count`` independent Anthropic vision calls and
+    majority-vote the FINAL ANSWER values.
+
+    Returns ``(voted_answer, raw_samples)`` so callers (and evidence
+    smoke tests) can audit per-pass output. ``voted_answer`` is "" when
+    every pass returned empty so the caller can fall back to the local
+    path. The L1 domain procedure anchor (e.g. orthogonal-polygon
+    procedure for area questions) is injected via
+    ``_get_domain_procedure`` so this multipass path stays consistent
+    with the local-vision prompt shape.
+    """
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = MIME_MAP.get(ext, "image/png")
+    try:
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except Exception as err:
+        print(f"  [vision-multipass read error] {err}", flush=True)
+        return "", []
+    procedure = _get_domain_procedure(question, image_path)
+    prelude = f"{procedure}\n\n" if procedure else ""
+    user_text = (
+        f"{prelude}{question}\n\nAnalyze the image carefully and "
+        "think step by step. After your reasoning, end with exactly "
+        "one final line:\n"
+        "FINAL ANSWER: <concise value>\n\n"
+        "The value must be concise (number, word, short phrase). "
+        "Do NOT add units unless asked. Do NOT cut off in the middle "
+        "of reasoning."
+    )
+    samples: list[str] = []
+    try:
+        client = _get_anthropic()
+    except Exception as err:
+        print(f"  [vision-multipass anthropic init error] {err}", flush=True)
+        return "", []
+    # Newer Anthropic models (e.g. claude-opus-4-7) reject the
+    # ``temperature`` parameter outright (HTTP 400 "temperature is
+    # deprecated for this model"). Sonnet 4.6 still accepts it and
+    # benefits from the lower variance. Gate by model name: any model
+    # whose name begins ``claude-opus-4-7`` or later opus-line goes
+    # through without temperature; sonnet-line keeps 0.2 for the
+    # multi-step-arithmetic stability the multipass vote depends on.
+    request_kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": 2000,
+        "timeout": 120.0,
+    }
+    if not _model_drops_temperature(model):
+        request_kwargs["temperature"] = 0.2
+    for pass_idx in range(max(1, passes_count)):
+        try:
+            resp = client.messages.create(
+                **request_kwargs,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {
+                            "type": "base64", "media_type": mime,
+                            "data": b64,
+                        }},
+                        {"type": "text", "text": user_text},
+                    ],
+                }],
+            )
+            raw = resp.content[0].text if resp.content else ""
+            samples.append(_extract_answer(raw))
+        except Exception as err:
+            print(
+                f"  [vision-multipass pass {pass_idx} error] {err}",
+                flush=True,
+            )
+            samples.append("")
+    voted = _majority_vote_numeric(samples) or ""
+    return voted, samples
+
+
+# Generic structured-JSON polygon-area solver (universal, no task-specific
+# keywords). Asks the vision model for a strict JSON object listing every
+# numeric label, the rectangle decomposition with explicit width/height,
+# direction-keyed edge sums for closure verification, and the model's own
+# computed_area. Python then (a) verifies horizontal-right == horizontal-
+# left and vertical-down == vertical-up closure, (b) recomputes area as
+# sum(w * h) over the rectangles, and (c) keeps only passes where the
+# closure holds within tolerance and the recomputed area matches the
+# model's computed_area within tolerance. The median of validated passes
+# is returned. This shifts the arithmetic burden off the model (heads-of-
+# arithmetic is the sub-spec where Sonnet/Opus drift) while keeping the
+# vision burden on the model where it is best. Generic for any axis-
+# aligned polygon area question with labelled side lengths.
+_POLYGON_STRUCTURED_PROMPT = (
+    "[Orthogonal polygon area — structured analysis]\n"
+    "Look at the image. It shows an orthogonal (axis-aligned) polygon "
+    "with side lengths labelled. Output a single JSON object using the "
+    "exact schema below — NO prose before or after, NO markdown fence, "
+    "JSON only.\n\n"
+    "Required schema:\n"
+    "{\n"
+    "  \"labels_visible\": [<every numeric label you can read on the "
+    "image, as a number; include duplicates; ignore scale bars / year "
+    "watermarks / logos>],\n"
+    "  \"rectangles\": [\n"
+    "    {\"width\": <number>, \"height\": <number>, "
+    "\"explanation\": \"<one short sentence: which labels gave width "
+    "and height>\"}\n"
+    "    // exactly N entries; N = (concave-corner count + 1) for a "
+    "simply-connected orthogonal polygon, or higher for shapes with "
+    "holes. An L-shape is N=2, a C/T-shape is usually N=3, and a "
+    "staircase with k steps is N=k+1.\n"
+    "  ],\n"
+    "  \"edge_sums\": {\n"
+    "    \"horizontal_right\": <sum of edge lengths going RIGHT around "
+    "the boundary>,\n"
+    "    \"horizontal_left\":  <sum going LEFT>,\n"
+    "    \"vertical_down\":    <sum going DOWN>,\n"
+    "    \"vertical_up\":      <sum going UP>\n"
+    "  },\n"
+    "  \"computed_area\": <number, your sum of width*height across all "
+    "rectangles>\n"
+    "}\n\n"
+    "Closure constraint (you MUST satisfy before answering):\n"
+    "  horizontal_right == horizontal_left\n"
+    "  vertical_down    == vertical_up\n"
+    "If your edge_sums fail closure, re-trace the boundary and adjust "
+    "until they balance — then update rectangles and computed_area "
+    "accordingly. Do NOT output a JSON whose closure is broken.\n\n"
+    "Decomposition rule: every rectangle's width and height MUST come "
+    "from the labels_visible list (or be deducible by subtracting "
+    "smaller labels along the same axis from a larger one). Do not "
+    "invent numbers.\n"
+)
+
+
+_POLYGON_JSON_FENCE_RE = re.compile(
+    r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.I,
+)
+_POLYGON_FIRST_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _extract_json_object(raw: str) -> str | None:
+    """Pull the first JSON object out of a model response.
+
+    Handles three shapes seen in practice: (a) pure JSON, (b) ```json
+    fenced``` block, (c) JSON embedded after prose. Returns the object
+    substring (still text) or None when no candidate is found.
+    """
+    if not raw:
+        return None
+    fenced = _POLYGON_JSON_FENCE_RE.search(raw)
+    if fenced:
+        return fenced.group(1)
+    naked = _POLYGON_FIRST_OBJECT_RE.search(raw)
+    return naked.group(0) if naked else None
+
+
+def _validate_polygon_pass(obj: dict, tol: float = 0.51) -> float | None:
+    """Return rectangle-derived area when the structured pass is valid.
+
+    Validation rules:
+      * ``rectangles`` is a non-empty list of ``{width, height}`` numbers
+      * ``edge_sums`` keys exist and are numbers
+      * ``horizontal_right`` matches ``horizontal_left`` within ``tol``
+      * ``vertical_down`` matches ``vertical_up`` within ``tol``
+      * Recomputed ``sum(w*h)`` matches the model's ``computed_area``
+        within ``tol`` (catches arithmetic errors in-pass)
+
+    Returns the deterministically-recomputed area on pass, ``None`` on
+    any validation failure.
+    """
+    rects = obj.get("rectangles")
+    if not isinstance(rects, list) or not rects:
+        return None
+    try:
+        widths_heights: list[tuple[float, float]] = []
+        for r in rects:
+            if not isinstance(r, dict):
+                return None
+            w = float(r["width"])
+            h = float(r["height"])
+            if w <= 0 or h <= 0:
+                return None
+            widths_heights.append((w, h))
+    except (KeyError, TypeError, ValueError):
+        return None
+    edge_sums = obj.get("edge_sums")
+    if not isinstance(edge_sums, dict):
+        return None
+    try:
+        hr = float(edge_sums["horizontal_right"])
+        hl = float(edge_sums["horizontal_left"])
+        vd = float(edge_sums["vertical_down"])
+        vu = float(edge_sums["vertical_up"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if abs(hr - hl) > tol or abs(vd - vu) > tol:
+        return None
+    recomputed = sum(w * h for w, h in widths_heights)
+    try:
+        claimed = float(obj["computed_area"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if abs(recomputed - claimed) > tol:
+        return None
+    return recomputed
+
+
+def _format_polygon_area(value: float) -> str:
+    """Render a polygon area value as the answer string.
+
+    Half-integer-aware: if ``value`` rounds to an integer within 0.05,
+    return the integer string; otherwise keep one fractional digit.
+    """
+    nearest_int = round(value)
+    if abs(value - nearest_int) < 0.05:
+        return str(int(nearest_int))
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def _solve_polygon_structured_multipass(
+    question: str,
+    image_path: str,
+    *,
+    model: str = "claude-sonnet-4-6",
+    passes_count: int = 5,
+) -> tuple[str, list[dict]]:
+    """Polygon-area solver using structured-JSON multipass + closure.
+
+    Each pass requests a JSON object with rectangle decomposition and
+    direction-keyed edge sums. The Python side validates closure and
+    re-derives area from rectangles, dropping passes whose decomposition
+    fails closure or whose self-claimed area disagrees with the
+    rectangle sum. Returns ``(voted_answer, raw_pass_records)`` so
+    callers can audit per-pass output. Universal for any orthogonal
+    polygon area question — no task-specific keywords, no expected-
+    answer reading.
+
+    On total validation failure (zero valid passes) returns ``("", ...)``
+    so the caller can fall back to plain :func:`_solve_vision_anthropic_multipass`.
+    """
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = MIME_MAP.get(ext, "image/png")
+    try:
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except Exception as err:
+        print(
+            f"  [polygon-structured read error] {err}",
+            flush=True,
+        )
+        return "", []
+    user_text = (
+        f"{_POLYGON_STRUCTURED_PROMPT}\n\nQuestion: {question}\n"
+    )
+    pass_records: list[dict] = []
+    valid_areas: list[float] = []
+    try:
+        client = _get_anthropic()
+    except Exception as err:
+        print(
+            f"  [polygon-structured anthropic init] {err}",
+            flush=True,
+        )
+        return "", []
+    request_kwargs: dict[str, object] = {
+        "model": model,
+        "max_tokens": 4000,
+        "timeout": 120.0,
+    }
+    if not _model_drops_temperature(model):
+        request_kwargs["temperature"] = 0.3
+    for pass_idx in range(max(1, passes_count)):
+        record: dict = {"pass": pass_idx, "valid": False}
+        try:
+            resp = client.messages.create(
+                **request_kwargs,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {
+                            "type": "base64", "media_type": mime,
+                            "data": b64,
+                        }},
+                        {"type": "text", "text": user_text},
+                    ],
+                }],
+            )
+            raw = resp.content[0].text if resp.content else ""
+            record["raw_len"] = len(raw)
+            obj_str = _extract_json_object(raw)
+            if obj_str is None:
+                record["error"] = "no_json_object"
+                pass_records.append(record)
+                continue
+            try:
+                obj = json.loads(obj_str)
+            except json.JSONDecodeError as je:
+                record["error"] = f"json_decode: {je}"
+                pass_records.append(record)
+                continue
+            area = _validate_polygon_pass(obj)
+            if area is None:
+                record["error"] = "closure_or_recompute_mismatch"
+                record["edge_sums"] = obj.get("edge_sums")
+                record["claimed_area"] = obj.get("computed_area")
+                pass_records.append(record)
+                continue
+            record["valid"] = True
+            record["area"] = area
+            record["rect_count"] = len(obj.get("rectangles") or [])
+            valid_areas.append(area)
+        except Exception as err:
+            record["error"] = f"call: {err}"
+        pass_records.append(record)
+    if not valid_areas:
+        return "", pass_records
+    valid_areas.sort()
+    median = valid_areas[len(valid_areas) // 2]
+    return _format_polygon_area(median), pass_records
+
+
 def _solve_vision_local(question: str, image_path: str) -> str:
     """Solve a vision question with the local Qwen2.5-VL (or fallback
     open-source multimodal) model. CPU path, ~5-20s/image.
@@ -1462,11 +2187,126 @@ def _solve_vision_local(question: str, image_path: str) -> str:
       - 4× LANCZOS upscale for small images (<800px) so noteheads land
         on enough pixels for the visual encoder
 
+    Polygon-AREA questions get force-routed to Anthropic Sonnet
+    multi-pass vision (gated by ``gaia_polygon_sonnet_multipass``)
+    because local Gemma 4 Q4_K_M mmproj reliably under-counts on
+    orthogonal-polygon decomposition (concave-corner rectangles
+    missed). The route is generic infra (no answer paths); the
+    polygon-area procedure anchor it injects is the same textbook
+    decomposition method already used by the local path.
+
     The L1 procedural anchor (generic music-theory / polygon procedure
     text) is gated by separate ``gaia_music_procedure_anchor`` /
     ``gaia_polygon_area_procedure_anchor`` feature toggles registered
     in :mod:`concinno.feature_config`.
     """
+    # ── Polygon-area: structured-JSON multipass (closure-validated) ──
+    # First-class path. Asks the vision model for a strict JSON object
+    # carrying the rectangle decomposition + per-direction edge sums and
+    # has Python (a) verify horizontal/vertical closure and (b) re-derive
+    # the area from rectangles, dropping passes whose decomposition fails
+    # closure or whose self-claimed area disagrees with the rectangle
+    # sum. Generic for any orthogonal polygon area question — no task-
+    # specific keywords, no expected-answer reading. On total validation
+    # failure falls through to the legacy free-form multipass below.
+    if (
+        _is_orthogonal_polygon_area_question(question)
+        and _feature_enabled("gaia_polygon_structured_multipass")
+    ):
+        passes_count, model = _multipass_params(
+            "gaia_polygon_structured_multipass",
+        )
+        upscale_path = (
+            _upscale_image_if_small(image_path)
+            if _feature_enabled("image_upscale_4x")
+            else image_path
+        )
+        print(
+            "  [polygon-area structured-multipass] "
+            f"model={model} passes={passes_count} for "
+            f"{question[:60]!r}",
+            flush=True,
+        )
+        voted, records = _solve_polygon_structured_multipass(
+            question, upscale_path,
+            model=model, passes_count=passes_count,
+        )
+        if voted:
+            return voted
+        valid_count = sum(1 for r in records if r.get("valid"))
+        print(
+            "  [polygon-structured 0 valid — falling through] "
+            f"valid={valid_count}/{len(records)}",
+            flush=True,
+        )
+
+    # ── Polygon-area legacy free-form multipass fallback ──
+    # Used when structured-JSON pipeline yields zero closure-valid passes
+    # (e.g. very ambiguous polygon, model refuses JSON, etc.). Same
+    # majority-vote behaviour as before; left in place as a safety net.
+    if (
+        _is_orthogonal_polygon_area_question(question)
+        and _feature_enabled("gaia_polygon_sonnet_multipass")
+    ):
+        passes_count, model = _polygon_multipass_params()
+        upscale_path = (
+            _upscale_image_if_small(image_path)
+            if _feature_enabled("image_upscale_4x")
+            else image_path
+        )
+        print(
+            "  [polygon-area force-anthropic] "
+            f"model={model} passes={passes_count} for "
+            f"{question[:60]!r}",
+            flush=True,
+        )
+        voted, samples = _solve_vision_anthropic_multipass(
+            question, upscale_path,
+            model=model, passes_count=passes_count,
+        )
+        if voted:
+            return voted
+        # Fall through to local path on total Sonnet failure (network
+        # outage, quota, etc.) so we still get a best-effort answer.
+        print(
+            "  [polygon-area multipass empty — falling back to local] "
+            f"samples={samples!r}",
+            flush=True,
+        )
+
+    # ── Music-notation force-route to Anthropic Sonnet multi-pass ──
+    # Empirical (2026-04-26 P0.3): single-pass sonnet bass-clef returns
+    # ['90','90','80'] = 67% per-call PASS — N=3 majority vote stabilises
+    # to deterministic PASS. Gated by gaia_music_sonnet_multipass; falls
+    # through to local path on Sonnet failure.
+    if (
+        _is_music_notation_question(question)
+        and _feature_enabled("gaia_music_sonnet_multipass")
+    ):
+        passes_count, model = _music_multipass_params()
+        upscale_path = (
+            _upscale_image_if_small(image_path)
+            if _feature_enabled("image_upscale_4x")
+            else image_path
+        )
+        print(
+            "  [music-notation force-anthropic] "
+            f"model={model} passes={passes_count} for "
+            f"{question[:60]!r}",
+            flush=True,
+        )
+        voted, samples = _solve_vision_anthropic_multipass(
+            question, upscale_path,
+            model=model, passes_count=passes_count,
+        )
+        if voted:
+            return voted
+        print(
+            "  [music-notation multipass empty — falling back to local] "
+            f"samples={samples!r}",
+            flush=True,
+        )
+
     try:
         llm = _get_local_vision_llm()
     except Exception as err:

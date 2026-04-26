@@ -114,3 +114,60 @@ def _enable_ux_injection_for_legacy_tests(
         ux_gate.reset_cache()
     except Exception:
         pass
+
+
+# 4.0.0 (default-off feature gates): the SHIP-LEVEL default for every
+# blocker feature flips to ``enabled=False``. The legacy test suites
+# were written assuming guards-default-ON and assert e.g. "this
+# malicious prompt MUST be blocked" without explicitly setting up the
+# gate. Rather than touching ~hundreds of pre-existing tests, this
+# autouse fixture re-enables every ``DEFAULT_OFF_4_0_0`` feature for
+# the test process via process-wide config patching.
+#
+# Skip-list: tests that own the default-off invariants themselves —
+# they manage ``enabled`` per-test and would fight this fixture.
+@pytest.fixture(autouse=True)
+def _restore_default_on_for_legacy_tests(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Pin every 4.0.0 default-off feature back to ``enabled=True``
+    for legacy tests that pre-date the flip.
+
+    The fixture monkey-patches ``Config.feature`` so that any call
+    asking for ``key="enabled"`` on a ``DEFAULT_OFF_4_0_0`` feature
+    returns True UNLESS the test explicitly set the underlying
+    config to False (we still let user-level overrides win).
+    """
+    module_file = (request.node.fspath.basename
+                   if hasattr(request.node, "fspath") else "")
+    if module_file in {
+        "test_config.py",  # owns config default invariants
+        "test_config_loader.py",  # owns config default invariants
+        "test_feature_config.py",  # owns FEATURE_META invariants
+        "test_feature_meta_schema_v2_36.py",  # schema invariants
+        "test_default_off_4_0_0.py",  # 4.0.0 defaults regression test
+        "test_feature_enabled_wiring.py",  # wiring uses explicit state
+        "test_feature_enabled_wiring_part2.py",  # wiring uses explicit state
+    }:
+        return
+    try:
+        from concinno.core.config import Config
+        from concinno.feature_config import DEFAULT_OFF_4_0_0
+    except Exception:
+        return
+
+    original_feature = Config.feature
+
+    def patched_feature(self, name, key="enabled"):
+        # Force legacy default-on for the 27 4.0.0-flipped features
+        # regardless of user-level cc_config.json (the developer running
+        # pytest may have set ALL of them to enabled=False locally —
+        # legitimate runtime config, illegitimate test fixture). Tests
+        # that want the real flipped behaviour live in
+        # ``test_default_off_4_0_0.py`` (skip-listed above).
+        if key == "enabled" and name in DEFAULT_OFF_4_0_0:
+            return True
+        return original_feature(self, name, key)
+
+    monkeypatch.setattr(Config, "feature", patched_feature)
