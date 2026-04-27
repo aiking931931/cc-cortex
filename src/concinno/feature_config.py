@@ -1030,17 +1030,56 @@ FEATURE_META: dict[str, dict] = {
             "Block irreversible publish operations until the user types "
             "'go publish <pkg> <ver>' in chat (STRING_MATCH) or selects "
             "the equivalent AskUserQuestion option (ASKUSER_ANSWER). "
-            "Honours release_auth.disabled=True as a global bypass."
+            "Honours release_auth.disabled=True as a global bypass. "
+            "4.2.3+: also wires atomic per-package ReleaseLock + PyPI "
+            "pre-check via acquire_for_upload() context manager so "
+            "concurrent sessions cannot collide on twine upload."
         ),
         "description_zh": (
             "阻擋 twine upload / cargo publish / git tag push remote 等"
             "不可逆 publish 操作，直到用戶在 chat 打出"
             "'go publish <pkg> <ver>' 字串確認。"
             "若 ~/.concinno/release_auth.json::disabled=True 則整層跳過。"
+            "4.2.3+ 額外串接 atomic ReleaseLock + PyPI pre-check"
+            "（acquire_for_upload context manager），防止多 session"
+            "並發 publish 撞 PyPI 400 already-exists race。"
         ),
         "ziq_autotunable": False,
         "cosmetic": False,
-        "params": {},
+        "params": {
+            # ``lock_ttl_minutes`` is exposed so ``concinno features
+            # get release_authorization`` surfaces it. It is **not**
+            # ZIQ-autotunable — TTL is operational correctness, not
+            # outcome-learnable: too short drops live releases (data
+            # loss), too long wedges crashed sessions (availability).
+            # Correctness wins over learning. Read at call time by
+            # ``concinno.coordination.release_lock._ttl_seconds()`` via
+            # env var ``CONCINNO_RELEASE_LOCK_TTL_MIN``.
+            "lock_ttl_minutes": {
+                "type": "int",
+                "default": 30,
+                "min": 5,
+                "max": 240,
+                "recommended": 30,
+                "risk_low": (
+                    "Below 5 minutes can revoke an in-flight upload from "
+                    "a slow network, causing the next acquire to take "
+                    "over and produce a double-publish race"
+                ),
+                "risk_high": (
+                    "Above 240 minutes (4 hours) leaves crashed-session "
+                    "locks wedged for hours, blocking the recovery session"
+                ),
+                "risk_low_zh": (
+                    "低於 5 分鐘會把慢網路下尚未完成的 upload 視為過期，"
+                    "下個 acquire 就接手 → 雙重 publish race"
+                ),
+                "risk_high_zh": (
+                    "高於 240 分鐘（4 小時）會把 crash session 的鎖卡住"
+                    "好幾小時，恢復用 session 無法接手"
+                ),
+            },
+        },
     },
     "publish_scan_guard": {
         # Distinct from the existing ``publish_scan`` entry above —
@@ -2320,6 +2359,83 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    # 2026-04-27 — MAR (Multi-Agent Reflexion) 4-perspective C5 self-correction.
+    # Dispatches engineer / user / attacker / auditor Opus subagents in
+    # parallel via the harness Agent dispatcher; aggregates findings with
+    # ZIQ-FTRL-tuned weights. See concinno.guards.multi_perspective_reflection_guard.
+    "mar_4perspective_reflection": {
+        "category": "behavioral",
+        "description": (
+            "C5 self-correction reflection across 4 perspectives "
+            "(engineer / user / attacker / auditor). Each perspective is "
+            "an Opus subagent dispatched via the harness Agent tool; "
+            "findings are aggregated with weights tuned by ZIQ FTRL "
+            "from next-turn outcome signal. Triggered on task failure, "
+            "user correction, or B5 anchor invocation."
+        ),
+        "description_zh": (
+            "C5 自我修正 4 視角反省（工程師/用戶/攻擊者/審計者）。"
+            "每個視角為 Opus 子代理，findings 用 ZIQ FTRL 學到的權重聚合。"
+            "由任務失敗、用戶糾正或 B5 anchor 觸發。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "C5 自我修正失去 4 視角覆蓋，反思只走主代理單視角，"
+            "易漏 user / attacker / auditor 維度"
+        ),
+        "consequences_if_off_en": (
+            "C5 self-correction loses 4-perspective coverage; "
+            "reflection collapses to main-agent self-view, missing "
+            "user / attacker / auditor lenses."
+        ),
+        "params": {
+            "engineer_weight": {
+                "type": "float",
+                "default": 0.30,
+                "min": 0.0,
+                "max": 1.0,
+                "recommended": 0.30,
+            },
+            "user_weight": {
+                "type": "float",
+                "default": 0.25,
+                "min": 0.0,
+                "max": 1.0,
+                "recommended": 0.25,
+            },
+            "attacker_weight": {
+                "type": "float",
+                "default": 0.20,
+                "min": 0.0,
+                "max": 1.0,
+                "recommended": 0.20,
+            },
+            "auditor_weight": {
+                "type": "float",
+                "default": 0.25,
+                "min": 0.0,
+                "max": 1.0,
+                "recommended": 0.25,
+            },
+            "fatal_severity_threshold": {
+                "type": "int",
+                "default": 2,
+                "min": 1,
+                "max": 10,
+                "recommended": 2,
+            },
+            "max_concurrent_perspectives": {
+                "type": "int",
+                "default": 4,
+                "min": 1,
+                "max": 4,
+                "recommended": 4,
+            },
+        },
+    },
     # 2026-04-27 — DSPy MIPROv2 Bayesian prompt optimizer (wave-1).
     # Opt-in only — optimization runs burn LLM credits. Ships default-OFF
     # (also in DEFAULT_OFF_4_0_0 frozenset above).
@@ -2360,6 +2476,101 @@ FEATURE_META: dict[str, dict] = {
                     "'medium'/'heavy' run more trials and cost more. "
                     "'light' is appropriate for dev iteration."
                 ),
+            },
+        },
+    },
+    # ── CBUA SOTA-borrow gap-fill (2026-04-27) ───────────
+    "reflexion_guard": {
+        "category": "soft_cognitive",
+        "description": (
+            "C5 Reflexion: synthesise why_failed narrative on tool failure, "
+            "replay on next PreToolUse via additionalContext."
+        ),
+        "description_zh": (
+            "C5 Reflexion：失敗時合成為什麼錯，下一次 PreToolUse "
+            "用 additionalContext 顯示給模型看。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+            },
+            "max_words": {
+                "type": "int",
+                "default": 80,
+                "min": 30,
+                "max": 200,
+                "recommended": 80,
+            },
+            "injection_ttl_calls": {
+                "type": "int",
+                "default": 2,
+                "min": 1,
+                "max": 5,
+                "recommended": 2,
+            },
+        },
+    },
+    "tot_branch_explorer": {
+        "category": "soft_cognitive",
+        "description": (
+            "C3 Tree-of-Thought branch planner: recommend branch count + "
+            "force convergence above budget threshold."
+        ),
+        "description_zh": (
+            "C3 ToT 分支規劃：建議並行分支數 + 預算超閾強制收斂。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+            },
+            "max_branches": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 5,
+                "recommended": 3,
+            },
+            "convergence_pct": {
+                "type": "float",
+                "default": 0.5,
+                "min": 0.3,
+                "max": 0.7,
+                "recommended": 0.5,
+            },
+        },
+    },
+    "action_phase_signal": {
+        "category": "soft_cognitive",
+        "description": (
+            "OODA/PDCA/ReAct behavioural phase counter. Emits a phase-"
+            "distribution advisory summary every summary_interval calls."
+        ),
+        "description_zh": (
+            "OODA/PDCA/ReAct 行為階段計數器，每 summary_interval 次呼叫"
+            "輸出一次階段分布摘要。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+            },
+            "summary_interval": {
+                "type": "int",
+                "default": 10,
+                "min": 5,
+                "max": 30,
+                "recommended": 10,
             },
         },
     },
@@ -3033,3 +3244,174 @@ def apply_profile(name: str) -> list[str]:
         return [f"Failed to apply profile: {e}"]
 
     return [f"Applied profile '{name}': {profile['description']}"] + changes
+
+
+# ── Per-feature toggle profiles (4.2.x, set-profile shortcut) ────
+#
+# These profiles toggle individual features in ``DEFAULT_OFF_4_0_0``
+# en-masse, so an operator restoring strict mode after the 4.0.0
+# permissive baseline can do it in one command instead of running
+# ``concinno config set features.<name>.enabled true`` 27 times.
+#
+# Distinct from the legacy :data:`PROFILES` dict above — that one
+# stores high-level settings (guard_count / arbiter / skill_routing
+# / silent / dynamic_routing) under a meta ``profile_settings`` key,
+# while this one writes per-feature ``enabled`` flags through
+# :meth:`Config.set_feature` so the existing 6-source resolution
+# chain (env > user > project > FEATURE_META) keeps working.
+#
+# Each profile maps a name to two specs (``enable`` / ``disable``).
+# Each spec is either a frozenset of feature names, or the string
+# sentinel ``"DEFAULT_OFF_4_0_0"`` which expands to the live frozenset
+# at apply time. The ``permissive`` profile *disables* every feature
+# in ``DEFAULT_OFF_4_0_0`` so a previously-applied ``strict`` can be
+# rolled back in one command.
+#
+# ZIQ note: profile choice is operator preference, not auto-tunable
+# (cosmetic=False, ziq_autotunable=False). ZIQ does not auto-flip
+# operator-applied profiles; user明示 wins.
+
+FEATURE_TOGGLE_PROFILES: dict[str, dict[str, Any]] = {
+    "strict": {
+        "description": (
+            "Enable all features default-off in 4.0.0 (27 guards). "
+            "Pre-4.0.0 paranoid baseline."
+        ),
+        "enable": "DEFAULT_OFF_4_0_0",  # sentinel — expanded at apply time
+        "disable": frozenset(),
+    },
+    "permissive": {
+        "description": (
+            "4.0.0 senior-dev permissive baseline — every guard in "
+            "DEFAULT_OFF_4_0_0 set to enabled=False. No-op on a fresh "
+            "install; reverts a previous ``strict`` apply."
+        ),
+        "enable": frozenset(),
+        "disable": "DEFAULT_OFF_4_0_0",
+    },
+    "dev": {
+        "description": (
+            "Solo-dev daily driver — enable productivity features "
+            "(dspy_prompt_optimization, polling_watcher, "
+            "pip_aftermath_hint) only. Leaves DEFAULT_OFF_4_0_0 guards "
+            "off."
+        ),
+        "enable": frozenset({
+            "dspy_prompt_optimization",
+            "polling_watcher",
+            "pip_aftermath_hint",
+        }),
+        "disable": frozenset(),
+    },
+}
+
+
+def list_feature_toggle_profiles() -> dict[str, str]:
+    """Return ``{name: description}`` for the per-feature toggle profiles."""
+    return {k: v["description"] for k, v in FEATURE_TOGGLE_PROFILES.items()}
+
+
+def _resolve_profile_features(
+    spec: "frozenset[str] | str",
+) -> frozenset[str]:
+    """Expand the ``"DEFAULT_OFF_4_0_0"`` sentinel to the actual
+    frozenset; pass through real frozensets verbatim."""
+    if spec == "DEFAULT_OFF_4_0_0":
+        return DEFAULT_OFF_4_0_0
+    if isinstance(spec, frozenset):
+        return spec
+    return frozenset()
+
+
+def apply_feature_toggle_profile(
+    name: str,
+    cfg: Any = None,
+) -> dict[str, Any]:
+    """Apply a per-feature toggle profile by name.
+
+    Returns a dict with ``profile`` / ``enabled`` / ``disabled`` /
+    ``unchanged`` / ``error`` keys so callers (CLI, GUI) can render
+    structured output.
+
+    The function is idempotent — re-running ``apply_feature_toggle_profile
+    ("strict")`` after the first invocation yields ``unchanged ==``
+    full set, ``enabled == disabled == []``.
+
+    The optional ``cfg`` parameter accepts a pre-built
+    :class:`concinno.core.config.Config` instance (used by tests to
+    isolate writes to a tmp ``cc_config.json``). When ``None``, the
+    process-wide singleton from ``get_config()`` is used.
+    """
+    if name not in FEATURE_TOGGLE_PROFILES:
+        return {
+            "profile": name,
+            "error": (
+                f"Unknown profile: {name!r}. Available: "
+                f"{', '.join(FEATURE_TOGGLE_PROFILES)}"
+            ),
+            "enabled": [],
+            "disabled": [],
+            "unchanged": [],
+        }
+
+    profile = FEATURE_TOGGLE_PROFILES[name]
+    to_enable = _resolve_profile_features(profile["enable"])
+    to_disable = _resolve_profile_features(profile["disable"])
+
+    enabled: list[str] = []
+    disabled: list[str] = []
+    unchanged: list[str] = []
+    errors: list[str] = []
+
+    if cfg is None:
+        try:
+            from concinno.core.config import get_config
+
+            cfg = get_config()
+        except Exception as exc:  # pragma: no cover — bootstrap is solid
+            return {
+                "profile": name,
+                "error": f"Failed to load config: {exc}",
+                "enabled": [],
+                "disabled": [],
+                "unchanged": [],
+            }
+
+    for feat in sorted(to_enable):
+        try:
+            current = bool(cfg.feature(feat, "enabled"))
+        except Exception:
+            current = False
+        if current:
+            unchanged.append(feat)
+            continue
+        try:
+            cfg.set_feature(feat, "enabled", True)
+            enabled.append(feat)
+        except Exception as exc:
+            errors.append(f"{feat}: {exc}")
+
+    for feat in sorted(to_disable):
+        try:
+            current = bool(cfg.feature(feat, "enabled"))
+        except Exception:
+            current = True
+        if not current:
+            unchanged.append(feat)
+            continue
+        try:
+            cfg.set_feature(feat, "enabled", False)
+            disabled.append(feat)
+        except Exception as exc:
+            errors.append(f"{feat}: {exc}")
+
+    result: dict[str, Any] = {
+        "profile": name,
+        "description": profile["description"],
+        "enabled": enabled,
+        "disabled": disabled,
+        "unchanged": sorted(unchanged),
+    }
+    if errors:
+        result["errors"] = errors
+    return result

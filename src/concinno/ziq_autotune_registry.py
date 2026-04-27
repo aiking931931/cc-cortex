@@ -201,6 +201,61 @@ TUNABLE_REGISTRY: dict[str, TunableSpec] = {
         source="concinno.escalation (opt-in enrichment)",
         note="Whether to inject few-shot examples into escalation prompt.",
     ),
+    # ── CBUA SOTA-borrow gap-fill (2026-04-27) ────────────
+    "reflexion.max_words": TunableSpec(
+        target="reflexion.max_words",
+        preset=80,
+        kind="continuous",
+        vmin=30.0,
+        vmax=200.0,
+        source="concinno.guards.reflexion_guard.ReflexionGuard",
+        note="Word cap on the synthesised why_failed narrative.",
+    ),
+    "reflexion.injection_ttl_calls": TunableSpec(
+        target="reflexion.injection_ttl_calls",
+        preset=2,
+        kind="continuous",
+        vmin=1.0,
+        vmax=5.0,
+        source="concinno.guards.reflexion_guard.ReflexionGuard",
+        note=(
+            "How many subsequent PreToolUse calls replay the narrative "
+            "before it expires."
+        ),
+    ),
+    "tot.max_branches": TunableSpec(
+        target="tot.max_branches",
+        preset=3,
+        kind="continuous",
+        vmin=1.0,
+        vmax=5.0,
+        source="concinno.cognitive.tot_branch_explorer.plan_branches",
+        note="Hard cap on Tree-of-Thought parallel branches.",
+    ),
+    "tot.convergence_pct": TunableSpec(
+        target="tot.convergence_pct",
+        preset=0.5,
+        kind="continuous",
+        vmin=0.3,
+        vmax=0.7,
+        source="concinno.cognitive.tot_branch_explorer.plan_branches",
+        note=(
+            "Reasoning-budget fraction above which ToT branching is "
+            "force-converged."
+        ),
+    ),
+    "action_phase.summary_interval": TunableSpec(
+        target="action_phase.summary_interval",
+        preset=10,
+        kind="continuous",
+        vmin=5.0,
+        vmax=30.0,
+        source="concinno.guards.action_phase_signal_guard.ActionPhaseSignalGuard",
+        note=(
+            "Tool-call count between OODA/PDCA/ReAct phase-distribution "
+            "advisory summaries."
+        ),
+    ),
 }
 
 

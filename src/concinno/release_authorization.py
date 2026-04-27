@@ -40,14 +40,16 @@ Config sources (later overrides earlier):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import socket
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Iterator, Optional
 
 # ── Irreversible publish operations ─────────────────────────────────
 #
@@ -592,10 +594,228 @@ class ReleaseAuthorizationGuard(_BaseGuard):
         )
 
 
+# ── acquire_for_upload context manager (4.2.3, 2026-04-27) ──────────
+#
+# Wires ``coordination.release_lock.ReleaseLock`` + ``twine_pre_check.
+# check_before_upload`` into the publish gate so the next ship cycle
+# benefits from atomic per-package locks + PyPI pre-check race
+# prevention. The 4.2.1 ship hit a 400-already-exists race specifically
+# because ``check_authorization`` only consulted the user's auth string
+# and the markdown ``RELEASE_COORDINATION.md::Active`` self-validation
+# pattern — neither caught a concurrent upload from another session.
+#
+# Existing ``check_authorization()`` keeps its old signature for
+# back-compat. The new logic only activates inside ``acquire_for_upload``
+# so legacy callers see zero behavior change.
+
+
+def _resolve_session_identity() -> str:
+    """Best-effort session identity from env or ``instance_lock.json``.
+
+    Mirrors :func:`concinno.cli.release_lock_cmd._resolve_session`.
+
+    TODO(release_authorization): consolidate this into a shared helper
+    in ``concinno.coordination`` so the CLI and the gate read the same
+    source of truth. Inline copy avoids a circular import for now
+    (``cli`` imports ``release_authorization``, not the other way).
+    """
+    for var in ("CCC_SESSION", "CC_SESSION_ID", "CLAUDE_SESSION_ID"):
+        val = os.environ.get(var, "").strip()
+        if val:
+            return val
+    lock_path = Path.home() / ".claude" / "token_state" / "instance_lock.json"
+    if lock_path.exists():
+        try:
+            data = json.loads(lock_path.read_text(encoding="utf-8"))
+            sessions = data.get("sessions", {})
+            if isinstance(sessions, dict) and sessions:
+                # Pick newest session by 'started' if available.
+                def _start(item: tuple[str, dict]) -> str:
+                    return str(item[1].get("started", ""))
+
+                key, _ = max(sessions.items(), key=_start)
+                return key
+        except (json.JSONDecodeError, OSError):
+            pass
+    return f"unknown-{socket.gethostname()}"
+
+
+@dataclass(frozen=True)
+class UploadAuthorization:
+    """Result of :func:`acquire_for_upload`.
+
+    Attributes:
+        allowed: True iff every layer (config, transcript auth string,
+            PyPI pre-check, atomic lock) cleared.
+        reason: Empty when allowed; human-readable explanation otherwise.
+        denied_at: One of ``""``, ``"authorization"``,
+            ``"race_prevention"``, ``"lock_collision"``. Lets callers
+            route on which layer rejected.
+        lock_acquired: True iff the atomic ``ReleaseLock`` was taken
+            (so callers know whether ``__exit__`` will try to release).
+    """
+
+    allowed: bool
+    reason: str
+    denied_at: str = ""
+    lock_acquired: bool = False
+
+
+@contextlib.contextmanager
+def acquire_for_upload(
+    package: str,
+    version: str,
+    session: Optional[str] = None,
+    transcript_text: str = "",
+    askuser_answers: Optional[Iterable[str]] = None,
+    config: Optional[AuthorizationConfig] = None,
+    operation: str = "twine_upload",
+) -> Iterator[UploadAuthorization]:
+    """Context manager that authorises + locks a publish, releasing on exit.
+
+    Combines three layers in order:
+
+    1. :func:`check_authorization` — standard auth-string / AskUser gate.
+       (When ``release_auth.disabled=True`` this short-circuits to
+       ``allowed=True`` and **both** subsequent layers are skipped — the
+       opt-out is honoured cleanly per ``rules/L1/release_coord.md``.)
+    2. :func:`coordination.twine_pre_check.check_before_upload`
+       (with ``require_lock_held=False`` because we acquire below) —
+       PyPI 404/200 pre-check that catches "already on PyPI" before
+       ``twine upload`` 400s.
+    3. :class:`coordination.release_lock.ReleaseLock` ``acquire`` — atomic
+       per-package lock so two concurrent sessions cannot both upload.
+
+    On any layer's denial, yields ``UploadAuthorization(allowed=False,
+    reason=..., denied_at=...)`` and the lock is **not** acquired (so
+    nothing to release). On success, yields ``allowed=True`` and the
+    lock is released on ``__exit__`` even if the body raises.
+
+    Args:
+        package: Package name (e.g. ``"concinno"``).
+        version: Target version (e.g. ``"4.3.0"``).
+        session: Session identity for the lock. Defaults to
+            :func:`_resolve_session_identity`.
+        transcript_text: Recent user-authored chat for STRING_MATCH.
+        askuser_answers: AskUserQuestion answers for ASKUSER_ANSWER mode.
+        config: Resolved auth config; defaults to :func:`load_config`.
+        operation: Operation label for the denial message
+            (default ``"twine_upload"`` — this matches the most common
+            caller; pass ``"cargo_publish"`` etc. for non-PyPI packages
+            but note the PyPI pre-check still queries pypi.org regardless,
+            which is harmless for cross-ecosystem packages — a
+            ``not-on-pypi`` package simply 404s and is treated as free).
+
+    Example::
+
+        with acquire_for_upload("concinno", "4.3.0",
+                                 transcript_text=chat) as auth:
+            if not auth.allowed:
+                print(f"blocked: {auth.reason}")
+                return
+            subprocess.check_call(
+                ["twine", "upload", "dist/concinno-4.3.0-*"],
+            )
+        # lock auto-released on exit (success or exception)
+    """
+    cfg = config if config is not None else load_config()
+
+    # Layer 1: standard authorization check. Honours disabled=True.
+    allowed, reason = check_authorization(
+        operation,
+        package,
+        version,
+        transcript_text=transcript_text,
+        askuser_answers=askuser_answers,
+        config=cfg,
+    )
+    if not allowed:
+        yield UploadAuthorization(
+            allowed=False,
+            reason=reason,
+            denied_at="authorization",
+            lock_acquired=False,
+        )
+        return
+
+    # ``disabled=True`` → trust the operator. Skip pre-check + atomic lock
+    # entirely so the opt-out really means "no friction at the concinno
+    # layer" (the harness allow-list remains the only check).
+    if cfg.disabled:
+        yield UploadAuthorization(
+            allowed=True,
+            reason="",
+            denied_at="",
+            lock_acquired=False,
+        )
+        return
+
+    # Lazy import — release_authorization stays stdlib-only at module
+    # load; the coordination subpackage only loads when callers actually
+    # use the upload context manager.
+    from concinno.coordination.release_lock import ReleaseLock
+    from concinno.coordination.twine_pre_check import check_before_upload
+
+    resolved_session = session or _resolve_session_identity()
+
+    # Layer 2: PyPI pre-check. ``require_lock_held=False`` because we
+    # acquire the lock immediately below — caller hasn't yet.
+    ok, pre_reason = check_before_upload(
+        package,
+        version,
+        session=resolved_session,
+        require_lock_held=False,
+    )
+    if not ok:
+        yield UploadAuthorization(
+            allowed=False,
+            reason=pre_reason,
+            denied_at="race_prevention",
+            lock_acquired=False,
+        )
+        return
+
+    # Layer 3: atomic release lock. Holder identity = resolved session.
+    lock = ReleaseLock()
+    host = socket.gethostname()
+    if not lock.acquire(package, version, session=resolved_session, host=host):
+        held = lock.check(package) or {}
+        holder = held.get("holder_session", "?")
+        held_ver = held.get("version", "?")
+        yield UploadAuthorization(
+            allowed=False,
+            reason=(
+                f"release lock held by {holder!r} for {package} "
+                f"{held_ver!r}; concurrent publish in progress"
+            ),
+            denied_at="lock_collision",
+            lock_acquired=False,
+        )
+        return
+
+    try:
+        yield UploadAuthorization(
+            allowed=True,
+            reason="",
+            denied_at="",
+            lock_acquired=True,
+        )
+    finally:
+        # Release on exception too — a crashed body must not wedge
+        # subsequent retries (TTL would eventually reclaim, but immediate
+        # release is the cleaner contract).
+        try:
+            lock.release(package)
+        except Exception:  # pragma: no cover — release is fail-safe
+            pass
+
+
 __all__ = [
     "AuthorizationMode",
     "AuthorizationConfig",
     "PUBLISH_PATTERNS",
+    "UploadAuthorization",
+    "acquire_for_upload",
     "detect_publish_operation",
     "load_config",
     "format_required_string",

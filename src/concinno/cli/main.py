@@ -1595,6 +1595,10 @@ def _register_features(sub: argparse._SubParsersAction) -> None:
     from .features_register_cmd import register_features_subcommands
     register_features_subcommands(feat_sub)
 
+    # 4.2.x — set-profile bulk-toggle shortcut for 4.0.0 default-off features
+    from .features_profile_cmd import register_set_profile
+    register_set_profile(feat_sub)
+
 
 def _register_gui(sub: argparse._SubParsersAction) -> None:
     p_gui = sub.add_parser(
