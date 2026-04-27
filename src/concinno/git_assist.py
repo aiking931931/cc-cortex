@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import stat
@@ -694,6 +695,40 @@ def auto_commit(
     if not safe_files:
         return None
 
+    safe_files = _stage_and_filter(cwd, all_files, safe_files, op_timeout)
+    if safe_files is None:
+        return None
+
+    # Generate commit message from file types
+    exts = set()
+    for f in safe_files[:10]:
+        parts = f.rsplit(".", 1)
+        if len(parts) == 2:
+            exts.add(parts[1])
+    ext_hint = ", ".join(sorted(exts)[:5]) if exts else "files"
+    msg = f"auto: update {len(safe_files)} files ({ext_hint})"
+
+    result = _git(["commit", "-m", msg], cwd, timeout=op_timeout)
+    if result is None:
+        return None
+
+    # 反熵優先: squash old commits when accumulated beyond threshold
+    _inline_squash_if_needed(cwd, timeout=timeout)
+    return msg
+
+
+def _stage_and_filter(
+    cwd: str,
+    all_files: list[str],
+    safe_files: list[str],
+    op_timeout: int,
+) -> list[str] | None:
+    """Stage all files, unstage secrets + large blobs, return remaining safe list.
+
+    Extracted from ``auto_commit`` to keep that function under 120 lines.
+    Returns the filtered safe_files list, or None if nothing is left to commit
+    (caller should return None from auto_commit).
+    """
     # 2.13.1 治本 — skip nested repo subdirs from `git add -A` to break
     # the outer-inner race of MEMORY #67. When an outer repo intentionally
     # tracks paths inside a nested working tree (e.g. ai-king's
@@ -702,10 +737,6 @@ def auto_commit(
     # outer rebase/checkout that replays an older outer tree state can
     # then **delete those files from the inner working tree** (they are
     # now outer-tracked paths, and the old tree does not contain them).
-    # The 2.10.2 snapshot/restore handles the rebase phase but does not
-    # prevent the stage — the file gets drawn into the outer index long
-    # before squash ever runs. Excluding the nested subdir from `add -A`
-    # keeps outer blind to inner WIP; the inner repo owns its own commits.
     # Set ``CONCINNO_SKIP_NESTED_ADD=0`` to restore pre-2.13.1 behavior.
     nested_excludes: list[str] = []
     if os.environ.get("CONCINNO_SKIP_NESTED_ADD", "1") != "0":
@@ -732,23 +763,15 @@ def auto_commit(
     if _git(add_cmd, cwd, timeout=op_timeout) is None:
         return None
 
-    # Defensive unstage: remove any newly-detected secret-like files
-    # from the index before committing. Already-tracked secrets that
-    # predate this guard are out of scope — those need a manual
-    # `git rm --cached`. This only protects against the new stage.
+    # Defensive unstage: remove any newly-detected secret-like files.
     secret_files = [f for f in all_files if _is_secret(f)]
     if secret_files:
         _git(["reset", "HEAD", "--", *secret_files], cwd, timeout=op_timeout)
 
-    # 2.10.3 治本 — unstage large unignored blobs so they never enter
-    # outer .git history. The squash fix (2.10.2) reclaims historical
-    # bloat, but preventing the stage is cheaper than squashing it
-    # later. MEMORY #77's 7.6 GB came from LoRA/safetensors/BEIR
-    # corpus files the .gitignore missed — this is the belt to that
-    # .gitignore suspenders.
-    large_files = [
-        f for f in safe_files if _is_large_unignored(f, cwd)
-    ]
+    # 2.10.3 治本 — unstage large unignored blobs (≥threshold) to prevent
+    # repo bloat. MEMORY #77's 7.6 GB traced to LoRA/safetensors blobs
+    # the .gitignore missed.
+    large_files = [f for f in safe_files if _is_large_unignored(f, cwd)]
     if large_files:
         _git(["reset", "HEAD", "--", *large_files], cwd, timeout=op_timeout)
         _safe_stderr(
@@ -759,28 +782,11 @@ def auto_commit(
             ("\n  …" if len(large_files) > 5 else "") +
             "\n(escape: CONCINNO_LARGE_FILE_THRESHOLD=<bytes>)"
         )
-        # Recompute safe_files: if ALL safe_files were large, there is
-        # nothing left to commit. Otherwise commit the remainder.
         safe_files = [f for f in safe_files if f not in large_files]
         if not safe_files:
             return None
 
-    # Generate commit message from file types
-    exts = set()
-    for f in safe_files[:10]:
-        parts = f.rsplit(".", 1)
-        if len(parts) == 2:
-            exts.add(parts[1])
-    ext_hint = ", ".join(sorted(exts)[:5]) if exts else "files"
-    msg = f"auto: update {len(safe_files)} files ({ext_hint})"
-
-    result = _git(["commit", "-m", msg], cwd, timeout=op_timeout)
-    if result is None:
-        return None
-
-    # 反熵優先: squash old commits when accumulated beyond threshold
-    _inline_squash_if_needed(cwd, timeout=timeout)
-    return msg
+    return safe_files
 
 
 def _inline_squash_if_needed(
@@ -826,6 +832,206 @@ def _inline_squash_if_needed(
     except Exception as e:
         # Keep hook resilient: any unexpected failure logs, does not raise.
         sys.stderr.write(f"concinno: inline squash failed — {type(e).__name__}: {e}\n")
+
+
+# ── Nested repo discovery + allowlist ────────────────────────────────────────
+
+_DEFAULT_ALLOWLIST_PATH = os.path.join(
+    os.path.expanduser("~"), ".concinno", "auto_commit_repos.json"
+)
+
+# Hardcoded upstream/dataset patterns that are NEVER auto-committed even if
+# they appear in nested scan (short-circuits allowlist for obvious upstreams).
+_UPSTREAM_DIR_MARKERS = frozenset({
+    "ImpliRet", "locomo", "locomo_dataset",
+})
+
+# Directory names to prune from nested search (same as cleanup.py convention).
+_NESTED_PRUNE_DIRS = frozenset({
+    ".git", ".venv", "venv", "env", "node_modules",
+    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".hypothesis", ".tox", "dist", "build",
+})
+
+
+def _load_auto_commit_allowlist(root: str) -> list[str] | None:
+    """Load allowlist from ~/.concinno/auto_commit_repos.json.
+
+    Returns list of absolute paths to include, or None if the file
+    does not exist (caller uses auto-discover mode).
+
+    File format::
+
+        {
+            "repos": [
+                "/abs/path/to/repo",
+                "relative/to/root"
+            ]
+        }
+
+    Relative paths are resolved relative to *root*.
+    ``null`` / missing file → auto-discover mode (scan nested .git dirs).
+    """
+    path = _DEFAULT_ALLOWLIST_PATH
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        repos = data.get("repos", [])
+        result: list[str] = []
+        for r in repos:
+            if os.path.isabs(r):
+                result.append(os.path.normpath(r))
+            else:
+                result.append(os.path.normpath(os.path.join(root, r)))
+        return result if result else None
+    except Exception as exc:
+        _safe_stderr(f"[git_assist] allowlist load failed ({path}): {exc}\n")
+        return None
+
+
+def _is_upstream_repo(path: str) -> bool:
+    """Return True if any path component matches an upstream marker."""
+    parts = path.replace("\\", "/").split("/")
+    return any(p in _UPSTREAM_DIR_MARKERS for p in parts)
+
+
+def discover_nested_repos(
+    root: str,
+    max_depth: int = 5,
+    timeout: int = 10,
+) -> list[str]:
+    """Find self-owned nested git repos under *root* to auto-commit.
+
+    Discovery order:
+    1. If ``~/.concinno/auto_commit_repos.json`` exists and has a ``repos``
+       list, use that (explicit allowlist — fastest, most predictable).
+    2. Otherwise scan *root* for nested ``.git`` dirs (auto-discover mode).
+       Excludes:
+       - *root* itself (handled by caller's ``auto_commit(root)``)
+       - ``_NESTED_PRUNE_DIRS`` subtrees
+       - Paths matching ``_UPSTREAM_DIR_MARKERS``
+       - Repos whose toplevel is not inside *root* (symlink loops)
+    3. Always includes *root* itself as index 0.
+
+    Returns absolute paths (including *root* as first entry).
+    """
+    root_abs = os.path.abspath(root)
+
+    # Always include root first
+    result: list[str] = [root_abs]
+
+    # Try explicit allowlist
+    allowlist = _load_auto_commit_allowlist(root_abs)
+    if allowlist is not None:
+        for repo_path in allowlist:
+            abs_path = os.path.abspath(repo_path)
+            if abs_path == root_abs:
+                continue  # already added as first entry
+            if not os.path.isdir(abs_path):
+                _safe_stderr(
+                    f"[git_assist] allowlist entry not found, skipping: {abs_path}\n"
+                )
+                continue
+            if _is_upstream_repo(abs_path):
+                _safe_stderr(
+                    f"[git_assist] skipping upstream repo from allowlist: {abs_path}\n"
+                )
+                continue
+            # Verify it's actually a git repo
+            if _git(["rev-parse", "--is-inside-work-tree"], abs_path, timeout=timeout) == "true":
+                result.append(abs_path)
+        return result
+
+    # Auto-discover mode: walk tree looking for .git dirs
+    try:
+        for dirpath, dirnames, _filenames in os.walk(root_abs, followlinks=False):
+            rel_dir = os.path.relpath(dirpath, root_abs)
+            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+
+            # Prune dirs in-place to avoid descending
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in _NESTED_PRUNE_DIRS
+            ]
+
+            if depth >= max_depth:
+                dirnames.clear()
+                continue
+
+            if ".git" in os.listdir(dirpath) if dirpath != root_abs else []:
+                abs_path = os.path.abspath(dirpath)
+                if abs_path == root_abs:
+                    continue  # root handled above
+                if _is_upstream_repo(abs_path):
+                    _safe_stderr(
+                        f"[git_assist] skipping upstream repo: {abs_path}\n"
+                    )
+                    continue
+                is_repo = _git(
+                    ["rev-parse", "--is-inside-work-tree"],
+                    abs_path, timeout=timeout,
+                ) == "true"
+                if is_repo:
+                    result.append(abs_path)
+    except Exception as exc:
+        _safe_stderr(f"[git_assist] nested repo discovery error: {exc}\n")
+
+    return result
+
+
+def count_uncommitted(cwd: str, timeout: int = 10) -> int:
+    """Return the number of uncommitted changes in *cwd*, or 0 on error."""
+    if _git(["rev-parse", "--is-inside-work-tree"], cwd, timeout=timeout) != "true":
+        return 0
+    records = _status_records_z(cwd, timeout=timeout)
+    if records is None:
+        raw = _git(["status", "--short"], cwd, timeout=timeout) or ""
+        return sum(1 for line in raw.splitlines() if line.strip())
+    return len(records)
+
+
+def auto_commit_all_repos(
+    root: str | None = None,
+    timeout: int = 15,
+) -> dict[str, str | None]:
+    """Auto-commit all self-owned repos (root + nested).
+
+    Calls ``auto_commit()`` for each repo returned by ``discover_nested_repos``.
+    Skips upstream repos and honours the same env opt-out flags as
+    ``auto_commit``.
+
+    Returns:
+        Mapping of ``{abs_path: commit_msg_or_None}`` for all repos attempted.
+        Root is always the first key.
+    """
+    if os.environ.get("CONCINNO_NO_AUTOCOMMIT") == "1":
+        return {}
+    if os.environ.get("CONCINNO_SKIP_AUTO_COMMIT") == "1":
+        return {}
+
+    if root is None:
+        root = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+
+    repos = discover_nested_repos(root, timeout=timeout)
+    results: dict[str, str | None] = {}
+
+    for repo_path in repos:
+        try:
+            msg = auto_commit(cwd=repo_path, timeout=timeout)
+            results[repo_path] = msg
+            if msg:
+                _safe_stderr(
+                    f"[git_assist] auto-committed nested repo {repo_path}: {msg}\n"
+                )
+        except Exception as exc:
+            _safe_stderr(
+                f"[git_assist] auto_commit failed for {repo_path}: {exc}\n"
+            )
+            results[repo_path] = None
+
+    return results
 
 
 def generate_report(

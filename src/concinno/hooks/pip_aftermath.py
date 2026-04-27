@@ -11,7 +11,7 @@ icon "整個不見了" with no obvious cause.
 
 This hook detects the trigger pattern (pip touching concinno) and:
 
-1. Reads ``~/.memoria/heartbeat.json`` (written by Memoria's
+1. Reads ``~/.memoria/memoria_heartbeat.json`` (written by Memoria's
    scheduler every tick — see ``~/.claude/scripts/memoria/
    scheduler.py::Scheduler._heartbeat``).
 2. If the heartbeat is stale (>5 min default) OR missing, emits an
@@ -153,6 +153,6 @@ def detect_pip_concinno(tool_name: str, tool_input: dict) -> Optional[str]:
         f"{int(age)}s stale {pid_clause}. Daemon thread likely died "
         f"on mid-install ImportError. Restart: "
         f"`cd ~/.claude/scripts && pythonw -m memoria`. "
-        f"After restart, heartbeat file `~/.memoria/heartbeat.json` "
+        f"After restart, heartbeat file `~/.memoria/memoria_heartbeat.json` "
         f"refreshes every scheduler tick."
     )

@@ -21,7 +21,6 @@ from concinno.git_assist import (
     generate_report,
 )
 
-
 # ── env var opt-out (switches.md row #5 vs code) ────────────────────────
 
 
@@ -1134,3 +1133,311 @@ class TestAutoCommitNestedRepoSkip:
         )
         add_calls = [c for c in calls if c[:1] == ["add"]]
         assert add_calls[0] == ["add", "-A"]
+
+
+# ── nested repo discovery + allowlist ───────────────────────────────────────
+
+import importlib.util  # noqa: E402
+import json as _json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from concinno.git_assist import (  # noqa: E402
+    _is_upstream_repo,
+    _load_auto_commit_allowlist,
+    auto_commit_all_repos,
+    count_uncommitted,
+    discover_nested_repos,
+)
+
+
+class TestIsUpstreamRepo:
+    def test_known_upstream_marker_detected(self):
+        assert _is_upstream_repo("/workspace/benchmarks/ImpliRet/data") is True
+
+    def test_locomo_detected(self):
+        assert _is_upstream_repo("E:/ai-king/experiments/locomo/locomo") is True
+
+    def test_own_repo_not_upstream(self):
+        assert _is_upstream_repo("E:/ai-king/projects/concinno") is False
+
+    def test_empty_path(self):
+        assert _is_upstream_repo("") is False
+
+
+class TestLoadAutoCommitAllowlist:
+    def test_absent_file_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(tmp_path / "nonexistent.json"),
+        )
+        assert _load_auto_commit_allowlist(str(tmp_path)) is None
+
+    def test_valid_allowlist_absolute_paths(self, tmp_path, monkeypatch):
+        repo_a = tmp_path / "repo_a"
+        repo_a.mkdir()
+        cfg = {"repos": [str(repo_a)]}
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text(_json.dumps(cfg), encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+        result = _load_auto_commit_allowlist(str(tmp_path))
+        assert result is not None
+        assert str(repo_a.resolve()) in result
+
+    def test_valid_allowlist_relative_paths(self, tmp_path, monkeypatch):
+        (tmp_path / "inner").mkdir()
+        cfg = {"repos": ["inner"]}
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text(_json.dumps(cfg), encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+        result = _load_auto_commit_allowlist(str(tmp_path))
+        assert result is not None
+        assert any("inner" in p for p in result)
+
+    def test_empty_repos_returns_none(self, tmp_path, monkeypatch):
+        cfg = {"repos": []}
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text(_json.dumps(cfg), encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+        assert _load_auto_commit_allowlist(str(tmp_path)) is None
+
+    def test_corrupt_json_returns_none(self, tmp_path, monkeypatch):
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text("{bad json", encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+        assert _load_auto_commit_allowlist(str(tmp_path)) is None
+
+
+class TestDiscoverNestedRepos:
+    def test_root_always_first(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(tmp_path / "nonexistent.json"),
+        )
+        with patch("concinno.git_assist._git", return_value=None):
+            result = discover_nested_repos(str(tmp_path))
+        assert result[0] == str(tmp_path.resolve())
+
+    def test_upstream_excluded_from_allowlist(self, tmp_path, monkeypatch):
+        upstream = tmp_path / "ImpliRet"
+        upstream.mkdir()
+        cfg = {"repos": [str(upstream)]}
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text(_json.dumps(cfg), encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+        result = discover_nested_repos(str(tmp_path))
+        assert not any("ImpliRet" in p for p in result)
+
+    def test_allowlist_valid_repo_included(self, tmp_path, monkeypatch):
+        inner = tmp_path / "inner_repo"
+        inner.mkdir()
+        cfg = {"repos": [str(inner)]}
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text(_json.dumps(cfg), encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+
+        def mock_git(args, cwd, **kw):
+            if args == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            return None
+
+        with patch("concinno.git_assist._git", side_effect=mock_git):
+            result = discover_nested_repos(str(tmp_path))
+        assert str(inner.resolve()) in result
+
+    def test_nonexistent_allowlist_entry_skipped(self, tmp_path, monkeypatch):
+        cfg = {"repos": [str(tmp_path / "ghost_repo")]}
+        allowlist_file = tmp_path / "allow.json"
+        allowlist_file.write_text(_json.dumps(cfg), encoding="utf-8")
+        monkeypatch.setattr(
+            "concinno.git_assist._DEFAULT_ALLOWLIST_PATH",
+            str(allowlist_file),
+        )
+        result = discover_nested_repos(str(tmp_path))
+        assert len(result) == 1  # only root
+
+
+class TestCountUncommitted:
+    def test_returns_zero_for_non_repo(self, tmp_path):
+        assert count_uncommitted(str(tmp_path)) == 0
+
+    def test_counts_from_status_z(self, tmp_path):
+        with patch("concinno.git_assist._git", return_value="true"), \
+             patch(
+                 "concinno.git_assist._status_records_z",
+                 return_value=["M  file1.py", "?? file2.py", "M  file3.py"],
+             ):
+            assert count_uncommitted(str(tmp_path)) == 3
+
+    def test_fallback_to_short_when_z_returns_none(self, tmp_path):
+        def mock_git(args, cwd, **kw):
+            if args == ["rev-parse", "--is-inside-work-tree"]:
+                return "true"
+            if args[:1] == ["status"]:
+                return " M file1.py\n?? file2.py\n"
+            return None
+
+        with patch("concinno.git_assist._git", side_effect=mock_git), \
+             patch("concinno.git_assist._status_records_z", return_value=None):
+            assert count_uncommitted(str(tmp_path)) == 2
+
+
+class TestAutoCommitAllRepos:
+    def test_env_optout_canonical(self, monkeypatch):
+        monkeypatch.setenv("CONCINNO_NO_AUTOCOMMIT", "1")
+        assert auto_commit_all_repos(root="/nonexistent") == {}
+
+    def test_env_optout_alias(self, monkeypatch):
+        monkeypatch.delenv("CONCINNO_NO_AUTOCOMMIT", raising=False)
+        monkeypatch.setenv("CONCINNO_SKIP_AUTO_COMMIT", "1")
+        assert auto_commit_all_repos(root="/nonexistent") == {}
+
+    def test_commits_root_and_nested(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CONCINNO_NO_AUTOCOMMIT", raising=False)
+        monkeypatch.delenv("CONCINNO_SKIP_AUTO_COMMIT", raising=False)
+        inner = tmp_path / "nested"
+        inner.mkdir()
+
+        def fake_commit(cwd, **kw):
+            return "auto: 1 files (py)" if cwd == str(tmp_path) else None
+
+        with patch(
+            "concinno.git_assist.discover_nested_repos",
+            return_value=[str(tmp_path), str(inner)],
+        ), patch("concinno.git_assist.auto_commit", side_effect=fake_commit):
+            results = auto_commit_all_repos(root=str(tmp_path))
+
+        assert results[str(tmp_path)] is not None
+        assert results[str(inner)] is None
+
+    def test_exception_in_one_repo_does_not_abort_others(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("CONCINNO_NO_AUTOCOMMIT", raising=False)
+        monkeypatch.delenv("CONCINNO_SKIP_AUTO_COMMIT", raising=False)
+        inner = tmp_path / "nested"
+        inner.mkdir()
+        call_count = {"n": 0}
+
+        def boom_then_ok(cwd, **kw):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("simulated failure")
+            return "auto: 1 files (py)"
+
+        with patch(
+            "concinno.git_assist.discover_nested_repos",
+            return_value=[str(tmp_path), str(inner)],
+        ), patch("concinno.git_assist.auto_commit", side_effect=boom_then_ok):
+            results = auto_commit_all_repos(root=str(tmp_path))
+
+        assert results[str(tmp_path)] is None
+        assert results[str(inner)] is not None
+
+
+# ── git_health_check auto-action (dynamic import, not in package) ────────────
+
+
+def _load_health_mod():
+    spec = importlib.util.spec_from_file_location(
+        "git_health_check",
+        str(Path.home() / ".claude" / "hooks" / "git_health_check.py"),
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class TestGitHealthCheckConfig:
+    def test_env_overrides_thresholds(self, monkeypatch):
+        monkeypatch.setenv("CC_GIT_AUTO_CLEANUP_THRESHOLD", "150")
+        monkeypatch.setenv("CC_GIT_HEALTH_THRESHOLD", "60")
+        mod = _load_health_mod()
+        cfg = mod._load_config()
+        assert cfg["auto_threshold"] == 150
+        assert cfg["warn_threshold"] == 60
+
+    def test_disabled_env_sets_enabled_false(self, monkeypatch):
+        monkeypatch.setenv("CC_GIT_HEALTH_DISABLED", "1")
+        mod = _load_health_mod()
+        cfg = mod._load_config()
+        assert cfg["enabled"] is False
+
+
+class TestRunAutoCleanup:
+    def test_skipped_when_cc_git_auto_cleanup_disabled(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("CC_GIT_AUTO_CLEANUP_DISABLED", "1")
+        mod = _load_health_mod()
+        # No exception; returns early without calling anything
+        mod.run_auto_cleanup(str(tmp_path), auto_threshold=100)
+
+    def test_skipped_when_count_below_threshold(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("CC_GIT_AUTO_CLEANUP_DISABLED", raising=False)
+        mod = _load_health_mod()
+        with patch.object(mod, "_count_status", return_value=50):
+            mod.run_auto_cleanup(str(tmp_path), auto_threshold=100)
+            # No commit attempted — just no crash
+
+    def test_calls_auto_commit_all_repos_and_logs(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("CC_GIT_AUTO_CLEANUP_DISABLED", raising=False)
+        mod = _load_health_mod()
+
+        with patch.object(mod, "_count_status", side_effect=[150, 5, 5]), \
+             patch(
+                 "concinno.git_assist.auto_commit_all_repos",
+                 return_value={str(tmp_path): "auto: 3 files (py)"},
+             ) as mock_ac, \
+             patch.object(mod, "_fire_cleanup_toast"), \
+             patch.object(mod, "_append_jsonl_log") as mock_log, \
+             patch.object(mod, "_append_cleanup_md"):
+            mod.run_auto_cleanup(str(tmp_path), auto_threshold=100)
+
+        mock_ac.assert_called_once_with(root=str(tmp_path))
+        assert mock_log.called
+        entry = mock_log.call_args[0][0]
+        assert entry["before"] == 150
+        assert entry["after"] == 5
+
+    def test_ephemeral_gitignore_added_when_still_above_threshold(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("CC_GIT_AUTO_CLEANUP_DISABLED", raising=False)
+        mod = _load_health_mod()
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("node_modules/\n", encoding="utf-8")
+
+        # after commit still 120 > 100 → should add gitignore patterns
+        with patch.object(mod, "_count_status", side_effect=[150, 120, 10]), \
+             patch(
+                 "concinno.git_assist.auto_commit_all_repos",
+                 return_value={str(tmp_path): None},
+             ), \
+             patch("concinno.git_assist.auto_commit", return_value=None), \
+             patch.object(mod, "_fire_cleanup_toast"), \
+             patch.object(mod, "_append_jsonl_log"), \
+             patch.object(mod, "_append_cleanup_md"):
+            mod.run_auto_cleanup(str(tmp_path), auto_threshold=100)
+
+        content = gitignore.read_text(encoding="utf-8")
+        assert "__pycache__/" in content or "*.log" in content
