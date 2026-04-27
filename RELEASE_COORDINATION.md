@@ -3,26 +3,25 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-26 — **4.1.0 LIVE on PyPI** — polling watcher (real timer + ScheduleWakeup self-wake)）
+## 現況 snapshot（2026-04-27 — **4.2.2 LIVE on PyPI** — wave-1 bundle + release_lock atomic + docstring fix）
 
 | 欄位 | 值 |
 | --- | --- |
-| Registry latest (PyPI) | **`4.1.0`** ✅ (uploaded 2026-04-26 — <https://pypi.org/project/concinno/4.1.0/>) |
-| `pyproject.toml` version | `4.1.0` ✅ aligned |
-| `src/concinno/__init__.py __version__` | `4.1.0` ✅ aligned |
-| CHANGELOG.md 最新 release heading | `## [4.1.0] - 2026-04-26` (polling watcher) → `## [4.0.0] - 2026-04-26` (default-off SEMVER-MAJOR) |
-| 三源對齊狀態 | ✅ aligned at 4.1.0 |
-| Git tag | ✅ `v4.1.0` pushed (commit `33c5ec5` on branch `feat/2.3.0-red-team-round-3`) |
-| Inner concinno HEAD | `33c5ec5 release(4.1.0): polling watcher — real timer + ScheduleWakeup self-wake` |
-| Previous release | `4.0.0` (1173552 — SEMVER-MAJOR default-off + GAIA Phase-5 + memory_relief perf) |
-| Pending Publish Queue | empty (4.0.0 published) |
-| release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)`) green |
-| Build artifacts | ✅ `dist/concinno-4.0.0-py3-none-any.whl` (1.7 MB) + `dist/concinno-4.0.0.tar.gz` (1.5 MB) published. Stale `concinno-3.2.1*` / `3.0.x` / `3.1.x` left on disk, not on PyPI. |
-| **Post-publish ops** | ✅ PyPI yank 2.21.0/2.22.0/2.23.0 — user completed manually via web UI (per DISCLOSURE.md Path C-hybrid) before 4.0.0 ship. |
-| **User-directive deviation** | Per AI King 2026-04-26 ("把我現在的關閉 刪除檔案以外的 授權全部 deny 功能 預設也是關閉 全跑"): ALL 27 features ship default-OFF including `release_authorization` — overrides red/blue verdict #1 which had `release_authorization` stay default-on. User accepts publish-friction trade for fully friction-free senior-dev defaults. |
-| **Migration shim** | Intentionally not implemented — SEMVER-MAJOR is the right vehicle. Existing users restore strict mode via `concinno config set features.<name>.enabled true` per guard. `concinno features set-profile strict` shortcut deferred to 4.0.1. |
-| **Verification** | pytest 7374 passed / 1 known concurrency race (pre-existing test-isolation, not 4.0.0 fault) / 8 skipped / 3 xfailed in 11 minutes. ruff clean across all touched files. Triple-source aligned. |
-| Cross-stack pair | None this cycle — 4.0.0 is concinno-internal. Sancio (`sancio-runtime` 1.0.0) deploy-only, not on PyPI. |
+| Registry latest (PyPI) | **`4.2.2`** ✅ (uploaded 2026-04-27T04:37:45 UTC — <https://pypi.org/project/concinno/4.2.2/>) |
+| `pyproject.toml` version | `4.2.2` ✅ aligned |
+| `src/concinno/__init__.py __version__` | `4.2.2` ✅ aligned |
+| CHANGELOG.md 最新 release heading | `## [4.2.2] - 2026-04-27 — wave-1 bundle` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
+| 三源對齊狀態 | ✅ aligned at 4.2.2 |
+| Git tag | ✅ `v4.2.2` pushed (commit `5dc1a5c` on branch `feat/2.3.0-red-team-round-3`) |
+| Inner concinno HEAD | `5dc1a5c release(4.2.2): wave-1 bundle + release_lock atomic + docstring fix` |
+| Previous release | `4.2.1` (7d34316 — pip aftermath hint + Memoria heartbeat) |
+| Pending Publish Queue | empty (4.2.2 published) |
+| release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)` + `Bash(python -m twine upload:*)` + `Bash(git push origin v*:*)` + `Bash(python -m twine check:*)`) green |
+| Build artifacts | ✅ `dist/concinno-4.2.2-py3-none-any.whl` + `dist/concinno-4.2.2.tar.gz` published. Stale `concinno-3.0.x` / `3.1.x` / `3.2.0` / `4.0.0` / `4.1.0` / `4.2.0` / `4.2.1` left on disk (not on PyPI risk; safe to `rm` next cleanup pass). |
+| **Post-publish ops** | None — wave-1 bundle is purely additive; no yank, no migration shim needed. |
+| **Verification** | pytest 7567 passed / 0 failed / 8 skipped / 3 xfailed in 11 min (deselecting 2 known cross-suite concurrency flakes per handoff §3 needing `state_dir tmp_path` fixture). 11/11 release_lock tests pass independently. Ruff clean across all 4.2.2-touched files. Triple-source aligned. |
+| **New in 4.2.2** | (1) `coordination.release_lock` + `twine_pre_check` + CLI — atomic per-package release lock with 30-min TTL stale detection + PyPI json-endpoint pre-check; replaces markdown self-validation that hit a 400 already-exists race in 4.2.1. (2) `git_assist.discover_nested_repos` + `auto_commit_all_repos` + `count_uncommitted` — inner-side complement to outer wave-1G git auto-cleanup. (3) `tools.security` module scaffold. (4) `skills.public.agent.erl_retriever`. (5) `core.config` 6-source env-var chain consolidation. (6) Promoted `generic_solvers` (was [Unreleased] for 4.3.0) + `dspy_optimizer` from [Unreleased]. (7) Fixed `pip_aftermath` docstring + user-msg drift + matching test-fixture path drift (`heartbeat.json` → `memoria_heartbeat.json` to match Memoria 0.3.0 scheduler). |
+| Cross-stack pair | None this cycle — 4.2.2 is concinno-internal. Memoria 0.3.0 EXE is separate user-side ship (lives at `~/.claude/scripts/memoria/`, not in concinno PyPI). |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
