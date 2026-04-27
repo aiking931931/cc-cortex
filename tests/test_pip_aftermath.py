@@ -31,7 +31,7 @@ def heartbeat_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _write_heartbeat(d: Path, *, age_seconds: float = 0.0,
                      pid: int = 12345) -> None:
     d.mkdir(parents=True, exist_ok=True)
-    path = d / "heartbeat.json"
+    path = d / "memoria_heartbeat.json"
     payload = {
         "ts": time.time() - age_seconds,
         "ts_iso": "2026-04-27T00:00:00+0800",

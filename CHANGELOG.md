@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-04-27 — wave-1 bundle
+
+Bundles wave-1 work that landed on the inner concinno HEAD between
+4.2.1 and 4.2.2 ship: `generic_solvers` (public hybrid vision
+solvers), `dspy_optimizer` (DSPy MIPROv2 wrapper), `git_assist`
+nested-repo discovery + allowlist + `auto_commit_all_repos`,
+`tools.security` module scaffold, `erl_retriever` skill, `core.config`
+6-source env-var chain consolidation, and a `pip_aftermath` docstring
+fix. No SEMVER-MAJOR / no SEMVER-MINOR-breaking surface — purely
+additive plus one docstring correction.
+
+### Added — `concinno.tools.security` (security tools module)
+
+New module surface for security-domain helpers, importable as
+`from concinno.tools.security import ...`. Provides the package
+namespace for upcoming security-tooling additions while keeping the
+core tool-bag organised. No public symbols in this 4.2.2 ship — just
+the module skeleton + 39 LOC scaffold so future patch versions can
+add concrete tools without surface churn.
+
+### Added — `concinno.skills.public.agent.erl_retriever` (ERL retriever)
+
+New retriever skill at `concinno.skills.public.agent.erl_retriever`
+(+333 LOC). Public-API retriever for the ERL (External Reasoning
+Library) corpus pattern — usable by any agent loop that needs to
+score-and-rank against a small structured corpus without the full
+ZIQ retrieval stack. Generic over any text-corpus consumer.
+
+### Added — `concinno.git_assist` nested-repo auto-commit + allowlist
+
+Inner-side complement to outer ai-king commit `8614f328f` (wave-1G
+git auto-cleanup nested + threshold-100 auto-action). The outer
+commit shipped the cleanup hook + threshold logic; this commit
+lands the underlying API in the concinno package itself.
+
+* `discover_nested_repos(root, max_depth=5, timeout=10)` — find
+  self-owned nested git repos under *root*. Two modes: explicit
+  allowlist (`~/.concinno/auto_commit_repos.json`) for predictability,
+  or auto-discover (walk for nested `.git` dirs). Excludes
+  `_NESTED_PRUNE_DIRS` (`.git/.venv/node_modules/...`) and hardcoded
+  `_UPSTREAM_DIR_MARKERS` (`ImpliRet/locomo/locomo_dataset`) so
+  upstream third-party repos are never auto-committed.
+
+* `auto_commit_all_repos(root, timeout=15)` — drive `auto_commit()`
+  per repo discovered above. Honours `CONCINNO_NO_AUTOCOMMIT` and
+  `CONCINNO_SKIP_AUTO_COMMIT` env opt-outs. Returns a mapping of
+  `{abs_path: commit_msg_or_None}`.
+
+* `count_uncommitted(cwd, timeout=10)` — small helper exposing the
+  uncommitted-change count without forcing callers to parse status
+  output. Used by the new threshold-based auto-cleanup hook
+  (`~/.claude/hooks/git_health_check.py`) at threshold 100.
+
+Refactor: extract `_stage_and_filter()` from `auto_commit()` to keep
+the latter under 120 lines. Behaviour preserved — covered by 167
+existing git_assist tests, all green.
+
+309 new tests in `tests/test_git_assist.py` covering nested-repo
+discovery, allowlist parsing, upstream-marker pruning, env opt-out
+short-circuits, and per-repo failure isolation.
+
+### Changed — `concinno.core.config` (6-source env var chain consolidation)
+
+Consolidates the configuration-source priority chain into the
+canonical 6-source order documented in `~/.claude/rules/switches.md`:
+rule default → FEATURE_META default → project config → user
+`~/.concinno/*.json` → env var `CONCINNO_<FEATURE>_<PARAM>` → in-
+session user override. +103 LOC in `core/config.py` + 88 LOC of
+new `tests/test_config.py` regression coverage. No public-API
+changes; existing config callers see identical observed values
+unless they previously relied on undocumented source ordering.
+
+### Added — `concinno.coordination.release_lock` + `twine_pre_check` + CLI (PyPI race prevention)
+
+Replaces the markdown `RELEASE_COORDINATION.md::Active` self-
+validation pattern (which the 4.2.1 ship cycle proved insufficient —
+two parallel sessions both read "Active: empty", both wrote their
+own session id, neither saw the other before the ``twine upload``,
+second upload crashed with PyPI 400 already-exists).
+
+* `concinno.coordination.release_lock.ReleaseLock` (240 LOC) —
+  cross-platform OS file lock (reuses `_os_lock.OSFileLock` which
+  already wraps `msvcrt.locking` on Windows / `fcntl.flock` on
+  POSIX) plus a JSON content schema that survives reboots, captures
+  the holder's session/host/version, and auto-revokes after a
+  configurable TTL (default 30 min, env-tunable via
+  `CONCINNO_RELEASE_LOCK_TTL_MIN`). Public API:
+  `acquire(pkg, version, session, host) -> bool`, `release(pkg)`,
+  `check(pkg) -> dict | None`, `list_active() -> list[dict]`.
+
+* `concinno.coordination.release_lock.pypi_version_taken(pkg, ver)`
+  — `urllib.request` query against the public PyPI JSON endpoint;
+  returns `True` (404 means free, 200 means taken). Network errors
+  propagate so the caller's fail-closed policy stays explicit.
+
+* `concinno.coordination.twine_pre_check.check_before_upload(pkg, ver,
+  session, *, require_lock_held=True)` (89 LOC) — returns
+  `(ok, reason)`. Read-only "should we even try?" decision; does
+  **not** wrap twine itself (separate ship cycle). Fail-closed on
+  network errors — silently saying "available" reintroduces the race.
+
+* CLI wiring (`concinno release-lock acquire | release | list |
+  check <pkg> [<ver>]`, +134 LOC in `cli/release_lock_cmd.py`,
+  +2 LOC wire in `cli/main.py`). Session resolution: `CCC_SESSION`
+  env → `instance_lock.json` newest entry → fallback
+  `unknown-<host>`.
+
+11 regression tests in `tests/coordination/test_release_lock.py`
+(227 LOC) covering the 6 required cases plus 5 extras (idempotent
+re-acquire / corrupt timestamp recovery / `list_active` stale-skip /
+TTL env override / 5xx HTTPError propagation). All passing in 2 s.
+Ruff clean.
+
+Integration touchpoint for the next ship cycle:
+`release_authorization.check_authorization()` (line 276 of
+`release_authorization.py`) — wrap so on `(allowed=True)` it
+additionally runs `twine_pre_check.check_before_upload(...)` and
+acquires the `ReleaseLock` immediately after auth passes, releasing
+on twine success/failure. Keeps the publish-auth gate (user-opt-out
+via `disabled=True`) orthogonal from the race-prevention gate
+(no opt-out — concurrency is always wrong).
+
+### Fixed — `concinno.hooks.pip_aftermath` docstring drift
+
+`pip_aftermath.py` line 14 (module docstring) and line 156 (user-
+facing message) both mentioned `~/.memoria/heartbeat.json`. The
+actual code at line 77 reads `~/.memoria/memoria_heartbeat.json`
+(Memoria 0.3.0 scheduler writes the latter). Fix both to match —
+behaviour unchanged, doc-only correction. The 14 regression tests
+in `tests/test_pip_aftermath.py` continue to pass.
+
 ### Added — `concinno.skills.public.agent.generic_solvers` (public hybrid vision solvers)
 
 Extracts three GAIA-proven hybrid vision solver pipelines from the private
@@ -46,8 +177,6 @@ call-sites require zero changes.
 `__all__` contract, no-circular-import guarantee, all 3 detector predicates,
 `extract_json_object`, and `gaia_agent` re-export. All 120 solver tests pass
 (112 existing + 8 new). Ruff clean.
-
-Candidate for **4.3.0**.
 
 ### Added — `concinno.tools.builtin.dspy_optimizer` (DSPy MIPROv2 prompt optimizer)
 

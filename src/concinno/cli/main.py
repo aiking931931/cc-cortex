@@ -1714,10 +1714,12 @@ def main() -> None:
     # 2.16.0 — session-switches / configure-permissions / publish
     from .configure_permissions_cmd import register as _register_cfg_perms
     from .publish_cmd import register as _register_publish
+    from .release_lock_cmd import register as _register_release_lock
     from .session_switches_cmd import register as _register_switches
     _register_switches(sub)
     _register_cfg_perms(sub)
     _register_publish(sub)
+    _register_release_lock(sub)
 
     # 2.36.0 — self-update (Tier 2 auto-update, detached helper)
     from .self_update_cmd import register as _register_self_update
