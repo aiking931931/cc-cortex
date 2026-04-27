@@ -66,7 +66,30 @@ Wiring status (2.7.0 — every feature in this table is now live):
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional, cast
+
+# ── Fail-mode taxonomy (4.3.0 — Plan B Step 1) ──────────────────────
+#
+# A feature whose runtime check fails (or whose policy gate fires) can
+# react in one of four escalating ways. Profiles + per-feature user
+# overrides + ZIQ FTRL all converge on this same 4-value Literal so the
+# downstream :class:`concinno.security.policy_gate.PolicyGate` can
+# dispatch without speculation.
+#
+# silent     — log nothing, take no action (research / shadow mode)
+# warn       — stderr warn once per session, still allow the action
+# warn+log   — stderr warn + persist to ~/.concinno/audit.jsonl
+# hard_deny  — raise / PreToolUse deny (only profile that blocks)
+#
+# The literal is canonical: the validator below rejects anything else.
+# Storing the four values as a frozenset makes ``in`` lookups O(1) and
+# saves a tuple-construction on every validate call.
+
+FailMode = Literal["silent", "warn", "warn+log", "hard_deny"]
+
+VALID_FAIL_MODES: frozenset[str] = frozenset({
+    "silent", "warn", "warn+log", "hard_deny",
+})
 
 # ── 4.0.0 default-off catalogue ───────────────────────────
 #
@@ -918,6 +941,183 @@ FEATURE_META: dict[str, dict] = {
                 "risk_high": "Above 5 may cause long stuck loops",
                 "risk_low_zh": "低於 2 太快強制交接",
                 "risk_high_zh": "高於 5 可能卡住太久",
+            },
+        },
+    },
+    # ── PII Guard (4.3.0 Plan B Step 3) ──
+    "pii_guard": {
+        "category": "security",
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "PII (SSN / credit card / API keys / phone / email / IP / "
+            "passport) can leak through tool inputs/outputs without "
+            "warning. Default ON — opt out via FEATURE_META if needed."
+        ),
+        "description": (
+            "Regex-based PII leak prevention guard. Detects SSN, "
+            "credit cards (Luhn-validated), email, phone, IPv4/v6, "
+            "API key prefixes (sk-/ghp_/AKIA/etc), passports, and "
+            "driver licenses. Inherits PolicyGate fail-mode chain "
+            "(silent / warn / warn+log / hard_deny) — default ``warn`` "
+            "in ``mainstream``, ``hard_deny`` in ``strict``/``paranoid``."
+        ),
+        "description_zh": (
+            "Regex 偵測 PII 洩漏 — SSN / 信用卡（Luhn 驗證）/ "
+            "email / 電話 / IPv4-v6 / API key 前綴 / 護照 / 駕照。"
+            "繼承 PolicyGate fail-mode 鏈，預設 mainstream warn / "
+            "strict + paranoid hard_deny。"
+        ),
+        "enabled": True,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "recommended": True,
+        "params": {
+            "min_severity": {
+                "type": "str",
+                "default": "medium",
+                "options": ["low", "medium", "high", "critical"],
+                "recommended": "medium",
+                "risk_low": (
+                    "``low`` keeps every match incl. emails / IPs — "
+                    "high noise rate in normal logs"
+                ),
+                "risk_high": (
+                    "``critical`` only catches API keys — SSN / "
+                    "credit-card / phone leaks slip through silently"
+                ),
+                "risk_low_zh": (
+                    "``low`` 連 email / IP 全收，正常 log 噪音極高"
+                ),
+                "risk_high_zh": (
+                    "``critical`` 只抓 API key，SSN / 信用卡 / 電話 "
+                    "外洩會靜默漏掉"
+                ),
+            },
+            "luhn_strict": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabling Luhn keeps raw 13-19 digit candidates — "
+                    "order numbers / tracking codes spike false positives"
+                ),
+                "risk_off_zh": (
+                    "關閉 Luhn 後 13-19 位數字會全收 — "
+                    "訂單號 / 追蹤碼會大量誤判"
+                ),
+            },
+            "redact_chars": {
+                "type": "int",
+                "default": 4,
+                "min": 2,
+                "max": 8,
+                "recommended": 4,
+                "risk_low": (
+                    "Below 2 collapses every match to '***' — "
+                    "no triage signal"
+                ),
+                "risk_high": (
+                    "Above 8 leaks too much of the original secret "
+                    "(``sk-ant-api03-...XYZW`` defeats redaction)"
+                ),
+                "risk_low_zh": (
+                    "低於 2 全部變 '***' — 無從分流分析"
+                ),
+                "risk_high_zh": (
+                    "高於 8 暴露太多原始 secret（redaction 失效）"
+                ),
+            },
+        },
+    },
+    # ── Deserialize Guard (4.3.0 Plan B Step 4) ──
+    "deserialize_guard": {
+        "category": "security",
+        "enabled": True,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "Unsafe deserialize calls (pickle.load / yaml.load default "
+            "Loader / dill / marshal / eval / exec) ship to production "
+            "unflagged — single line of agent-generated code can RCE."
+        ),
+        "description": (
+            "AST-based scan for unsafe deserialize calls "
+            "(pickle/yaml/dill/marshal/eval/exec). Inherits PolicyGate "
+            "fail-mode chain — default ``warn`` in mainstream, "
+            "``hard_deny`` in strict/paranoid. Comment escape hatch "
+            "``# CONCINNO_DISABLE:deserialize_guard:<reason>`` per call."
+        ),
+        "description_zh": (
+            "AST 偵測不安全反序列化 — "
+            "pickle/yaml/dill/marshal/eval/exec。"
+            "繼承 PolicyGate fail-mode 鏈，mainstream warn / "
+            "strict + paranoid hard_deny。逐行 escape："
+            "``# CONCINNO_DISABLE:deserialize_guard:<reason>``。"
+        ),
+        "recommended": True,
+        "severity": "major",
+        "params": {
+            "allow_pickle_with_protocol": {
+                "type": "bool",
+                "default": False,
+                "recommended": False,
+                "risk_off": (
+                    "Allowing pickle silences every pickle.load / "
+                    "pickle.loads finding — RCE-on-load remains."
+                ),
+                "risk_off_zh": (
+                    "放行 pickle 會靜默所有 pickle.load 偵測 — "
+                    "load 即 RCE 的風險不會消失"
+                ),
+            },
+            "yaml_safe_loader_only": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabling SafeLoader-only flag lets ``yaml.load`` "
+                    "with default Loader / FullLoader pass — PyYAML "
+                    "FullLoader is NOT safe for untrusted input."
+                ),
+                "risk_off_zh": (
+                    "關閉 SafeLoader-only 後 yaml.load 預設 Loader / "
+                    "FullLoader 會被放行 — FullLoader 對不信任輸入並不安全"
+                ),
+            },
+            "flag_reduce_override": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Skipping ``__reduce__`` overrides hides classes "
+                    "designed to inject code on unpickle."
+                ),
+                "risk_off_zh": (
+                    "略過 ``__reduce__`` override 會漏看為 unpickle "
+                    "注入程式碼而設計的類別"
+                ),
+            },
+            "min_severity": {
+                "type": "str",
+                "default": "medium",
+                "options": ["low", "medium", "high", "critical"],
+                "recommended": "medium",
+                "risk_low": (
+                    "``low`` keeps every match incl. literal eval / "
+                    "__reduce__ — high noise on legitimate code."
+                ),
+                "risk_high": (
+                    "``critical`` filters out dill / marshal / "
+                    "subprocess.shell — high-severity bypass routes."
+                ),
+                "risk_low_zh": (
+                    "``low`` 含字面 eval / __reduce__，合法程式碼噪音極高"
+                ),
+                "risk_high_zh": (
+                    "``critical`` 會過濾 dill / marshal / subprocess.shell "
+                    "繞道路徑，覆蓋率不足"
+                ),
             },
         },
     },
@@ -3410,30 +3610,112 @@ def apply_profile(name: str) -> list[str]:
 # (cosmetic=False, ziq_autotunable=False). ZIQ does not auto-flip
 # operator-applied profiles; user明示 wins.
 
+# ── Profile fail-mode override defaults (4.3.0 — Plan B Step 1) ────
+#
+# Each profile carries a ``fail_mode_overrides: dict[feature_name,
+# FailMode]`` that the policy gate consults when a feature reports a
+# failure. Resolution chain (later wins):
+#
+#   1. profile default (this dict)
+#   2. user override in ``~/.concinno/<feature>.json::fail_mode``
+#   3. env ``CONCINNO_<FEATURE>_FAIL_MODE``
+#   4. ZIQ auto-tune (future — registered ``ziq_autotunable=False``
+#      for 4.3.0; flips to True once outcome bus signals are wired)
+#
+# A feature absent from a profile's overrides falls through to the
+# profile's "default for everything else" implicit category — encoded
+# in the docstring per profile, not the dict, because the four
+# profiles disagree on what "everything else" should mean (lite =
+# silent, mainstream = warn, strict = warn+log, paranoid = hard_deny).
+# :func:`get_fail_mode` materialises that fallback.
+
+# 4.3.0 schema additions are layered on top of the existing 3 profile
+# names (strict / permissive / dev) — `permissive` is now an alias to
+# `lite` for backward-compat (3-month migration window per CHANGELOG).
+
 FEATURE_TOGGLE_PROFILES: dict[str, dict[str, Any]] = {
-    "strict": {
+    "lite": {
         "description": (
-            "Enable all features default-off in 4.0.0 (27 guards). "
-            "Pre-4.0.0 paranoid baseline."
-        ),
-        "enable": "DEFAULT_OFF_4_0_0",  # sentinel — expanded at apply time
-        "disable": frozenset(),
-    },
-    "permissive": {
-        "description": (
-            "4.0.0 senior-dev permissive baseline — every guard in "
-            "DEFAULT_OFF_4_0_0 set to enabled=False. No-op on a fresh "
-            "install; reverts a previous ``strict`` apply."
+            "Lite default (4.3.0+) — minimal blocking, only "
+            "DestructionGuard hard-denies. Other guards default to "
+            "silent / warn. Aliased from ``permissive``; intended for "
+            "senior-dev daily driver and pre-shipping prototypes."
         ),
         "enable": frozenset(),
         "disable": "DEFAULT_OFF_4_0_0",
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "butterfly_guard": "warn",
+        },
+        "fail_mode_default": "silent",
+    },
+    "mainstream": {
+        "description": (
+            "Mainstream profile (4.3.0+) — production-ready balance. "
+            "Hard-deny on data-loss + secrets, warn+log on quality "
+            "gates, warn on the rest."
+        ),
+        "enable": frozenset(),
+        "disable": "DEFAULT_OFF_4_0_0",
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "pii_guard": "warn",
+            "butterfly_guard": "warn+log",
+        },
+        "fail_mode_default": "warn",
+    },
+    "strict": {
+        "description": (
+            "Strict profile (pre-4.0.0 paranoid baseline) — enable "
+            "all 27 default-off guards. Most checks warn+log, "
+            "destruction / pii / deserialize hard-deny."
+        ),
+        "enable": "DEFAULT_OFF_4_0_0",  # sentinel — expanded at apply time
+        "disable": frozenset(),
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "pii_guard": "hard_deny",
+            "deserialize_guard": "hard_deny",
+        },
+        "fail_mode_default": "warn+log",
+    },
+    "paranoid": {
+        "description": (
+            "Paranoid profile (4.3.0+) — every guard hard-denies "
+            "except cosmetic/observability features which stay warn. "
+            "Intended for security-sensitive deployments and CI."
+        ),
+        "enable": "DEFAULT_OFF_4_0_0",
+        "disable": frozenset(),
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "pii_guard": "hard_deny",
+            "deserialize_guard": "hard_deny",
+            "butterfly_guard": "hard_deny",
+        },
+        "fail_mode_default": "hard_deny",
+    },
+    "permissive": {
+        "description": (
+            "DEPRECATED — alias for ``lite`` since 4.3.0. Will be "
+            "removed in 5.0.0. Existing CLI/tests keep working "
+            "transparently via :func:`_resolve_profile_alias`."
+        ),
+        "enable": frozenset(),
+        "disable": "DEFAULT_OFF_4_0_0",
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "butterfly_guard": "warn",
+        },
+        "fail_mode_default": "silent",
+        "alias_of": "lite",
     },
     "dev": {
         "description": (
             "Solo-dev daily driver — enable productivity features "
             "(dspy_prompt_optimization, polling_watcher, "
             "pip_aftermath_hint) only. Leaves DEFAULT_OFF_4_0_0 guards "
-            "off."
+            "off. Inherits ``lite`` fail-mode defaults."
         ),
         "enable": frozenset({
             "dspy_prompt_optimization",
@@ -3441,8 +3723,142 @@ FEATURE_TOGGLE_PROFILES: dict[str, dict[str, Any]] = {
             "pip_aftermath_hint",
         }),
         "disable": frozenset(),
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "butterfly_guard": "warn",
+        },
+        "fail_mode_default": "silent",
     },
 }
+
+
+# Build-time validation: every fail_mode value across every profile
+# must be a member of :data:`VALID_FAIL_MODES`. Catches typos at
+# import time instead of at policy-gate dispatch (the original Plan B
+# spec called for runtime validation; module-level catches the
+# regression earlier and costs nothing).
+def _validate_profile_fail_modes() -> None:
+    """Module-import gate — raises ``ValueError`` on any bad fail_mode.
+
+    Examined keys:
+      * ``fail_mode_default`` (per-profile fallback)
+      * Every value in ``fail_mode_overrides``
+    """
+    for name, prof in FEATURE_TOGGLE_PROFILES.items():
+        default = prof.get("fail_mode_default")
+        if default is not None and default not in VALID_FAIL_MODES:
+            raise ValueError(
+                f"Profile {name!r} has invalid fail_mode_default "
+                f"{default!r}. Valid: {sorted(VALID_FAIL_MODES)}"
+            )
+        overrides = prof.get("fail_mode_overrides") or {}
+        if not isinstance(overrides, dict):
+            raise ValueError(
+                f"Profile {name!r} fail_mode_overrides must be a "
+                f"dict, got {type(overrides).__name__}"
+            )
+        for feat, mode in overrides.items():
+            if mode not in VALID_FAIL_MODES:
+                raise ValueError(
+                    f"Profile {name!r} fail_mode_overrides[{feat!r}] "
+                    f"= {mode!r} is invalid. Valid: "
+                    f"{sorted(VALID_FAIL_MODES)}"
+                )
+
+
+_validate_profile_fail_modes()
+
+
+# Profile alias map — single resolver used by both
+# :func:`apply_feature_toggle_profile` (Plan B carry-over) and
+# :func:`get_fail_mode` (new in 4.3.0).
+_PROFILE_ALIASES: dict[str, str] = {
+    name: target
+    for name, prof in FEATURE_TOGGLE_PROFILES.items()
+    if isinstance(target := prof.get("alias_of"), str)
+}
+
+
+def _resolve_profile_alias(name: str) -> str:
+    """Map ``permissive`` → ``lite`` (and any future alias). Pass
+    through any non-aliased name verbatim, including unknown names —
+    the caller's existing "Unknown profile" error path stays
+    authoritative.
+    """
+    return _PROFILE_ALIASES.get(name, name)
+
+
+def get_fail_mode(
+    feature_name: str,
+    profile: str = "lite",
+    *,
+    cfg: Any = None,
+) -> FailMode:
+    """Return the effective fail-mode for ``feature_name`` under ``profile``.
+
+    Resolution chain (later wins, mirrors :meth:`Config.feature`):
+
+      1. Profile per-feature override (``fail_mode_overrides[feat]``)
+      2. Profile catch-all (``fail_mode_default``)
+      3. User override on disk (``cfg.feature(feat, "fail_mode")``)
+      4. Env var ``CONCINNO_<FEATURE>_FAIL_MODE`` (handled by
+         :meth:`Config.feature`'s 6-source chain — no extra work here)
+
+    The ``cfg`` argument is optional — when ``None`` we skip user/env
+    overrides and return the pure profile default. This keeps the
+    function trivially callable from policy-gate hot paths that do not
+    want a singleton lookup on every check.
+
+    Raises:
+        ValueError: if ``profile`` does not exist in
+            :data:`FEATURE_TOGGLE_PROFILES` (after alias resolution).
+            Returning a silent default would mask config bugs.
+    """
+    canonical = _resolve_profile_alias(profile)
+    if canonical not in FEATURE_TOGGLE_PROFILES:
+        raise ValueError(
+            f"Unknown profile {profile!r}. Available: "
+            f"{', '.join(sorted(FEATURE_TOGGLE_PROFILES))}"
+        )
+    prof = FEATURE_TOGGLE_PROFILES[canonical]
+
+    # User override beats profile when cfg is supplied. Honours the
+    # full 6-source chain inside Config.feature, so env vars and
+    # per-project cc_config.json work for free.
+    if cfg is not None:
+        try:
+            override = cfg.feature(feature_name, "fail_mode")
+        except Exception:
+            override = None
+        if isinstance(override, str) and override in VALID_FAIL_MODES:
+            return _coerce_fail_mode(override)
+
+    overrides: dict[str, str] = prof.get("fail_mode_overrides") or {}
+    if feature_name in overrides:
+        return _coerce_fail_mode(overrides[feature_name])
+
+    default = prof.get("fail_mode_default", "warn")
+    return _coerce_fail_mode(default)
+
+
+def _coerce_fail_mode(value: str) -> FailMode:
+    """Narrow ``str`` → ``FailMode`` after a ``VALID_FAIL_MODES`` check.
+
+    The runtime check has already happened at module import (or at the
+    Config.feature override step), so this is purely a typing helper —
+    mypy strict requires the cast to bridge ``str`` → ``Literal``.
+    """
+    if value not in VALID_FAIL_MODES:
+        # Defence in depth — should never trigger after the import-time
+        # validator, but a corrupted cc_config.json could feed a junk
+        # string through Config.feature.
+        raise ValueError(
+            f"Invalid fail_mode {value!r}. Valid: "
+            f"{sorted(VALID_FAIL_MODES)}"
+        )
+    # mypy needs the explicit cast — Literal narrowing from a frozenset
+    # membership check is not currently inferred.
+    return cast("FailMode", value)
 
 
 def list_feature_toggle_profiles() -> dict[str, str]:
@@ -3481,19 +3897,20 @@ def apply_feature_toggle_profile(
     isolate writes to a tmp ``cc_config.json``). When ``None``, the
     process-wide singleton from ``get_config()`` is used.
     """
-    if name not in FEATURE_TOGGLE_PROFILES:
+    canonical = _resolve_profile_alias(name)
+    if canonical not in FEATURE_TOGGLE_PROFILES:
         return {
             "profile": name,
             "error": (
                 f"Unknown profile: {name!r}. Available: "
-                f"{', '.join(FEATURE_TOGGLE_PROFILES)}"
+                f"{', '.join(sorted(FEATURE_TOGGLE_PROFILES))}"
             ),
             "enabled": [],
             "disabled": [],
             "unchanged": [],
         }
 
-    profile = FEATURE_TOGGLE_PROFILES[name]
+    profile = FEATURE_TOGGLE_PROFILES[canonical]
     to_enable = _resolve_profile_features(profile["enable"])
     to_disable = _resolve_profile_features(profile["disable"])
 

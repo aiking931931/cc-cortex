@@ -36,6 +36,14 @@ from concinno.security.bash_validators import (  # noqa: F401
     validate_unicode_whitespace,
     validate_zsh_dangerous_commands,
 )
+from concinno.security.deserialize_guard import (  # noqa: F401
+    DEFAULT_TRUSTED_MODULES,
+    PATTERN_SEVERITY,
+    SAFE_YAML_FUNCTIONS,
+    SAFE_YAML_LOADERS,
+    DeserializeFinding,
+    DeserializeGuard,
+)
 from concinno.security.llm_judge_guard import (  # noqa: F401
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MAX_CACHE_SIZE,
@@ -56,6 +64,10 @@ from concinno.security.permission_mode import (  # noqa: F401
     PermissionRequest,
     PermissionRule,
     PermissionVerdict,
+)
+from concinno.security.pii_guard import (  # noqa: F401
+    PIIGuard,
+    PIIType,
 )
 from concinno.security.policy_gate import (  # noqa: F401
     OWASP_LLM_BASELINE,
@@ -175,4 +187,14 @@ __all__ = [
     "PolicyGate",
     "PolicyGateResult",
     "Severity",
+    # 4.3.0 — Deserialize guard
+    "DEFAULT_TRUSTED_MODULES",
+    "DeserializeFinding",
+    "DeserializeGuard",
+    "PATTERN_SEVERITY",
+    "SAFE_YAML_FUNCTIONS",
+    "SAFE_YAML_LOADERS",
+    # 4.3.0 — PII guard
+    "PIIGuard",
+    "PIIType",
 ]
