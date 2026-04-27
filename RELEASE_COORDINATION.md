@@ -3,25 +3,25 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## Current snapshot (2026-04-27 — **4.2.2 LIVE on PyPI** — wave-1 bundle + release_lock atomic + docstring fix)
+## Current snapshot (2026-04-27 — **4.2.3 LIVE on PyPI** — wave-3 schema migration cleanup + Parent-B wiring + typed agent loop)
 
 | Field | Value |
 | --- | --- |
-| Registry latest (PyPI) | **`4.2.2`** ✅ (uploaded 2026-04-27T04:37:45 UTC — <https://pypi.org/project/concinno/4.2.2/>) |
-| `pyproject.toml` version | `4.2.2` ✅ aligned |
-| `src/concinno/__init__.py __version__` | `4.2.2` ✅ aligned |
-| CHANGELOG.md latest release heading | `## [4.2.2] - 2026-04-27 — wave-1 bundle` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
-| Triple-source alignment | ✅ aligned at 4.2.2 |
-| Git tag | ✅ `v4.2.2` pushed (commit `5dc1a5c` on branch `feat/2.3.0-red-team-round-3`) |
-| Inner concinno HEAD | `5dc1a5c release(4.2.2): wave-1 bundle + release_lock atomic + docstring fix` |
-| Previous release | `4.2.1` (7d34316 — pip aftermath hint + Memoria heartbeat) |
-| Pending Publish Queue | empty (4.2.2 published) |
+| Registry latest (PyPI) | **`4.2.3`** ✅ (uploaded 2026-04-27 — <https://pypi.org/project/concinno/4.2.3/>) |
+| `pyproject.toml` version | `4.2.3` ✅ aligned |
+| `src/concinno/__init__.py __version__` | `4.2.3` ✅ aligned |
+| CHANGELOG.md latest release heading | `## [4.2.3] - 2026-04-27 — wave-3 schema migration cleanup + typed agent loop` → `## [4.2.2] - 2026-04-27 — wave-1 bundle` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
+| Triple-source alignment | ✅ aligned at 4.2.3 |
+| Git tag | ✅ `v4.2.3` pushed (commit `d944395` on branch `feat/2.3.0-red-team-round-3`) |
+| Inner concinno HEAD | `d944395 release(4.2.3): wave-3 schema migration cleanup + Parent-B wiring + typed agent loop` |
+| Previous release | `4.2.2` (5dc1a5c — wave-1 bundle + release_lock atomic + docstring fix) |
+| Pending Publish Queue | empty (4.2.3 published) |
 | release_auth state | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)` + `Bash(python -m twine upload:*)` + `Bash(git push origin v*:*)` + `Bash(python -m twine check:*)`) green |
-| Build artifacts | ✅ `dist/concinno-4.2.2-py3-none-any.whl` + `dist/concinno-4.2.2.tar.gz` published. Stale `concinno-3.0.x` / `3.1.x` / `3.2.0` / `4.0.0` / `4.1.0` / `4.2.0` / `4.2.1` left on disk (not on PyPI risk; safe to `rm` next cleanup pass). |
-| **Post-publish ops** | None — wave-1 bundle is purely additive; no yank, no migration shim needed. |
-| **Verification** | pytest 7567 passed / 0 failed / 8 skipped / 3 xfailed in 11 min (deselecting 2 known cross-suite concurrency flakes per handoff §3 needing `state_dir tmp_path` fixture). 11/11 release_lock tests pass independently. Ruff clean across all 4.2.2-touched files. Triple-source aligned. |
-| **New in 4.2.2** | (1) `coordination.release_lock` + `twine_pre_check` + CLI — atomic per-package release lock with 30-min TTL stale detection + PyPI json-endpoint pre-check; replaces markdown self-validation that hit a 400 already-exists race in 4.2.1. (2) `git_assist.discover_nested_repos` + `auto_commit_all_repos` + `count_uncommitted` — inner-side complement to outer wave-1G git auto-cleanup. (3) `tools.security` module scaffold. (4) `skills.public.agent.erl_retriever`. (5) `core.config` 6-source env-var chain consolidation. (6) Promoted `generic_solvers` (was [Unreleased] for 4.3.0) + `dspy_optimizer` from [Unreleased]. (7) Fixed `pip_aftermath` docstring + user-msg drift + matching test-fixture path drift (`heartbeat.json` → `memoria_heartbeat.json` to match Memoria 0.3.0 scheduler). |
-| Cross-stack pair | None this cycle — 4.2.2 is concinno-internal. Memoria 0.3.0 EXE is separate user-side ship (lives at `~/.claude/scripts/memoria/`, not in concinno PyPI). |
+| Build artifacts | ✅ `dist/concinno-4.2.3-py3-none-any.whl` + `dist/concinno-4.2.3.tar.gz` published. Only 4.2.2 + 4.2.3 left on disk (4.2.1 cleaned this session). |
+| **Post-publish ops** | None — 4.2.3 is purely additive (typed agent loop) plus three regression fixes (review_router schema unwrap / conftest tmp_path isolation / axis_arms preset alignment); no yank, no migration shim needed. |
+| **Verification** | pytest 7730 passed / 0 failed / 8 skipped / 5 xfailed in 16:30 (v3 full run from `projects/concinno` cwd, deselecting 2 known cross-suite concurrency flakes). Ruff clean across all 4.2.3-touched files. Triple-source aligned. PyPI HTTP 200 verified post-upload. |
+| **New in 4.2.3** | (1) Fixed `cognitive.review_router._feature_param` dict-schema unwrap — restores `int(_feature_param(...))` / `float(_feature_param(...))` semantics broken by wave-3 d04d355 raw-scalar → dict migration (15 review_router + 13 advisory_routing tests recover). (2) Fixed `tests/conftest._isolate_state_dir` — `tmp_path_factory.mktemp("state_iso")` instead of `tmp_path / "state_store"` so 7 tests asserting on `tmp_path.iterdir()` recover (append_only_log / state_store_prune / meta_skills_cross_channel / sentinel_check). (3) Fixed `guards.redblue_green_dispatch_guard._AXIS_WEIGHT_ARMS` step 0.10 → 0.05 — aligns with FEATURE_META `functional_weight=0.25` + `ux_friction_weight=0.15` defaults; `test_registry_presets_match_expected_types` recovers. (4) Added `concinno.agent.session_loop` typed single-agent loop borrowing PydanticAI patterns (zero new deps). (5) Tests added: 13 funcs / 29 sub-cases via parametrize / 585 LOC covering wave-2 release_lock + twine_pre_check edges + wave-3 RBG dispatch 5-state verdict matrix. (6) Parent-B wiring: cbua_pipeline_guard ReviewRouter U-stage hook (default-off feature flag) + cli first-run banner + features set-profile {strict\|permissive} CLI shortcut. |
+| Cross-stack pair | None this cycle — 4.2.3 is concinno-internal cleanup of wave-3 schema migration debt + post-4.2.2 typed agent loop. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
