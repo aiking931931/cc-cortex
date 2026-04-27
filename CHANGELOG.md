@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.4] - 2026-04-27 — R+B+G CBUA review verdict carryover patch
+
+Same-day patch release implementing the three must-fix items from the
+2026-04-27 R+B+G CBUA architectural review of 4.2.3 (3 Red Opus 4.7-1M
+attackers + 1 Blue Opus 4.7-1M defender + 1 Green Opus 4.7-1M PM-trust
+0.70 arbitrator). Verdict was SHIP WITH CARRYOVER (4.2.3 stays LIVE,
+4.2.4 patch ≤7 days for the three concrete gaps). 2 of 5 axes failed
+under framing-corrected evidence — `functional` (test-coverage thinness)
+and `ux_friction` (CI/pipe pollution + silent OSError loop). PM trust
+0.70 + no security/data-loss component → patch not yank.
+
+### Fixed
+
+- `concinno.agent.session_loop.SessionLoop._validate_input` — Red 2 R2.5
+  FATAL: prior implementation only checked field-name presence and that
+  the dataclass `__init__` did not raise; types were never validated, so
+  `AddInput(a=1, b="not-a-number")` silently passed and the agent received
+  a false "typed I/O" trust signal. Now performs `typing.get_type_hints`
+  isinstance validation per field, with graceful handling of `Optional`,
+  `Union`, `Literal`, `List[X]`, `Dict[K, V]` (origin-type isinstance
+  with INFO-level skip-log when origin is non-isinstance-able).
+  `test_session_loop_rejects_wrong_field_type` regression locks the
+  contract: wrong field type returns `ToolResult(status="fail", ...)`
+  rather than silent accept.
+- `concinno.cli._first_run.maybe_print_first_run_banner` — Red 1 R1.4 +
+  Red 3 R3.1/R3.2 (convergent across 2 Reds) HIGH:
+  - **TTY gate**: now wraps the banner emit with a hookable
+    `is_stderr_tty()` check (default `sys.stderr.isatty()`); CI logs,
+    Docker boot output, and `2>&1`-folded shell pipelines no longer see
+    the banner.
+  - **OSError observability + loop break**: `mark_seen()` now emits
+    exactly one WARNING via `concinno.first_run` logger when the marker
+    write fails (read-only `$HOME` / NFS without write perm / Windows
+    enterprise lockdown), and sets a module-level
+    `_session_marker_failed` flag so the banner short-circuits for the
+    rest of the process — kills the previously-infinite re-print loop.
+  - **`CONCINNO_FIRST_RUN_BANNER=0` documentation**: `concinno --help`
+    epilog (via `argparse.RawDescriptionHelpFormatter`) now documents
+    the killswitch + the auto-suppress-on-non-TTY behaviour.
+
+### Added
+
+- `tests/integration/test_rbg_live.py` — Red 2 R2.1 FATAL fix: the
+  existing `tests/guards/test_redblue_green_dispatch_guard.py` exercised
+  module-private helpers (`_decide_verdict`, `_parse_team_response`,
+  `_parse_green_response`) and used `_never_called` AssertionError stubs
+  — zero tests invoked `RedBlueGreenDispatchGuard.review()`
+  end-to-end. New test does one real-Opus E2E happy path with `Medium`
+  radius (1 red, no blue, no green — cheapest E2E shape that still
+  exercises spawn ledger + parse + aggregate + decide path) under
+  `@pytest.mark.live`. Skip-by-default; requires `ANTHROPIC_API_KEY`
+  env var to opt in. The `live` pytest marker is registered in
+  `pyproject.toml` so default `pytest -q` runs see "1 skipped" with
+  reason. Honours the existing `CONCINNO_OPUS_MODEL` env override
+  pattern from `concinno.cache.autocompact` / `concinno.escalation`.
+
+### Carryover (acknowledged, deferred beyond 4.2.4)
+
+The R+B+G review identified additional concerns the verdict deferred:
+
+- `session_loop` LLM-driver gap — module is library primitive shipped
+  without a built-in LLM driver. Target 4.3.0 for `examples/session_loop_anthropic_driver.py`
+  reference impl + module docstring "WARNING: requires user-provided
+  driver".
+- Sub-package cadence consolidation (Red 3 R3.7) — 19 `concinno-skills-*`
+  PyPI packages × 19 release cadences is the langchain-already-learned
+  pain. Open RFC for 5.0 evaluating `concinno-skills-bundle` mega-package
+  vs separate cadences.
+- Banner i18n + `_DICHOTOMY_MARKERS` i18n — currently English/Mandarin
+  only. Open issue `i18n-roadmap` for 4.4.0.
+- `release_lock` integration — `coordination.release_lock` +
+  `twine_pre_check` shipped in 4.2.2 but the actual hook into
+  `release_authorization.py:276` is still pending. Target 4.3.0.
+
 ## [4.2.3] - 2026-04-27 — wave-3 schema migration cleanup + typed agent loop
 
 Patch release bundling wave-3 schema-migration cleanup (three Fixed

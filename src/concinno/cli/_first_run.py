@@ -13,10 +13,14 @@ Suppress paths:
   :func:`should_skip_banner_for_argv`.
 * ``CONCINNO_FIRST_RUN_BANNER=0`` (also ``false`` / ``no`` / ``off``) —
   silence the banner entirely without touching the marker, e.g. for CI.
+* Non-TTY ``stderr`` — when ``sys.stderr.isatty()`` is False the banner
+  is suppressed so CI logs, ``CMD ["concinno", ...]`` Docker bootstrap,
+  and ``concinno features list 2>&1 | jq`` style pipelines stay clean.
 * ``touch ~/.concinno/.4_0_0_seen`` — manual opt-out.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -26,11 +30,25 @@ __all__ = [
     "FIRST_RUN_MARKER_PATH",
     "BANNER_DISABLE_ENV",
     "is_banner_env_disabled",
+    "is_stderr_tty",
     "mark_seen",
     "marker_exists",
     "maybe_print_first_run_banner",
     "should_skip_banner_for_argv",
 ]
+
+# In-memory session flag flipped on first read-only-HOME OSError. Once
+# set, ``maybe_print_first_run_banner`` short-circuits for the rest of
+# this Python process so a user with a read-only ``$HOME`` does not see
+# the banner re-printed on every subsequent invocation in the same
+# process (see Red 1 R1.4 + Red 3 R3.2 — convergent infinite-loop bug).
+_session_marker_failed: bool = False
+
+# Module-level latch that ensures the OSError warning fires exactly once
+# per process even if ``mark_seen`` is called repeatedly (e.g. tests).
+_oserror_warning_emitted: bool = False
+
+_logger = logging.getLogger("concinno.first_run")
 
 # Env var that lets users / CI suppress the one-time banner without
 # writing the on-disk marker (so a real first run on a developer's
@@ -67,6 +85,19 @@ def is_banner_env_disabled() -> bool:
     return raw.strip().lower() in _DISABLE_VALUES
 
 
+def is_stderr_tty() -> bool:
+    """Return True iff ``sys.stderr`` reports as an interactive TTY.
+
+    Wrapped as a module-level function so tests (which run under pytest's
+    capsys, where ``sys.stderr`` is a non-TTY ``EncodedFile`` whose
+    C-level ``isatty`` cannot be monkeypatched on the class) can stub
+    this gate directly via ``monkeypatch.setattr`` instead of fighting
+    the capture machinery.
+    """
+    isatty = getattr(sys.stderr, "isatty", None)
+    return bool(callable(isatty) and isatty())
+
+
 def marker_exists() -> bool:
     """Return True if the on-disk first-run marker is present."""
     return _marker_path().exists()
@@ -80,8 +111,14 @@ def mark_seen() -> Path:
     immediately silences the banner).
 
     Returns the marker path even on best-effort failure so callers can
-    log it; the IO failure itself is swallowed (non-fatal).
+    log it; the IO failure itself is logged at WARNING (exactly once
+    per process via :data:`_oserror_warning_emitted`) and surfaced via
+    :data:`_session_marker_failed` so :func:`maybe_print_first_run_banner`
+    can short-circuit subsequent invocations and avoid the read-only
+    ``$HOME`` infinite-banner loop (Red 1 R1.4 + Red 3 R3.2).
     """
+    global _session_marker_failed, _oserror_warning_emitted
+
     marker = _marker_path()
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -91,9 +128,22 @@ def mark_seen() -> Path:
             datetime.now(timezone.utc).isoformat(timespec="seconds") + "\n",
             encoding="utf-8",
         )
-    except OSError:
-        # Best-effort: the calling CLI command should still proceed.
-        pass
+    except OSError as exc:
+        # Best-effort: the calling CLI command should still proceed,
+        # but flip the in-memory session flag so we do not re-print
+        # the banner on every subsequent call within this process.
+        _session_marker_failed = True
+        if not _oserror_warning_emitted:
+            _oserror_warning_emitted = True
+            _logger.warning(
+                "concinno first-run marker could not be written to %s "
+                "(%s); banner will be suppressed for the rest of this "
+                "process. Set %s=0 to silence permanently or fix HOME "
+                "permissions to persist the marker.",
+                marker,
+                exc,
+                BANNER_DISABLE_ENV,
+            )
     return marker
 
 
@@ -115,21 +165,38 @@ def maybe_print_first_run_banner() -> bool:
     Skips silently when:
 
     * ``CONCINNO_FIRST_RUN_BANNER`` env var is falsy.
+    * ``sys.stderr`` is not a TTY (CI logs / Docker bootstrap / pipes).
     * The on-disk marker already exists.
     * The current argv invokes a banner-skipping subcommand
       (``set-profile``) — chicken-and-egg.
+    * A previous :func:`mark_seen` call in this process raised OSError
+      (read-only ``$HOME``); the in-memory ``_session_marker_failed``
+      flag prevents the infinite-banner loop documented in Red 1 R1.4
+      and Red 3 R3.2.
 
     Output goes to ``stderr`` so it never pollutes stdout consumers
-    (e.g. ``concinno features list --json | jq``).
+    (e.g. ``concinno features list --json | jq``), and the TTY check
+    above ensures it never pollutes stderr consumers either.
     """
     if is_banner_env_disabled():
         return False
     if should_skip_banner_for_argv():
         return False
+    if _session_marker_failed:
+        # The marker write already failed this process — banner has
+        # been shown once and we refuse to re-print on every call.
+        return False
+    # Suppress on non-TTY stderr so CI logs / Docker boot / pipes stay
+    # clean. Routed through ``is_stderr_tty`` so the test suite (whose
+    # capsys-wrapped stderr is a non-patchable C-level method_descriptor)
+    # can stub the gate at module scope.
+    if not is_stderr_tty():
+        return False
     marker = _marker_path()
     if marker.exists():
         return False
-    # Best-effort touch — failure is non-fatal (banner still prints).
+    # Best-effort touch — failure flips ``_session_marker_failed`` so a
+    # follow-up invocation will short-circuit instead of re-printing.
     mark_seen()
 
     from concinno import __version__

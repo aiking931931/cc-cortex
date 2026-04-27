@@ -43,6 +43,8 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import time
+import types
+import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Literal, TypeVar, cast, get_type_hints
 
@@ -57,6 +59,65 @@ __all__ = [
 
 T_In = TypeVar("T_In")
 T_Out = TypeVar("T_Out")
+
+# ---------------------------------------------------------------------------
+# Runtime type-check helpers (stdlib-only, no pydantic)
+# ---------------------------------------------------------------------------
+
+
+def _value_matches_hint(value: Any, hint: Any) -> bool:
+    """Best-effort ``isinstance`` check of ``value`` against type ``hint``.
+
+    Returns ``True`` whenever the value plausibly matches, including the
+    "we cannot statically verify, so accept" case for ``Any``, ``Literal``,
+    unresolved ``TypeVar``, and other non-``isinstance``-able forms. The
+    intent is to catch the high-frequency "string in, int expected"
+    mismatch that motivated this gate, not to be a full type checker.
+    """
+    # ``typing.Any`` accepts everything — let downstream code raise.
+    if hint is Any:
+        return True
+
+    origin = typing.get_origin(hint)
+    args = typing.get_args(hint)
+
+    # Plain class (``int``, ``str``, custom dataclass, …).
+    if origin is None:
+        if isinstance(hint, type):
+            return isinstance(value, hint)
+        # Forward refs / TypeVar / other unresolved forms — accept and
+        # rely on the dataclass constructor as final gate.
+        return True
+
+    # ``Union[A, B]`` / ``Optional[X]`` (== ``Union[X, None]``).
+    # PEP 604 ``A | B`` syntax has origin ``types.UnionType`` instead of
+    # ``typing.Union``; both must be handled.
+    if origin is typing.Union or origin is types.UnionType:
+        return any(_value_matches_hint(value, arg) for arg in args)
+
+    # ``Literal[a, b, ...]`` — equality membership rather than isinstance.
+    if origin is typing.Literal:
+        return value in args
+
+    # Generic alias whose origin IS ``isinstance``-able (``list[int]`` →
+    # ``list``, ``dict[str, int]`` → ``dict``, ``tuple[...]`` → ``tuple``,
+    # ``set[X]`` → ``set``). We only check the container type, not the
+    # element types — verifying every element would balloon the surface
+    # and is what pydantic exists for.
+    if isinstance(origin, type):
+        return isinstance(value, origin)
+
+    # Anything else (``Callable[...]``, ``ClassVar``, exotic generics) —
+    # cannot be checked cheaply; accept and defer to the constructor.
+    return True
+
+
+def _format_hint(hint: Any) -> str:
+    """Render a type hint for inclusion in error messages."""
+    if isinstance(hint, type):
+        return hint.__name__
+    return str(hint).replace("typing.", "")
+
 
 # ---------------------------------------------------------------------------
 # Core data types
@@ -273,6 +334,24 @@ class SessionLoop:
     ) -> tuple[Any | None, str | None]:
         """Instantiate ``spec.input_type`` from ``raw_input``.
 
+        Performs three layers of validation, in order:
+
+        1. **Field name presence** — reject unexpected keys and missing
+           required keys (no defaults).
+        2. **Runtime type check** — for each provided value, verify it
+           matches the field's annotated type using ``isinstance`` against
+           the resolved hint (or the generic origin for ``list[X]`` /
+           ``dict[K, V]`` / ``Optional[X]`` / ``Union[A, B]``). Generics
+           whose origin cannot be ``isinstance``-checked (e.g. ``Literal``,
+           ``Any``, unresolved type variables) are skipped — the dataclass
+           constructor remains the final gate for those.
+        3. **Constructor call** — instantiate the dataclass; any
+           remaining ``TypeError`` is surfaced as a schema mismatch.
+
+        Layer 2 closes the gap where a dataclass without
+        ``__post_init__`` silently accepted ``{"a": 1, "b": "x"}`` for an
+        ``int``-typed field, giving the agent a false trust signal.
+
         Returns ``(instance, None)`` on success or ``(None, error_msg)``
         on schema mismatch.
         """
@@ -296,6 +375,28 @@ class SessionLoop:
                         f"schema mismatch: missing required field '{f.name}' "
                         f"for tool '{spec.name}'"
                     )
+
+        # Runtime type check (layer 2) — resolve forward refs once, then
+        # inspect each provided value against its annotated hint.
+        try:
+            type_hints = get_type_hints(spec.input_type)
+        except Exception:
+            # Forward refs that cannot be resolved at this point (e.g. they
+            # reference a name in a caller scope) — fall back to the
+            # constructor-only check below rather than block validation.
+            type_hints = {}
+        for field_name, value in raw_input.items():
+            hint = type_hints.get(field_name)
+            if hint is None:
+                continue
+            if not _value_matches_hint(value, hint):
+                expected_repr = _format_hint(hint)
+                return None, (
+                    f"schema mismatch: field '{field_name}' for tool "
+                    f"'{spec.name}' expected {expected_repr}, got "
+                    f"{type(value).__name__}"
+                )
+
         try:
             instance = spec.input_type(**raw_input)
         except TypeError as exc:

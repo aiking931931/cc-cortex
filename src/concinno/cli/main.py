@@ -1651,6 +1651,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="concinno",
         description="Production-grade hooks for Claude Code",
+        epilog=(
+            "Environment variables:\n"
+            "  CONCINNO_FIRST_RUN_BANNER=0   Suppress the post-4.0.0 onboarding\n"
+            "                                banner shown once per machine on a\n"
+            "                                fresh install. Accepts 0/false/no/off\n"
+            "                                (case-insensitive). The banner is also\n"
+            "                                auto-suppressed when stderr is not a TTY\n"
+            "                                (CI logs, Docker bootstrap, shell pipes).\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
 

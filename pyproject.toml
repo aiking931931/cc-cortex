@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "4.2.3"
+version = "4.2.4"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -244,6 +244,9 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: integration tests that require real API calls (skip-by-default)",
+]
 
 [tool.coverage.run]
 source = ["concinno"]

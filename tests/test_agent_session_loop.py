@@ -10,7 +10,7 @@ All tests are deterministic (base_delay=0.0 throughout).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -57,6 +57,24 @@ class OptionalInput:
 @dataclass
 class OptionalOutput:
     value: str
+
+
+@dataclass
+class GenericInput:
+    """Mixed-generic input used by ``test_session_loop_accepts_generic_hints``.
+
+    Defined at module scope so ``typing.get_type_hints`` can resolve the
+    forward references created by ``from __future__ import annotations``.
+    """
+
+    maybe: int | None
+    items: list[str]
+    mode: Literal["fast", "slow"]
+
+
+@dataclass
+class GenericOutput:
+    ok: bool
 
 
 # ---------------------------------------------------------------------------
@@ -427,3 +445,68 @@ def test_call_tool_without_ctx_creates_fresh_context() -> None:
 def test_render_system_prompt_no_tools() -> None:
     loop = SessionLoop(tools=[], system_prompt="Only this.")
     assert loop.render_system_prompt() == "Only this."
+
+
+# ---------------------------------------------------------------------------
+# 16. Runtime type validation rejects wrong-type field values
+# ---------------------------------------------------------------------------
+
+
+def test_session_loop_rejects_wrong_field_type() -> None:
+    """A dataclass without ``__post_init__`` previously accepted any value
+    as long as the field name matched. The 4.2.4 patch adds an
+    ``isinstance``-based runtime check so an LLM passing
+    ``{"a": 1, "b": "not-a-number"}`` for an ``int``-typed field gets a
+    ``fail`` result instead of a silent accept that lies to the caller.
+    """
+
+    @tool()
+    def add(inp: AddInput, ctx: RunContext) -> AddOutput:
+        return AddOutput(result=inp.a + inp.b)
+
+    loop = SessionLoop(tools=[add])
+    ctx = RunContext()
+    result = loop.call_tool("add", {"a": 1, "b": "not-a-number"}, ctx)
+
+    assert result.status == "fail"
+    assert result.error is not None
+    assert "schema mismatch" in result.error
+    assert "'b'" in result.error
+    assert "expected int" in result.error
+    assert "got str" in result.error
+
+
+# ---------------------------------------------------------------------------
+# 17. Runtime type validation tolerates Optional / Union / Literal generics
+# ---------------------------------------------------------------------------
+
+
+def test_session_loop_accepts_generic_hints() -> None:
+    """Generics like ``Optional[int]``, ``list[str]``, and ``Literal[...]``
+    must remain accepted when the value plausibly matches; the new check
+    must not over-reject and break existing dataclass-based tools.
+    """
+
+    @tool(name="generic_tool")
+    def generic_tool(inp: GenericInput, ctx: RunContext) -> GenericOutput:
+        return GenericOutput(ok=True)
+
+    loop = SessionLoop(tools=[generic_tool])
+
+    # Plausible values across each generic kind.
+    ok = loop.call_tool(
+        "generic_tool",
+        {"maybe": None, "items": ["a", "b"], "mode": "fast"},
+        RunContext(),
+    )
+    assert ok.status == "ok"
+
+    # Wrong literal value still rejected.
+    bad_lit = loop.call_tool(
+        "generic_tool",
+        {"maybe": 1, "items": [], "mode": "turbo"},
+        RunContext(),
+    )
+    assert bad_lit.status == "fail"
+    assert bad_lit.error is not None
+    assert "'mode'" in bad_lit.error
