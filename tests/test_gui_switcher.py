@@ -44,9 +44,15 @@ def switcher_app(tmp_path, monkeypatch):
 
     from concinno.gui.switcher import create_switcher_app
 
+    # Use ports that are guaranteed unreachable in unit tests (no real
+    # GUI process listens there). Default 8400/8401 can collide with a
+    # running ``concinno gui`` instance, causing reachable=True when the
+    # test expects False.
     app = create_switcher_app(
         token="UNIT-SWITCHER-TOKEN",
         token_path=tmp_path / "switcher_token",
+        concinno_port=19400,
+        sancio_port=19401,
     )
     return app, "UNIT-SWITCHER-TOKEN", tmp_path
 
@@ -81,8 +87,9 @@ def test_landing_page_bypasses_auth_and_renders_tabs(switcher_app):
         assert r.status_code == 200
         body = r.text
         # Two tab buttons + iframe + ports surfaced.
-        assert "Concinno (:8400)" in body
-        assert "Sancio (:8401)" in body
+        # Fixture uses 19400/19401 to avoid colliding with a running GUI.
+        assert "Concinno (:19400)" in body
+        assert "Sancio (:19401)" in body
         assert "<iframe" in body
         # Switcher banner present so operator knows what they are looking at.
         assert "Switcher :8399" in body
@@ -140,9 +147,9 @@ def test_backends_no_tokens_present_reports_absent(switcher_app):
         assert data["sancio"]["token_present"] is False
         assert data["concinno"]["reachable"] is False
         assert data["sancio"]["reachable"] is False
-        # URLs reflect the configured backend ports.
-        assert data["concinno"]["url"] == "http://127.0.0.1:8400"
-        assert data["sancio"]["url"] == "http://127.0.0.1:8401"
+        # URLs reflect the configured backend ports (19400/19401 in fixture).
+        assert data["concinno"]["url"] == "http://127.0.0.1:19400"
+        assert data["sancio"]["url"] == "http://127.0.0.1:19401"
 
 
 def test_backends_reads_concinno_token_from_disk(switcher_app):
@@ -230,8 +237,8 @@ def test_proxy_concinno_forwards_backend_token(switcher_app, monkeypatch):
     # token, not echoed the switcher's own token through.
     assert captured["auth"] == "Bearer REAL-CONCINNO-TOKEN"
     assert captured["auth"] != f"Bearer {switcher_tok}"
-    # URL points at the right backend port + path.
-    assert captured["url"].startswith("http://127.0.0.1:8400/")
+    # URL points at the right backend port + path (19400 in fixture).
+    assert captured["url"].startswith("http://127.0.0.1:19400/")
     assert "/api/features" in captured["url"]
 
 
@@ -268,7 +275,7 @@ def test_proxy_sancio_forwards_backend_token(switcher_app, monkeypatch):
         )
     assert r.status_code == 200
     assert captured["auth"] == "Bearer REAL-SANCIO-TOKEN"
-    assert captured["url"].startswith("http://127.0.0.1:8401/")
+    assert captured["url"].startswith("http://127.0.0.1:19401/")
 
 
 def test_proxy_returns_503_when_backend_token_absent(switcher_app):
