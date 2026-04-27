@@ -66,7 +66,14 @@ def cmd_features_set_profile(args: argparse.Namespace) -> None:
     Honours an optional ``args._injected_cfg`` (set by tests) so the
     apply call writes to a tmp ``cc_config.json`` instead of the
     process-wide singleton.
+
+    Side effect: every successful invocation (including ``--list``) writes
+    the ``~/.concinno/.4_0_0_seen`` first-run marker via
+    :func:`concinno.cli._first_run.mark_seen`. This silences the
+    onboarding banner from then on — the user has consciously engaged
+    with the profile system, so further nag is noise.
     """
+    from concinno.cli._first_run import mark_seen
     from concinno.feature_config import (
         FEATURE_TOGGLE_PROFILES,
         apply_feature_toggle_profile,
@@ -74,6 +81,10 @@ def cmd_features_set_profile(args: argparse.Namespace) -> None:
     )
 
     if getattr(args, "list_profiles", False):
+        # Touch the marker even on --list so a user who just inspects
+        # the available profiles doesn't get nagged again on the next
+        # invocation.
+        mark_seen()
         profiles = list_feature_toggle_profiles()
         print("Available profiles:")
         for name, desc in profiles.items():
@@ -91,6 +102,12 @@ def cmd_features_set_profile(args: argparse.Namespace) -> None:
 
     injected_cfg = getattr(args, "_injected_cfg", None)
     result = apply_feature_toggle_profile(name, cfg=injected_cfg)
+
+    # Mark the user as having seen / acknowledged the 4.0.0 onboarding
+    # message regardless of which profile was chosen — even ``permissive``
+    # (the no-op profile) is a conscious "I want default-OFF" decision.
+    if not result.get("error"):
+        mark_seen()
 
     if getattr(args, "json_output", False):
         print(json.dumps(result, indent=2, sort_keys=True))

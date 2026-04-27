@@ -7,12 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.3] - 2026-04-27 — wave-3 schema migration cleanup + typed agent loop
+
+Patch release bundling wave-3 schema-migration cleanup (three Fixed
+entries below) with the post-4.2.2 `concinno.agent.session_loop`
+typed single-agent loop. The Fixed entries surface follow-on consumer
+breakage from wave-3 commit `d04d355`'s `FEATURE_META.params`
+raw-scalar → dict schema migration; the `session_loop` Added entry was
+introduced post-4.2.2 and rides this ship cycle. No SEMVER-MAJOR /
+SEMVER-MINOR-breaking surface — purely additive plus three regression
+fixes.
+
 ### Added
 - `concinno.agent.session_loop` — typed single-agent session loop borrowing
   PydanticAI patterns (typed tool I/O, retry policy, result types, system-prompt
   builder, run context). Zero new deps; pure stdlib (`dataclasses` + `typing` +
   `inspect`). Public API: `SessionLoop`, `ToolSpec`, `tool`, `ToolResult`,
   `RetryPolicy`, `RunContext`. All six names re-exported from `concinno.agent`.
+
+### Fixed
+
+- `concinno.cognitive.review_router._feature_param` — wave-3 commit
+  `d04d355` migrated `FEATURE_META["review_router_ziq"].params` from
+  raw scalars (`30`) to dict schemas (`{"type": "int", "default": 30,
+  "min": 5, "max": 1000, ...}`), but the helper still returned the
+  raw `params.get(name, default)` value. Downstream callers
+  `int(_feature_param("ftrl_takeover_after_n_samples", 30))` /
+  `int(_feature_param("meta_mar_every_n_chaotic", 10))` /
+  `float(_feature_param("cost_adjustment_factor", 1.0))` blew up with
+  `TypeError: int() argument must be a string, a bytes-like object or
+  a real number, not 'dict'`. The helper now unwraps any dict carrying
+  a ``"default"`` key to its scalar default while still passing raw
+  scalars through, restoring the 4.2.2 contract for existing callers.
+  15 review_router tests + 13 advisory_routing tests recover green.
+- `tests/conftest._isolate_state_dir` autouse fixture — wave-3 commit
+  added per-test isolation by creating ``tmp_path / "state_store"``,
+  but several tests (`test_append_only_log.py` /
+  `test_state_store_prune.py` / `test_meta_skills_cross_channel.py` /
+  `test_sentinel_check.py`) assert on ``tmp_path.iterdir()`` and saw
+  the fixture's ``state_store/`` as a stray directory. Switched the
+  fixture to ``tmp_path_factory.mktemp("state_iso")`` (sibling tmp
+  dir, also managed by pytest) so the per-test ``tmp_path`` stays
+  clean. 7 pre-existing tests recover green; ``test_polling.py``'s
+  explicit ``CONCINNO_STATE_DIR=str(tmp_path)`` per-test monkeypatch
+  still overrides the autouse value as before.
+- `concinno.guards.redblue_green_dispatch_guard._AXIS_WEIGHT_ARMS` —
+  the discrete arm tuple was ``(0.10, 0.20, 0.30, 0.40, 0.50)`` (step
+  0.10) but two presets — ``functional_weight = 0.25`` and
+  ``ux_friction_weight = 0.15`` — are step 0.05 in
+  `FEATURE_META.redblue_green_review.params`, so the registry-schema
+  invariant ``preset in choices`` was violated. Widened the tuple to
+  step 0.05 (``(0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50)``)
+  matching the `FEATURE_META` defaults and giving the ZIQ FTRL tuner
+  a finer grid; ``test_registry_presets_match_expected_types`` recovers
+  green.
+
+### Tests
+
+- `tests/coordination/test_release_lock_edge.py` (138 LOC, 6 funcs /
+  13 parametrized sub-cases) — wave-2 ``release_lock`` edge cases:
+  ``_ttl_seconds`` env-var fallback (6 garbage values), unset env
+  default, ``pypi_version_taken`` URLError propagation, explicit
+  ``host=`` override, lazy lock-dir creation, acquire after release.
+- `tests/coordination/test_twine_pre_check.py` (228 LOC, 8 funcs) —
+  wave-2 ``twine_pre_check.check_before_upload`` edge cases:
+  PyPI-version-taken veto, lock-disabled short-circuit,
+  lock-held-self happy path, lock-held-by-other, lock-version
+  mismatch, ``require_lock_held=True`` with no lock, PyPI URLError
+  fail-closed, PyPI HTTP 5xx fail-closed.
+- `tests/guards/test_redblue_green_dispatch_guard.py` (219 LOC, 8
+  funcs) — wave-3 ``RedBlueGreenDispatchGuard`` edge cases:
+  feature-disabled short-circuit, ``Radius.SIMPLE`` short-circuit,
+  ``_parse_team_response`` malformed-JSON tolerance + unknown-axis
+  enum drop, ``_parse_green_response`` malformed → HOLD fallback,
+  ``_decide_verdict`` 5-state matrix (REJECT pure-framing /
+  REJECT fatal-above-threshold / DOWNGRADE one-fatal /
+  ACCEPT clean / HOLD single-HIGH).
+
+585 LOC added across 3 new test files; total wave-2/3 coverage
+delta = 13 functions / 29 sub-cases via parametrize, all green.
 
 ## [4.2.2] - 2026-04-27 — wave-1 bundle
 

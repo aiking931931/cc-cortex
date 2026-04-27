@@ -713,7 +713,141 @@ class TestSessionIsolation:
         assert _state(tmp_path, "sess-b")["edit_count"] == 1
 
 
-# ── 11. Competition Mode Bypass ───────────────────────────────
+# ── 11. RedBlueGreen U-stage wire-up (opt-in) ─────────────────
+
+
+class TestRedBlueGreenUStageWire:
+    """Verify the RBG dispatch wire-up is gated, additive, and crash-safe.
+
+    Wire-up is gated behind
+    ``cfg.feature("redblue_green_review", "wire_into_u_stage")`` and
+    only fires for >= Complicated tasks where ``redteam_required`` is
+    True. The default-OFF state must produce zero behavior change.
+    """
+
+    def test_flag_off_default_preserves_a5_text_unchanged(self):
+        """Wire-up flag default is False → A5 reminder text byte-equal to legacy."""
+        # Drive the same A5 path the legacy reminder fires on.
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={"edit_count": 10, "b1_shown": True},
+            complexity="complex",
+            redteam_required=True,
+        )
+        assert reminder is not None
+        # Default rbg_hint="" → message ends exactly at "未派出".
+        assert "A5 紅隊未派出" in reminder.context
+        assert "RBG dispatch" not in reminder.context
+        assert "RedBlueGreenDispatchGuard" not in reminder.context
+
+    def test_flag_on_simple_task_no_rbg_hint(self, monkeypatch):
+        """Simple radius escape preserved even with flag ON."""
+        monkeypatch.setattr(
+            "concinno.guards.cbua_pipeline_guard.CbuaPipelineGuard."
+            "_maybe_get_rbg_hint",
+            staticmethod(
+                lambda complexity, redteam_required: ""
+                if complexity == "simple"
+                else "WIRED_HINT",
+            ),
+        )
+        # Simple complexity — _maybe_get_rbg_hint returns "" by contract.
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("simple", True)
+        assert hint == ""
+
+    def test_flag_on_complicated_dispatches_rbg(self, monkeypatch):
+        """Flag ON + Complicated + redteam_required → hint appended."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("complicated", True)
+        assert hint != ""
+        assert "RBG dispatch" in hint
+        assert "RedBlueGreenDispatchGuard" in hint
+
+    def test_flag_on_complex_dispatches_rbg_with_5_axis(self, monkeypatch):
+        """Flag ON + Complex + redteam_required → hint mentions 5-axis."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("complex", True)
+        assert "5-axis" in hint
+        # Reminder text concatenates hint after legacy message.
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={"edit_count": 10, "b1_shown": True},
+            complexity="complex",
+            redteam_required=True,
+            rbg_hint=hint,
+        )
+        assert reminder is not None
+        assert "A5 紅隊未派出" in reminder.context
+        assert "RBG dispatch" in reminder.context
+
+    def test_rbg_import_failure_falls_back_gracefully(self, monkeypatch):
+        """If RBG guard raises on instantiation, hint becomes "" (no crash)."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        # Force RedBlueGreenDispatchGuard.__init__ to raise.
+        import concinno.guards.redblue_green_dispatch_guard as rbg_mod
+
+        def _boom(self, *_a, **_kw):
+            raise RuntimeError("synthetic failure")
+
+        monkeypatch.setattr(
+            rbg_mod.RedBlueGreenDispatchGuard, "__init__", _boom,
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("complex", True)
+        assert hint == ""
+        # Pipeline still produces the legacy reminder (not None, not crash).
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={"edit_count": 10, "b1_shown": True},
+            complexity="complex",
+            redteam_required=True,
+            rbg_hint=hint,
+        )
+        assert reminder is not None
+        assert "A5 紅隊未派出" in reminder.context
+
+    def test_flag_on_redteam_not_required_no_hint(self, monkeypatch):
+        """Wire-up only fires when redteam_required=True (avoid noise)."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint(
+            "complex", redteam_required=False,
+        )
+        assert hint == ""
+
+
+# ── 12. Competition Mode Bypass ───────────────────────────────
 
 
 class TestCompetitionMode:

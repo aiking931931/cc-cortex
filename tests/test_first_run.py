@@ -28,8 +28,10 @@ def test_first_run_prints_banner(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
 
     assert printed is True
-    assert "Welcome to concinno" in captured.out
-    assert "set-profile strict" in captured.out
+    # Banner now goes to stderr so stdout pipelines (jq, grep …) stay clean.
+    assert "Welcome to concinno" in captured.err
+    assert "set-profile strict" in captured.err
+    assert captured.out == ""
 
 
 def test_subsequent_run_silent(capsys: pytest.CaptureFixture[str]) -> None:
@@ -43,6 +45,7 @@ def test_subsequent_run_silent(capsys: pytest.CaptureFixture[str]) -> None:
     assert first is True
     assert second is False
     assert captured.out == ""
+    assert captured.err == ""
 
 
 def test_marker_creation_failure_still_prints(
@@ -64,7 +67,7 @@ def test_marker_creation_failure_still_prints(
     captured = capsys.readouterr()
 
     assert printed is True
-    assert "Welcome to concinno" in captured.out
+    assert "Welcome to concinno" in captured.err
 
 
 def test_banner_includes_version(capsys: pytest.CaptureFixture[str]) -> None:
@@ -74,7 +77,111 @@ def test_banner_includes_version(capsys: pytest.CaptureFixture[str]) -> None:
     maybe_print_first_run_banner()
     captured = capsys.readouterr()
 
-    assert __version__ in captured.out
+    assert __version__ in captured.err
+
+
+# ── Env-var killswitch (CONCINNO_FIRST_RUN_BANNER=0) ─────────────────
+
+
+@pytest.mark.parametrize("falsy", ["0", "false", "FALSE", "no", "off"])
+def test_env_killswitch_suppresses_banner(
+    falsy: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``CONCINNO_FIRST_RUN_BANNER`` falsy values silence the banner.
+
+    Critically: the marker is NOT touched, so a real first run on the
+    same machine after unsetting the env var will still show it.
+    """
+    from concinno.cli._first_run import (
+        marker_exists,
+        maybe_print_first_run_banner,
+    )
+
+    monkeypatch.setenv("CONCINNO_FIRST_RUN_BANNER", falsy)
+    printed = maybe_print_first_run_banner()
+    captured = capsys.readouterr()
+
+    assert printed is False
+    assert captured.err == ""
+    assert captured.out == ""
+    # Marker untouched so a later real run can still see the banner.
+    assert marker_exists() is False
+
+
+def test_env_truthy_does_not_suppress(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Any non-falsy value keeps the banner active (no surprise gating)."""
+    from concinno.cli._first_run import maybe_print_first_run_banner
+
+    monkeypatch.setenv("CONCINNO_FIRST_RUN_BANNER", "1")
+    printed = maybe_print_first_run_banner()
+    captured = capsys.readouterr()
+
+    assert printed is True
+    assert "Welcome to concinno" in captured.err
+
+
+# ── Chicken-and-egg: set-profile invocation must not trigger banner ──
+
+
+def test_set_profile_argv_skips_banner(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Invoking ``concinno features set-profile <x>`` must NOT show the
+    banner (chicken-and-egg). The set-profile command itself touches
+    the marker so subsequent invocations (any subcommand) are silent.
+    """
+    from concinno.cli._first_run import (
+        marker_exists,
+        maybe_print_first_run_banner,
+        should_skip_banner_for_argv,
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["concinno", "features", "set-profile", "permissive"],
+    )
+    assert should_skip_banner_for_argv() is True
+
+    printed = maybe_print_first_run_banner()
+    captured = capsys.readouterr()
+    assert printed is False
+    assert captured.err == ""
+    # Crucially, the banner-side-effect did NOT touch the marker —
+    # the set-profile cmd_features_set_profile body is responsible
+    # for that, exercised in test_features_cli.py.
+    assert marker_exists() is False
+
+
+def test_other_subcommands_do_not_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``concinno features list`` (or other subcommands) should still
+    show the banner — only ``set-profile`` is in the chicken-and-egg
+    skip list."""
+    from concinno.cli._first_run import should_skip_banner_for_argv
+
+    monkeypatch.setattr("sys.argv", ["concinno", "features", "list"])
+    assert should_skip_banner_for_argv() is False
+
+    monkeypatch.setattr("sys.argv", ["concinno", "doctor"])
+    assert should_skip_banner_for_argv() is False
+
+
+def test_mark_seen_writes_iso_timestamp() -> None:
+    """The marker file body should be a parseable ISO-8601 timestamp."""
+    from datetime import datetime
+
+    from concinno.cli._first_run import mark_seen
+
+    marker = mark_seen()
+    body = marker.read_text(encoding="utf-8").strip()
+    # Round-trip parse — raises if the format drifted.
+    parsed = datetime.fromisoformat(body)
+    assert parsed.tzinfo is not None  # we wrote UTC explicitly
 
 
 def test_marker_path_resolves_under_home(tmp_path: Path) -> None:

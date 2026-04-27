@@ -263,14 +263,24 @@ def _feature_enabled() -> bool:
 
 
 def _feature_param(name: str, default: Any) -> Any:
-    """Read ``FEATURE_META.review_router_ziq.params[name]`` with fallback."""
+    """Read ``FEATURE_META.review_router_ziq.params[name]`` with fallback.
+
+    Wave-3 (d04d355) migrated FEATURE_META params from raw scalars to
+    dict schemas (``{"type": ..., "default": ..., "min": ..., "max": ...}``).
+    This helper unwraps dict schemas to the scalar default so existing
+    ``int(_feature_param(...))`` / ``float(_feature_param(...))`` callers
+    keep working without churning each call site.
+    """
     try:
         from concinno.feature_config import FEATURE_META
     except Exception:
         return default
     meta = FEATURE_META.get("review_router_ziq", {})
     params = meta.get("params", {}) or {}
-    return params.get(name, default)
+    val = params.get(name, default)
+    if isinstance(val, dict) and "default" in val:
+        return val["default"]
+    return val
 
 
 # ── ReviewRouter ───────────────────────────────────────────────────

@@ -10,7 +10,6 @@ explicitly set / unset the flags.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
@@ -206,7 +205,7 @@ def _restore_default_on_for_legacy_tests(
 # ``pytest_configure`` above.
 @pytest.fixture(autouse=True)
 def _isolate_state_dir(
-    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> None:
@@ -223,6 +222,14 @@ def _isolate_state_dir(
     Together they cover every production caller that would otherwise
     resolve to ``~/.concinno/state_store/`` or ``~/.sancio/state/``.
 
+    The isolation directory is allocated via ``tmp_path_factory``
+    rather than ``tmp_path / "state_store"`` so it does not pollute
+    the per-test ``tmp_path``. Several tests
+    (``test_append_only_log.py``, ``test_state_store_prune.py`` etc.)
+    use ``tmp_path`` as their own log/state root and assert on
+    ``tmp_path.iterdir()``; co-locating the fixture's ``state_store``
+    in there causes spurious failures.
+
     Opt-out: tests that need to verify the production-dir resolution
     (typically only ``tests/test_state_store.py``) declare
     ``pytestmark = pytest.mark.no_state_isolation`` and the fixture
@@ -230,8 +237,7 @@ def _isolate_state_dir(
     """
     if request.node.get_closest_marker("no_state_isolation") is not None:
         return
-    isolated = tmp_path / "state_store"
-    isolated.mkdir(parents=True, exist_ok=True)
+    isolated = tmp_path_factory.mktemp("state_iso")
     monkeypatch.setenv("CONCINNO_STATE_DIR", str(isolated))
     monkeypatch.setenv("SANCIO_STATE_DIR", str(isolated))
     # Some callers read ``Path.home() / ".concinno"`` directly without

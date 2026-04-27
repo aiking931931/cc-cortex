@@ -331,11 +331,55 @@ class CbuaPipelineGuard(BaseGuard):
         if final_state.get("polling_streak", 0) >= 3:
             return None
 
+        complexity = final_state.get("complexity", "complicated")
+        redteam_required = final_state.get("redteam_required", False)
+        rbg_hint = self._maybe_get_rbg_hint(complexity, redteam_required)
         return self._generate_reminder(
             final_state,
-            final_state.get("complexity", "complicated"),
-            final_state.get("redteam_required", False),
+            complexity,
+            redteam_required,
+            rbg_hint=rbg_hint,
         )
+
+    @staticmethod
+    def _maybe_get_rbg_hint(
+        complexity: str, redteam_required: bool,
+    ) -> str:
+        """Compute a Red+Blue+Green dispatch hint for the U-stage.
+
+        Wire-up between cbua_pipeline_guard's A5 (red-team-required)
+        signal and ``RedBlueGreenDispatchGuard``. Default-off behind
+        ``cfg.feature("redblue_green_review", "wire_into_u_stage")`` so
+        existing sessions see no behavioral change. When the flag is
+        on AND complexity is at least Complicated, instantiate the RBG
+        guard (proves wiring) and return its prompt-template fingerprint
+        so the A5 reminder steers the agent toward the canonical 5-axis
+        review path. Any failure (import error, instantiation crash,
+        config lookup error) falls back to ``""`` so the existing
+        text-only A5 reminder is preserved unchanged.
+        """
+        if complexity == "simple" or not redteam_required:
+            return ""
+        try:
+            from concinno.core.config import get_config
+
+            if not bool(get_config().feature(
+                "redblue_green_review", "wire_into_u_stage",
+            )):
+                return ""
+            from concinno.guards.redblue_green_dispatch_guard import (
+                RedBlueGreenDispatchGuard,
+            )
+            # Instantiate to prove wiring; the dispatcher itself runs
+            # in the agent's next turn (hook context has no Opus client).
+            RedBlueGreenDispatchGuard()
+            return (
+                " — RBG dispatch enabled: route via "
+                "RedBlueGreenDispatchGuard.review() "
+                "(5-axis red+blue+green, 5-state verdict)."
+            )
+        except Exception:
+            return ""
 
     def _classify(
         self, cache_dir: str, session_id: str,
@@ -420,7 +464,11 @@ class CbuaPipelineGuard(BaseGuard):
 
     @staticmethod
     def _generate_reminder(
-        state: dict, complexity: str, redteam_required: bool,
+        state: dict,
+        complexity: str,
+        redteam_required: bool,
+        *,
+        rbg_hint: str = "",
     ) -> Optional[GuardResult]:
         """Generate reminders based on accumulated state.
 
@@ -491,7 +539,11 @@ class CbuaPipelineGuard(BaseGuard):
             and not state.get("redteam_dispatched")
             and edit_count >= 10
         ):
-            missing.append("⛔ A5 紅隊未派出")
+            # ``rbg_hint`` is "" by default (preserves existing message
+            # text). When ``redblue_green_review.wire_into_u_stage`` is
+            # opt-in enabled, the hint points the agent to the 5-axis
+            # RBG dispatch path instead of an ad-hoc red-team spawn.
+            missing.append("⛔ A5 紅隊未派出" + rbg_hint)
 
         # WIREDO delivery reminder: ONE-SHOT, fires only at delivery
         # signals. 2026-04-13 fix (用戶糾正「時機判斷要正確 不然會

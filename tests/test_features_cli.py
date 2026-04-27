@@ -194,3 +194,110 @@ def test_cli_unknown_profile_exits_nonzero(
         cfg=tmp_cfg,
     )
     assert code == 1
+
+
+# ── First-run marker side-effect (4.0.0 onboarding handoff) ─────────
+
+
+@pytest.fixture()
+def isolated_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    """Redirect HOME so ``mark_seen()`` lands in tmp_path, not the real ~/.
+
+    Mirrors the autouse fixture in tests/test_first_run.py so we can
+    safely exercise the CLI side-effect that writes the on-disk marker.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    return tmp_path
+
+
+def test_cli_set_profile_permissive_writes_marker(
+    tmp_cfg: Config,
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``set-profile permissive`` must touch ``~/.concinno/.4_0_0_seen``
+    and leave DEFAULT_OFF_4_0_0 features OFF (the no-op outcome).
+    """
+    marker = isolated_home / ".concinno" / ".4_0_0_seen"
+    assert not marker.exists()
+
+    code = _run_cli("features", "set-profile", "permissive", cfg=tmp_cfg)
+    capsys.readouterr()  # discard output
+
+    assert code == 0
+    assert marker.exists(), "set-profile permissive must write the marker"
+    # DEFAULT_OFF_4_0_0 features should remain OFF (permissive = no-op).
+    for feat in DEFAULT_OFF_4_0_0:
+        assert tmp_cfg.feature(feat, "enabled") is False
+
+
+def test_cli_set_profile_strict_writes_marker_and_enables(
+    tmp_cfg: Config,
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``set-profile strict`` must (a) write the marker, (b) enable the
+    expected DEFAULT_OFF_4_0_0 gate subset.
+    """
+    marker = isolated_home / ".concinno" / ".4_0_0_seen"
+    assert not marker.exists()
+
+    code = _run_cli("features", "set-profile", "strict", cfg=tmp_cfg)
+    capsys.readouterr()
+
+    assert code == 0
+    assert marker.exists(), "set-profile strict must write the marker"
+    # Spot-check the recommended defensive gates from the brief.
+    for feat in (
+        "butterfly_guard",
+        "destruction_guard",
+        "premise_gate",
+        "consecutive_fail_gate",
+        "sentinel_gate",
+        "wiredo_guard",
+    ):
+        if feat in DEFAULT_OFF_4_0_0:
+            assert tmp_cfg.feature(feat, "enabled") is True, (
+                f"strict profile should enable {feat}"
+            )
+
+
+def test_cli_set_profile_does_not_trigger_banner(
+    tmp_cfg: Config,
+    isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Chicken-and-egg: invoking ``set-profile`` must NOT itself fire
+    the first-run banner, even though the marker is absent at start.
+
+    Verified by setting argv to a set-profile invocation, then calling
+    the banner gate directly — it should be a no-op.
+    """
+    from concinno.cli._first_run import (
+        marker_exists,
+        maybe_print_first_run_banner,
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["concinno", "features", "set-profile", "permissive"],
+    )
+    assert marker_exists() is False
+    printed = maybe_print_first_run_banner()
+    captured = capsys.readouterr()
+
+    assert printed is False
+    assert captured.err == ""
+    # Banner skip must NOT touch the marker — only the actual
+    # set-profile cmd body does that.
+    assert marker_exists() is False
+
+    # Now actually run set-profile and confirm it writes the marker.
+    code = _run_cli("features", "set-profile", "permissive", cfg=tmp_cfg)
+    capsys.readouterr()
+    assert code == 0
+    assert marker_exists() is True

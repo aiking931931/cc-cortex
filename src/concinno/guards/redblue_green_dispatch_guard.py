@@ -321,7 +321,9 @@ _ZIQ_ARM_TARGETS: tuple[str, ...] = (
     "redblue_green_review.radius_chaotic_threshold",
 )
 
-_AXIS_WEIGHT_ARMS: tuple[float, ...] = (0.10, 0.20, 0.30, 0.40, 0.50)
+_AXIS_WEIGHT_ARMS: tuple[float, ...] = (
+    0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50,
+)
 _GREEN_PM_TRUST_ARMS: tuple[float, ...] = (0.40, 0.55, 0.70, 0.85, 1.00)
 _FATAL_THRESHOLD_ARMS: tuple[int, ...] = (2, 3, 4, 5)
 _RADIUS_CHAOTIC_THRESHOLD_ARMS: tuple[float, ...] = (0.85, 0.90, 0.93, 0.95)
