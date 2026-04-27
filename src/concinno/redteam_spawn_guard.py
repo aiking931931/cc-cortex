@@ -118,7 +118,7 @@ class SpawnRecord:
     cap: int
     timestamp: str               # ISO-8601 UTC
     estimated_spawns: int        # what the caller announced
-    role: str = "redteam"        # redteam | blueteam | commander | other
+    role: str = "redteam"        # redteam | blueteam | greenteam | commander | other
     extra: dict = field(default_factory=dict)
 
     def to_jsonl(self) -> str:
@@ -327,6 +327,15 @@ def before_spawn_redteam(
     if estimated_spawns <= 0:
         raise ValueError(
             f"estimated_spawns must be positive, got {estimated_spawns}",
+        )
+
+    # 2026-04-27: green role accepted (RBG dispatch guard PM verdict role).
+    if role == "green":
+        role = "greenteam"
+    valid_roles = {"redteam", "blueteam", "greenteam", "commander", "other"}
+    if role not in valid_roles:
+        raise ValueError(
+            f"role must be one of {sorted(valid_roles)}, got {role!r}",
         )
 
     effective_cap = cap if cap is not None else _resolve_cap()

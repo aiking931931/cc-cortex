@@ -66,7 +66,15 @@ _BASH_PATTERNS: list[tuple[re.Pattern[str], str, int]] = [
     (re.compile(r"npm\s+install\b", re.IGNORECASE), "long_op", 300),
     (re.compile(r"cargo\s+build(?:\s+--release)?\b", re.IGNORECASE), "long_op", 600),
     (re.compile(r"pytest\b.*\b--timeout\b", re.IGNORECASE), "long_op", 1800),
+    # ``pytest --runslow`` toggles slow-marked tests (common idiom across
+    # Concinno + many OSS Python repos); 4-trigger expansion 2026-04-27.
+    # NB: ``\b`` before ``--`` does NOT match (space + dash are both
+    # non-word), so we anchor on whitespace then literal ``--flag``.
+    (re.compile(r"pytest\b.*\s--runslow\b", re.IGNORECASE), "long_op", 1800),
     (re.compile(r"git\s+clone\b", re.IGNORECASE), "long_op", 300),
+    # ``git fetch --all --prune`` on a multi-remote repo can take a
+    # while; treat as long_op so the watcher surfaces ETA.
+    (re.compile(r"git\s+fetch\b.*\s--all\b.*\s--prune\b", re.IGNORECASE), "long_op", 300),
     # RunPod / cloud orchestration
     (re.compile(r"runpod\s+", re.IGNORECASE), "deploy", 600),
 ]

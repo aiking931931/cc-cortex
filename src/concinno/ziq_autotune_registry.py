@@ -259,6 +259,27 @@ TUNABLE_REGISTRY: dict[str, TunableSpec] = {
 }
 
 
+def register(spec: TunableSpec, *, overwrite: bool = False) -> None:
+    """Register a new tunable target into ``TUNABLE_REGISTRY``.
+
+    Use this for module-import-time registration of tunable arms owned
+    by feature modules (e.g. ``redblue_green_dispatch_guard`` registers
+    its 8 axis-weight / verdict-threshold arms on import).
+
+    Args:
+        spec: Fully-formed :class:`TunableSpec` to add.
+        overwrite: If ``False`` (default) and the target already exists,
+            raise :class:`KeyError`. If ``True``, replace the existing
+            entry (mostly useful for tests / hot-reload).
+    """
+    if not overwrite and spec.target in TUNABLE_REGISTRY:
+        raise KeyError(
+            f"Tunable target '{spec.target}' is already registered. "
+            f"Pass overwrite=True to replace.",
+        )
+    TUNABLE_REGISTRY[spec.target] = spec
+
+
 def list_targets() -> list[str]:
     """Return registered tunable target identifiers, sorted alphabetically."""
     return sorted(TUNABLE_REGISTRY.keys())
@@ -341,4 +362,5 @@ __all__ = [
     "describe",
     "get_tuner",
     "list_targets",
+    "register",
 ]

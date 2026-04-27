@@ -1645,6 +1645,9 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr,attr-defined]
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr,attr-defined]
 
+    from concinno.cli._first_run import maybe_print_first_run_banner
+    maybe_print_first_run_banner()
+
     parser = argparse.ArgumentParser(
         prog="concinno",
         description="Production-grade hooks for Claude Code",

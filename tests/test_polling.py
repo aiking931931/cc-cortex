@@ -128,6 +128,63 @@ def test_classifier_handles_chained_segments():
     assert cls.kind == "upload"
 
 
+# ── 4-trigger audit expansion (2026-04-27) ────────────────────────────
+#
+# Audit (research_log.md) noted four wait-state idioms that the 4.1.0
+# pattern table missed or only partially covered. Two were already in
+# the table (``npm install`` / ``cargo build --release``); the other
+# two (``pytest --runslow`` / ``git fetch --all --prune``) were added
+# alongside these tests. All four are covered here as regression locks.
+
+
+def test_classify_pytest_runslow():
+    from concinno.polling import classify_wait
+    cls = classify_wait("Bash", {"command": "pytest --runslow tests/"})
+    assert cls is not None
+    assert cls.kind == "long_op"
+    assert cls.eta_seconds > 0
+
+
+def test_classify_git_fetch_all_prune():
+    from concinno.polling import classify_wait
+    cls = classify_wait(
+        "Bash", {"command": "git fetch --all --prune"},
+    )
+    assert cls is not None
+    assert cls.kind == "long_op"
+    assert cls.eta_seconds > 0
+
+
+def test_classify_cargo_build_release():
+    from concinno.polling import classify_wait
+    cls = classify_wait("Bash", {"command": "cargo build --release"})
+    assert cls is not None
+    assert cls.kind == "long_op"
+
+
+def test_classify_npm_install():
+    from concinno.polling import classify_wait
+    cls = classify_wait("Bash", {"command": "npm install"})
+    assert cls is not None
+    assert cls.kind == "long_op"
+
+
+def test_existing_classifier_tests_still_pass():
+    """Sanity: a representative subset of pre-existing classifier
+    behaviours still matches after the 4-trigger expansion. Guards
+    against accidental regression in the pattern table."""
+    from concinno.polling import classify_wait
+
+    # Pre-existing patterns must still match.
+    assert classify_wait("Bash", {"command": "twine upload"}).kind == "upload"
+    assert classify_wait("Bash", {"command": "docker push img"}).kind == "upload"
+    assert classify_wait("Bash", {"command": "git clone git@..."}).kind == "long_op"
+
+    # Pre-existing non-matches must still be None.
+    assert classify_wait("Bash", {"command": "ls -la"}) is None
+    assert classify_wait("Read", {"file_path": "/tmp/x"}) is None
+
+
 # ── Wait queue CRUD ───────────────────────────────────────────────────
 
 

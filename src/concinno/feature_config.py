@@ -2574,6 +2574,56 @@ FEATURE_META: dict[str, dict] = {
             },
         },
     },
+    "redblue_green_review": {
+        "category": "behavioral",
+        "enabled": True,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "description": (
+            "Red+Blue+Green (RBG) review dispatch guard — 5-axis aggregation, "
+            "5-state verdict, 4-step framing check, ZIQ-tuned axis weights."
+        ),
+        "description_zh": (
+            "紅藍綠（RBG）審查派遣 guard — 5 軸聚合、5 態裁決、4 步 framing "
+            "檢查、ZIQ 調 axis 權重。"
+        ),
+        "params": {
+            "real_done_weight": 0.20,
+            "wired_weight": 0.20,
+            "functional_weight": 0.25,
+            "ai_capability_weight": 0.20,
+            "ux_friction_weight": 0.15,
+            "green_pm_trust": 0.70,
+            "fatal_threshold": 3,
+            "radius_chaotic_threshold": 0.90,
+            "max_concurrent_opus": 5,
+            "review_timeout_seconds": 300,
+        },
+        "recommended": True,
+        "severity": "minor",
+    },
+    "review_router_ziq": {
+        "category": "behavioral",
+        "enabled": True,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "description": (
+            "ZIQ-routed review method dispatcher — picks MAR (breadth) vs "
+            "R+B+G (depth) vs sequential / parallel composites per task. "
+            "SPS structural prior + FTRL outcome posterior."
+        ),
+        "description_zh": (
+            "ZIQ 路由審查方法派遣 — 按任務挑 MAR（廣度）/ RBG（深度）/ "
+            "順序 / 並行組合。SPS 結構先驗 + FTRL 結果後驗。"
+        ),
+        "params": {
+            "meta_mar_every_n_chaotic": 10,
+            "ftrl_takeover_after_n_samples": 30,
+            "cost_adjustment_factor": 1.0,
+        },
+        "recommended": True,
+        "severity": "minor",
+    },
 }
 
 
