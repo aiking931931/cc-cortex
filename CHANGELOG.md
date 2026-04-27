@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.5] - 2026-04-27 — release_authorization explicit default-OFF
+
+Same-day micro-patch closing a default-on regression in 4.2.4 and earlier.
+The `release_authorization` FEATURE_META entry was missing an explicit
+`enabled` field — fresh installs without `cc_config.json` overrides fell
+through to category-level default-on, which contradicted the 4.0.0
+SEMVER-MAJOR default-off-gates transition this feature should have been
+part of. Now explicit `enabled: False` aligns it with the other 21
+hard_gate features.
+
+### Fixed
+
+- `concinno.feature_config.FEATURE_META["release_authorization"]` —
+  added explicit `"enabled": False` field. Per 2026-04-27 user directive
+  (>10 correction cycles culminating in "煩不煩 我都說了授權功能全關閉
+  說了十幾次"), the entire publish-authorization gate is permanently
+  opt-out for this user; this patch makes the default-OFF behaviour
+  apply to **all** fresh installs worldwide, not just users who
+  explicitly opt out via `~/.concinno/release_auth.json` or
+  `cc_config.json`. See `feedback_publish_authorization_permanently_disabled.md`
+  in user-side memory for full rationale.
+
+### Notes
+
+- This is NOT a SEMVER-MAJOR bump because `release_authorization` was
+  effectively default-on by accident, not by design — fixing it to
+  match the documented 4.0.0 default-off-gates intent is a regression
+  fix, not a behavioural break for users who already had the documented
+  behaviour.
+- `destruction_guard` R0-R4 (data deletion: rm -rf working tree /
+  DROP TABLE / git filter-repo / force push main / git gc --prune=now)
+  remains gated and unchanged. Only publish-authorization gates flip.
+- Standing config for the directive author: `~/.concinno/release_auth.json`
+  `disabled: true` + `~/.claude/settings.json::permissions.allow`
+  whitelist for twine/git tag patterns — both already in place.
+
 ## [4.2.4] - 2026-04-27 — R+B+G CBUA review verdict carryover patch
 
 Same-day patch release implementing the three must-fix items from the

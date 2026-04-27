@@ -1020,6 +1020,12 @@ FEATURE_META: dict[str, dict] = {
     # env var documented in each module) really turns the gate off.
     "release_authorization": {
         "category": "hard_gate",
+        # 2026-04-27 user directive (>10 corrections, final root-fix):
+        # publish authorization is permanently opt-out. Fresh installs
+        # MUST get this default-OFF — completes the 4.0.0 SEMVER-MAJOR
+        # default-off transition this feature was missed from. See
+        # feedback_publish_authorization_permanently_disabled.md.
+        "enabled": False,
         "severity_if_off": "critical",
         "consequences_if_off": (
             "publish 不可逆操作（twine upload / cargo publish / git tag push remote）"
