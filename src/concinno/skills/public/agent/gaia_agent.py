@@ -33,6 +33,20 @@ import sys
 import tempfile
 import threading
 
+# ── Public generic solvers (wave-1 cont'd¹⁴ refactor) ───────────────────────
+# The three hybrid solver pipelines have been extracted to
+# ``concinno.skills.public.agent.generic_solvers`` as public OSS API.
+# Import them here so external callers can use:
+#   from concinno.skills.public.agent.gaia_agent import (
+#       solve_orthogonal_polygon_via_opencv_hybrid, ...)
+# The internal ``_solve_*_hybrid`` private names defined later in this file
+# remain intact for backward-compat with existing tests and call-sites.
+from concinno.skills.public.agent.generic_solvers import (  # noqa: E402
+    solve_colour_coded_numeric_via_hybrid,  # noqa: F401  re-export
+    solve_image_quiz_scoring_via_hybrid,  # noqa: F401  re-export
+    solve_orthogonal_polygon_via_opencv_hybrid,  # noqa: F401  re-export
+)
+
 # ── Config ────────────────────────────────────────────────
 GEMMA_URL = os.environ.get(
     "GEMMA_URL",

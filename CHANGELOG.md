@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `concinno.skills.public.agent.generic_solvers` (public hybrid vision solvers)
+
+Extracts three GAIA-proven hybrid vision solver pipelines from the private
+`gaia_agent.py` runner into a standalone public OSS module, making them
+reusable by any vision-arithmetic / OCR-with-rule agent without depending on
+GAIA-runner glue code.
+
+**New public module**: `concinno.skills.public.agent.generic_solvers`
+
+Public API (`__all__` exported):
+
+* `solve_orthogonal_polygon_via_opencv_hybrid(question, image_path, *, model, passes_count)` —
+  OpenCV vertex extraction + narrow Sonnet OCR (multipass majority vote per
+  edge) + Python shoelace area. Closure constraints fill missing labels.
+  Returns `(answer: str, info: dict)`.
+
+* `solve_colour_coded_numeric_via_hybrid(question, image_path, *, model, passes_count)` —
+  OpenCV HSV colour-isolation per named colour + narrow Sonnet OCR +
+  Python `statistics` plan execution. Generic over any colour-coded
+  numeric data question. Returns `(answer: str, info: dict)`.
+
+* `solve_image_quiz_scoring_via_hybrid(question, image_path, *, model, passes_count)` —
+  Sonnet OCR + classification + deterministic `fractions.Fraction` judge +
+  arithmetic-plan compute via `concinno.tools.builtin.compute`. Returns
+  `(answer: str, info: dict)`.
+
+* Detector predicates: `is_orthogonal_polygon_area_question`,
+  `is_colour_coded_numeric_data_question`, `is_image_quiz_scoring_question`.
+
+* `extract_json_object(raw)` — shared JSON extraction helper (public).
+
+**Backward compat**: `gaia_agent.py` retains all existing `_solve_*_hybrid`
+private names and re-exports the three public names, so existing tests and
+call-sites require zero changes.
+
+**Tests**: `tests/test_generic_solvers.py` — 8 tests covering importability,
+`__all__` contract, no-circular-import guarantee, all 3 detector predicates,
+`extract_json_object`, and `gaia_agent` re-export. All 120 solver tests pass
+(112 existing + 8 new). Ruff clean.
+
+Candidate for **4.3.0**.
+
 ### Added — `concinno.tools.builtin.dspy_optimizer` (DSPy MIPROv2 prompt optimizer)
 
 Adds an opt-in DSPy MIPROv2 Bayesian search wrapper for CBUA stage

@@ -74,7 +74,7 @@ def _command_matches_pip_concinno(cmd: str) -> bool:
 # the file has never been written. Either case warrants the reminder.
 _HEARTBEAT_STALE_SECONDS = 5 * 60
 
-_HEARTBEAT_PATH = Path.home() / ".memoria" / "heartbeat.json"
+_HEARTBEAT_PATH = Path.home() / ".memoria" / "memoria_heartbeat.json"
 
 
 def _feature_enabled() -> bool:

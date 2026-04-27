@@ -197,6 +197,57 @@ def _resolve_feature_alias(name: str) -> str:
     return _legacy_aliases().get(name, name)
 
 
+def _coerce_env_value(raw: str, key: str) -> Any:
+    """Coerce an env-var string to the appropriate Python type.
+
+    Bool keys (``enabled`` or any key ending in ``_enabled``):
+      ``1`` / ``true`` / ``yes`` / ``on`` → True
+      ``0`` / ``false`` / ``no`` / ``off`` → False
+      anything else → None (skip override, treat as absent)
+
+    Int / float: tried in order; fall back to raw str.
+    """
+    if key == "enabled" or key.endswith("_enabled"):
+        low = raw.strip().lower()
+        if low in ("1", "true", "yes", "on"):
+            return True
+        if low in ("0", "false", "no", "off"):
+            return False
+        return None  # malformed → don't override
+
+    # Try int first, then float, then str
+    stripped = raw.strip()
+    try:
+        return int(stripped)
+    except ValueError:
+        pass
+    try:
+        return float(stripped)
+    except ValueError:
+        pass
+    return stripped
+
+
+def _env_feature_override(feature: str, key: str) -> Any:
+    """Return the env-var override for (feature, key), or None if absent.
+
+    Naming: ``CONCINNO_<FEATURE_UPPER>_<KEY_UPPER>``
+    where feature is the canonical snake_case name and key is the param key.
+
+    Examples::
+        CONCINNO_AGENT_CAP_ENABLED=false
+        CONCINNO_AGENT_CAP_MAX_SPAWNS=8
+        CONCINNO_TOKEN_GATE_AGENT_THRESHOLD=100000
+        CONCINNO_CONSECUTIVE_FAIL_GATE_MAX_FAILS=2
+        CONCINNO_POLLING_WATCHER_ENABLED=0
+    """
+    env_name = f"CONCINNO_{feature.upper()}_{key.upper()}"
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return None
+    return _coerce_env_value(raw, key)
+
+
 def _warn_legacy_alias(legacy: str, canonical: str) -> None:
     """Emit a one-time-per-process stderr deprecation warning.
 
@@ -364,6 +415,26 @@ class Config:
     def feature(self, name: str, key: str = "enabled") -> Any:
         """Get a feature config value. e.g. feature("agent_cap", "max_spawns").
 
+        Resolution order (later overrides earlier — 6-source chain):
+          1. Rule-hardcoded / FEATURE_META default
+          2. _DEFAULTS["features"] param defaults
+          3. Per-project cc_config.json (or ~/.claude/hooks/cc_config.json)
+          4. User-level ~/.concinno/*.json (not implemented here; future)
+          5. Env var ``CONCINNO_<FEATURE>_<PARAM>`` (upper-snake of name_key)
+          6. User明示 (session-level; handled by callers, not this layer)
+
+        Env var naming convention:
+          ``CONCINNO_<FEATURE_UPPER>_<PARAM_UPPER>``
+          Examples:
+            CONCINNO_AGENT_CAP_ENABLED=false
+            CONCINNO_AGENT_CAP_MAX_SPAWNS=8
+            CONCINNO_TOKEN_GATE_AGENT_THRESHOLD=100000
+            CONCINNO_CONSECUTIVE_FAIL_GATE_MAX_FAILS=2
+
+        Type coercion: bool keys (``enabled``) accept 1/0/true/false/yes/no
+        (case-insensitive). Int keys coerced to int when the value is all
+        digits. Float keys coerced to float when parseable. Other keys: str.
+
         Honors :data:`concinno.feature_config.LEGACY_ALIASES` — when a
         caller asks for the canonical (new) name and the cc_config.json
         only has the legacy (old) name set, we transparently read the
@@ -398,16 +469,28 @@ class Config:
                         break
         if key == "enabled":
             if "enabled" in feat:
-                return feat["enabled"]
-            # Fall through to FEATURE_META ship-level default. Lazy
-            # import to avoid concinno.core.config ↔ concinno.feature_config
-            # circular dependency at module load.
-            try:
-                from concinno.feature_config import meta_enabled_default
-                return meta_enabled_default(canonical)
-            except Exception:
-                return True
-        return feat.get(key)
+                base = feat["enabled"]
+            else:
+                # Fall through to FEATURE_META ship-level default. Lazy
+                # import to avoid concinno.core.config ↔ concinno.feature_config
+                # circular dependency at module load.
+                try:
+                    from concinno.feature_config import meta_enabled_default
+                    base = meta_enabled_default(canonical)
+                except Exception:
+                    base = True
+            # Source 5: env var override (highest priority before user明示)
+            env_val = _env_feature_override(canonical, key)
+            if env_val is not None:
+                return env_val
+            return base
+
+        # Non-enabled key: get from feat dict, then check env override
+        base = feat.get(key)
+        env_val = _env_feature_override(canonical, key)
+        if env_val is not None:
+            return env_val
+        return base
 
     def feature_all(self, name: str) -> dict:
         """Get full feature config dict.
