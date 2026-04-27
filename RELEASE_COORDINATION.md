@@ -3,20 +3,20 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## 現況 snapshot（2026-04-27 — **4.2.2 LIVE on PyPI** — wave-1 bundle + release_lock atomic + docstring fix）
+## Current snapshot (2026-04-27 — **4.2.2 LIVE on PyPI** — wave-1 bundle + release_lock atomic + docstring fix)
 
-| 欄位 | 值 |
+| Field | Value |
 | --- | --- |
 | Registry latest (PyPI) | **`4.2.2`** ✅ (uploaded 2026-04-27T04:37:45 UTC — <https://pypi.org/project/concinno/4.2.2/>) |
 | `pyproject.toml` version | `4.2.2` ✅ aligned |
 | `src/concinno/__init__.py __version__` | `4.2.2` ✅ aligned |
-| CHANGELOG.md 最新 release heading | `## [4.2.2] - 2026-04-27 — wave-1 bundle` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
-| 三源對齊狀態 | ✅ aligned at 4.2.2 |
+| CHANGELOG.md latest release heading | `## [4.2.2] - 2026-04-27 — wave-1 bundle` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
+| Triple-source alignment | ✅ aligned at 4.2.2 |
 | Git tag | ✅ `v4.2.2` pushed (commit `5dc1a5c` on branch `feat/2.3.0-red-team-round-3`) |
 | Inner concinno HEAD | `5dc1a5c release(4.2.2): wave-1 bundle + release_lock atomic + docstring fix` |
 | Previous release | `4.2.1` (7d34316 — pip aftermath hint + Memoria heartbeat) |
 | Pending Publish Queue | empty (4.2.2 published) |
-| release_auth 狀態 | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)` + `Bash(python -m twine upload:*)` + `Bash(git push origin v*:*)` + `Bash(python -m twine check:*)`) green |
+| release_auth state | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)` + `Bash(python -m twine upload:*)` + `Bash(git push origin v*:*)` + `Bash(python -m twine check:*)`) green |
 | Build artifacts | ✅ `dist/concinno-4.2.2-py3-none-any.whl` + `dist/concinno-4.2.2.tar.gz` published. Stale `concinno-3.0.x` / `3.1.x` / `3.2.0` / `4.0.0` / `4.1.0` / `4.2.0` / `4.2.1` left on disk (not on PyPI risk; safe to `rm` next cleanup pass). |
 | **Post-publish ops** | None — wave-1 bundle is purely additive; no yank, no migration shim needed. |
 | **Verification** | pytest 7567 passed / 0 failed / 8 skipped / 3 xfailed in 11 min (deselecting 2 known cross-suite concurrency flakes per handoff §3 needing `state_dir tmp_path` fixture). 11/11 release_lock tests pass independently. Ruff clean across all 4.2.2-touched files. Triple-source aligned. |
