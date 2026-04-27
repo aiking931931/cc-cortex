@@ -104,6 +104,14 @@ from concinno.agent.retrieve_pipeline import (
     ZIQCascadePipeline,
 )
 from concinno.agent.sentinel_parser import extract_sentinel_answer
+from concinno.agent.session_loop import (
+    RetryPolicy,
+    RunContext,
+    SessionLoop,
+    ToolResult,
+    ToolSpec,
+    tool,
+)
 from concinno.agent_artifact_guard import AgentArtifactGuard
 from concinno.agent_gate import (
     AgentGateGuard,
@@ -175,8 +183,11 @@ __all__ = [
     "ParallelDispatcher",
     "ParallelLimitExceeded",
     "RenderedPromptCache",
+    "RetryPolicy",
     "RetrievalResult",
     "RolePlan",
+    "RunContext",
+    "SessionLoop",
     "SimpleFeatures",
     "SpawnPath",
     "SpawnRequest",
@@ -186,6 +197,8 @@ __all__ = [
     "TeammateCannotSpawnTeammate",
     "TierBudget",
     "TierDecision",
+    "ToolResult",
+    "ToolSpec",
     "VerificationResult",
     "ZIQCascadePipeline",
     "blind_label_order",
@@ -207,6 +220,7 @@ __all__ = [
     "retry_reminder_for_mode",
     "run_mas",
     "select_question_anchors",
+    "tool",
     "truncate_trace_top_k",
     "verify_task",
 ]

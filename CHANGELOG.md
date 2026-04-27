@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `concinno.agent.session_loop` — typed single-agent session loop borrowing
+  PydanticAI patterns (typed tool I/O, retry policy, result types, system-prompt
+  builder, run context). Zero new deps; pure stdlib (`dataclasses` + `typing` +
+  `inspect`). Public API: `SessionLoop`, `ToolSpec`, `tool`, `ToolResult`,
+  `RetryPolicy`, `RunContext`. All six names re-exported from `concinno.agent`.
+
 ## [4.2.2] - 2026-04-27 — wave-1 bundle
 
 Bundles wave-1 work that landed on the inner concinno HEAD between
