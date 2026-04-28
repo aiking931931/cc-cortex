@@ -413,23 +413,26 @@ class CircuitBreakerGuard(PolicyGate):
         self._circuit_open_severity: Severity = circuit_open_severity
         self._time_source = time_source if time_source is not None else time.monotonic
 
-        if share_state_with is False:  # type: ignore[comparison-overlap]
+        if share_state_with is False:
             # Explicit opt-out — operator wants instance-private state
             # (test fixtures, multi-tenant isolation, intentional
             # divergent breaker tuning per call site). Pass
             # ``share_state_with=False`` to get the legacy per-instance
             # registry without naming a sibling guard.
             self._registry = _BreakerStateRegistry()
-        elif share_state_with is not None:
+        elif isinstance(share_state_with, CircuitBreakerGuard):
             # Operator handed in a sibling guard — share that exact
             # registry. This branch existed in the legacy contract.
             self._registry = share_state_with._registry
         else:
-            # Default (4.4.0+): shared process-wide registry so two
-            # ``CircuitBreakerGuard()`` instances guarding ``api.foo``
-            # converge on the same breaker state. Previously two
-            # default-constructed instances each started with their
-            # own registry, which silently broke "same logical
+            # Default (4.4.0+) — also covers ``share_state_with=None``
+            # (left at constructor default) and the redundant
+            # ``share_state_with=True`` (operator explicitly asking
+            # for the shared registry). Both paths converge here so
+            # two ``CircuitBreakerGuard()`` instances guarding
+            # ``api.foo`` end up on the same breaker state. Previously
+            # two default-constructed instances each started with
+            # their own registry, which silently broke "same logical
             # resource, different wrapper" deployments (e.g. one
             # guard per worker thread / async task wrapping the
             # same upstream API).
