@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(setup): 5-profile recommender CLI (`concinno setup --profile=<name>`)
+  for the W4 (4.6.0) ``claude-code-setup`` recommendation tree (Plan v3
+  line 130-134). New `concinno.setup.recommender` module ships five
+  named starter profiles — `senior` / `junior` / `benchmark` /
+  `production` / `researcher` — each with a tailored
+  `feature_overrides` dict ready to merge into
+  `~/.claude/hooks/cc_config.json`. `concinno setup --list` enumerates
+  the catalogue, `--profile=<name>` produces a dry-run diff, and
+  `--profile=<name> --apply` atomically persists (tmp file +
+  `os.replace`) without touching unrelated top-level keys. JSON output
+  via `--format=json`. Pure stdlib, 11 new tests, ruff + mypy --strict
+  clean. Wired through `cli/main.py` `_register_setup` alongside the
+  other 4.5.x subcommands.
+
 - W4 (4.6.0) high-risk security guards (Plan v3 line 138-140) —
   three new `PolicyGate`-based guards landed in parallel as W4
   wave-1, all default-OFF (per L0 6-DoD + 4.0.0 SEMVER), all

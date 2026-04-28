@@ -1774,6 +1774,10 @@ def main() -> None:
     from .skill_emerge_cmd import register as _register_skill_emerge
     _register_skill_emerge(sub)
 
+    # 4.6.0 — W4 five-profile starter recommender
+    from .setup_cmd import register as _register_setup
+    _register_setup(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)
