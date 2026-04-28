@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- W4 (4.6.0) high-risk security guards (Plan v3 line 138-140) —
+  three new `PolicyGate`-based guards landed in parallel as W4
+  wave-1, all default-OFF (per L0 6-DoD + 4.0.0 SEMVER), all
+  wired into `guards/registry.py:_register_security` so the
+  pipeline picks them up the moment the operator flips the
+  feature flag:
+
+  - `concinno.security.http_client_guard` (~580 LoC + 59 tests):
+    HTTP request semantic policy distinct from `ssrf_guard`.
+    Inspects `Bash` curl/wget/httpie + `requests`/`httpx`/`aiohttp`
+    kwargs; flags domain denylist (critical → DENY), leaked-secret
+    headers (Bearer ghp_/sk-ant-/aws_secret_access_key prefix
+    family), destructive method on production-shape URLs,
+    `application/x-www-form-urlencoded` POST to non-allowlisted
+    domains. Default lists ship empty so first-install never
+    avalanches; allowlist override at `~/.concinno/http_client_guard.json`.
+
+  - `concinno.security.rce_injection_guard` (~850 LoC + 45 tests):
+    OWASP LLM-08. Catches f-string interpolation into shell
+    (`os.system(f"...{x}...")` / `subprocess.run(f"...", shell=True)`),
+    literal `eval`/`exec`/`compile(.., 'exec')`, unsafe
+    `subprocess.run(..., shell=True)` with non-literal `shell`,
+    Bash backtick command substitution beyond what
+    `bash_validators` already covers, and a heuristic single-shot
+    flag for unquoted `$VAR` in Bash. Reuses
+    `bash_validators.validate_dangerous_patterns`; never
+    re-implements existing detectors.
+
+  - `concinno.security.sql_injection_guard` (~780 LoC + 69 tests):
+    OWASP A03:2021. Catches concat / f-string / `%` / `.format`
+    interpolation into SQL plus dynamic identifier without
+    `psycopg.sql.Identifier` / `format('%I', ..)`. Whitelists
+    parametrized DB-API placeholders, SQLAlchemy `text(...).bindparams`,
+    Django/SQLAlchemy ORM filter syntax. Skips docstrings, comments,
+    pytest-style negative test fixtures by default
+    (`skip_test_files=True` opt-out for non-standard layouts).
+    File-extension gated to `.py`/`.sql`/`.ipynb`.
+
+  Each guard ships a dual-base pattern: rich `PolicyGate` subclass
+  for the audit log + ZIQ outcome bus + 4-tier fail-mode chain,
+  and a thin `BaseGuard` adapter (`HttpClientPipelineGuard` /
+  `RceInjectionBaseGuard` / `SqlInjectionBaseGuard`) wired into
+  `create_default_pipeline()` so the same guard surface plugs
+  into the existing 67-guard PreToolUse pipeline. Total
+  `pytest tests/security/`: 576 passed, 0 regressions; broader
+  902-test sweep across security + skills + observability +
+  guards + cbua_pipeline + evolution + user_correction +
+  skill_emerge: 902 passed, 0 regressions. ruff clean,
+  `mypy --strict` 0 issues across all three new guard sources.
+
+  Plan v3 risk-matrix anchors (line 138-140 / line 290 MIT-only
+  policy): zero new runtime deps, AGPL-clean implementation, no
+  upstream patches.
+
 - `concinno.evolution` (Hermes Port wave-3 HP5, W4 / 4.6.0 launch,
   ~250 LoC + 20 tests): optional GEPA (Genetic Pareto-efficient
   evolutionary search via LLM reflection) integration. Upstream

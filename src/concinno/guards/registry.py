@@ -23,6 +23,9 @@ def _register_security(pipe: GuardPipeline) -> None:
     from concinno.publish_scan import PublishScanGuard
     from concinno.release_authorization import ReleaseAuthorizationGuard
     from concinno.secret_scan import SecretScanGuard
+    from concinno.security.http_client_guard import HttpClientPipelineGuard
+    from concinno.security.rce_injection_guard import RceInjectionBaseGuard
+    from concinno.security.sql_injection_guard import SqlInjectionBaseGuard
 
     pipe.register(PromptInjectionGuard())
     pipe.register(SecretScanGuard())
@@ -31,6 +34,25 @@ def _register_security(pipe: GuardPipeline) -> None:
     pipe.register(ExfilGuard())
     pipe.register(IdentityGuard())
     pipe.register(DestructionGuard())
+    # 4.6.0: HTTP-client request-shape policy gate. Default OFF per
+    # 4.0.0 SEMVER baseline; complementary to ExfilGuard (file-bound
+    # exfil pattern detection) and SSRFGuard (network endpoint
+    # validation). Wires the PolicyGate-based HttpClientGuard into
+    # the pipeline via a thin BaseGuard adapter.
+    pipe.register(HttpClientPipelineGuard())
+    # 4.6.0 W4: RCE injection guard. Default OFF per 4.0.0 SEMVER
+    # baseline (FEATURE_META gate suppresses execution unless an
+    # operator opts in). Catches dynamic-code-construction patterns
+    # — f-string into shell, eval/exec on dynamic args,
+    # compile(..., 'exec'), Bash backtick + unquoted-var shapes —
+    # which the deserialize_guard / SSRFGuard / sql_injection_guard
+    # trio do not cover.
+    pipe.register(RceInjectionBaseGuard())
+    # 4.6.0 W4 wave-1: SQL injection scanner. Default OFF per 4.0.0
+    # SEMVER baseline (FEATURE_META gate suppresses execution unless
+    # an operator opts in). Catches the 5 unsafe SQL construction
+    # styles the deserialize / RCE / HTTP-client guards do not cover.
+    pipe.register(SqlInjectionBaseGuard())
     # 3.1.3: previously orphaned — defined as BaseGuard subclasses but
     # never registered, so the publish-time secret scan + the publish
     # authorisation gate were both dead code. Wiring audit 2026-04-26.

@@ -138,6 +138,12 @@ DEFAULT_OFF_4_0_0: frozenset[str] = frozenset({
     # 4.4.0 — Plan B Week 2 stateful runtime guard, default OFF per
     # 4.0.0 default-off-gates SEMVER baseline.
     "circuit_breaker_guard",
+    # 4.6.0 — W4 RCE injection guard, default OFF per 4.0.0 SEMVER baseline.
+    "rce_injection_guard",
+    # 4.6.0 — W4 HTTP-client request-shape policy gate, default OFF.
+    "http_client_guard",
+    # 4.6.0 — W4 wave-1 SQL injection scanner, default OFF.
+    "sql_injection_guard",
 })
 
 
@@ -1234,6 +1240,176 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ── RCE Injection Guard (4.6.0 W4) ──
+    "rce_injection_guard": {
+        "category": "security",
+        # Default OFF per 4.0.0 default-off-gates SEMVER baseline —
+        # also registered in DEFAULT_OFF_4_0_0 frozenset above.
+        "enabled": False,
+        # Severity thresholds + literal-eval gating are tunable; ZIQ
+        # learns from accept/warn/deny outcomes when the bus is on.
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "Dynamic-code construction patterns (f-string into "
+            "os.system / subprocess shell=True / eval+user_input / "
+            "compile(..., 'exec')) reach disk unflagged. A single "
+            "agent-generated line such as ``os.system(f\"echo "
+            "{user_input}\")`` becomes an RCE primitive once the "
+            "interpolated source is attacker-controllable."
+        ),
+        "description": (
+            "AST + regex scan for RCE-injection patterns "
+            "(f-string-into-shell, eval/exec on dynamic args, "
+            "compile(..., 'exec'), Bash backtick substitution, "
+            "Bash unquoted-variable expansion). Inherits PolicyGate "
+            "fail-mode chain — default ``warn`` when enabled, "
+            "``hard_deny`` in strict/paranoid. Per-line escape: "
+            "``# CONCINNO_DISABLE:rce_injection_guard:<reason>``."
+        ),
+        "description_zh": (
+            "AST + regex 偵測 RCE 注入 — "
+            "f-string 入 shell / eval-exec 動態參數 / "
+            "compile('exec') / Bash 反引號 / Bash 未引用變數。"
+            "繼承 PolicyGate fail-mode 鏈，預設啟用後 warn / "
+            "strict + paranoid hard_deny。逐行 escape："
+            "``# CONCINNO_DISABLE:rce_injection_guard:<reason>``。"
+        ),
+        "recommended": True,
+        "severity": "major",
+        "params": {
+            "min_severity": {
+                "type": "str",
+                "default": "medium",
+                "options": ["low", "medium", "high", "critical"],
+                "recommended": "medium",
+                "risk_low": (
+                    "``low`` keeps eval-literal / exec-literal — "
+                    "noisy on legitimate test code"
+                ),
+                "risk_high": (
+                    "``critical`` filters out bash_unquoted_var / "
+                    "format_shell — high-severity Bash RCE shapes leak"
+                ),
+                "risk_low_zh": (
+                    "``low`` 連 eval/exec 字面量也保留，合法測試噪音極高"
+                ),
+                "risk_high_zh": (
+                    "``critical`` 過濾 bash_unquoted_var / format_shell — "
+                    "高風險 Bash RCE 形狀會漏掉"
+                ),
+            },
+            "flag_eval_literal": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabling skips the audit-trail entry for literal "
+                    "eval/exec — useful in heavy test setups but reduces "
+                    "forensic visibility."
+                ),
+                "risk_off_zh": (
+                    "關閉後 eval/exec 字面量不寫稽核 — "
+                    "重測試場景可降噪但失去鑑識可見度"
+                ),
+            },
+        },
+    },
+    # ── HTTP-Client Request-Shape Guard (4.6.0 W4) ──
+    "http_client_guard": {
+        "category": "security",
+        # Default OFF per 4.0.0 default-off-gates SEMVER baseline —
+        # also registered in DEFAULT_OFF_4_0_0 frozenset above.
+        "enabled": False,
+        # Allowlist / denylist / severity thresholds are tunable but
+        # the policy evaluation outcome (accept/warn/deny) emits to
+        # the ZIQ bus so FTRL can learn per-domain reputation.
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "Outbound HTTP-client tool calls (curl/wget/requests/"
+            "httpx/aiohttp) leave the agent without any request-shape "
+            "policy. Bearer-token leaks in Authorization headers, "
+            "form-encoded POST exfil, and DELETE/PUT against "
+            "production-shape hosts ship un-flagged."
+        ),
+        "description": (
+            "Request-semantic policy gate for HTTP-client tool calls. "
+            "Domain allow/deny-list, leaked-secret prefix detection in "
+            "Authorization/Cookie/X-Api-Key headers, form-encoded POST "
+            "exfil shape, and DELETE/PUT against ``*.prod.*`` hosts. "
+            "Complementary to ssrf_guard (which validates network "
+            "endpoints). Inherits PolicyGate fail-mode chain — default "
+            "``warn`` when enabled, ``hard_deny`` in strict/paranoid. "
+            "Per-line escape: ``# CONCINNO_DISABLE:http_client:<reason>``."
+        ),
+        "description_zh": (
+            "HTTP-client 請求形狀政策閘 — 域名白/黑名單、洩漏密鑰 "
+            "前綴偵測（Authorization / Cookie / X-Api-Key）、表單 "
+            "POST exfil 形狀、production-shape host DELETE/PUT。"
+            "與 ssrf_guard（驗證網路端點）互補。繼承 PolicyGate "
+            "fail-mode 鏈，啟用後 warn / strict+paranoid hard_deny。"
+            "逐行 escape：``# CONCINNO_DISABLE:http_client:<reason>``。"
+        ),
+        "recommended": True,
+        "severity": "major",
+        "params": {
+            "allowlist_path": {
+                "type": "str",
+                "default": "~/.concinno/http_client_guard.json",
+                "recommended": "~/.concinno/http_client_guard.json",
+                "risk_off": (
+                    "Empty allowlist means unknown_domain findings "
+                    "never emit — first-line domain triage is off."
+                ),
+                "risk_off_zh": (
+                    "空白名單會關掉 unknown_domain 偵測 — "
+                    "第一道域名分級失效"
+                ),
+            },
+            "secret_severity": {
+                "type": "str",
+                "default": "high",
+                "options": ["low", "medium", "high", "critical"],
+                "recommended": "high",
+                "risk_low": (
+                    "``low`` lets leaked Bearer tokens pass with a "
+                    "soft warn — exfil is one network hop away."
+                ),
+                "risk_high": (
+                    "``critical`` blocks every Authorization header "
+                    "that matches a prefix — too aggressive on dev "
+                    "environments where short-lived test tokens are "
+                    "expected."
+                ),
+                "risk_low_zh": (
+                    "``low`` 洩漏 Bearer token 只 warn，"
+                    "exfil 一跳就出去"
+                ),
+                "risk_high_zh": (
+                    "``critical`` 攔下所有 Authorization 命中 — "
+                    "dev 環境短期 token 會誤擋"
+                ),
+            },
+            "denylist_severity": {
+                "type": "str",
+                "default": "critical",
+                "options": ["low", "medium", "high", "critical"],
+                "recommended": "critical",
+                "risk_low": (
+                    "Lowering the denylist severity defeats the "
+                    "explicit operator block — denylist hits should "
+                    "always be loud."
+                ),
+                "risk_low_zh": (
+                    "降低 denylist severity 等同放掉操作員明示 "
+                    "封鎖 — 命中該大聲"
+                ),
+            },
+        },
+    },
     # ── Circuit Breaker Guard (4.4.0 Plan B Week 2) ──
     "circuit_breaker_guard": {
         "category": "security",
@@ -1379,6 +1555,81 @@ FEATURE_META: dict[str, dict[str, Any]] = {
                 "risk_high_zh": (
                     "高於 30 分鐘，一次大故障可能整個 session "
                     "都斷路"
+                ),
+            },
+        },
+    },
+    # ── SQL Injection Guard (4.6.0 W4 wave-1) ──
+    "sql_injection_guard": {
+        "category": "security",
+        # Default OFF per L0 6-DoD opt-in baseline (4.0.0 SEMVER).
+        "enabled": False,
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "Agent-written code that interpolates user input into SQL "
+            "(string-concat / f-string / %% / .format()) ships to disk "
+            "unflagged — single agent edit can introduce OWASP A03:2021 "
+            "Injection. The guard is the only static-analysis layer "
+            "covering query construction in the Concinno security stack."
+        ),
+        "description": (
+            "Regex-based SQL injection scanner. Detects 5 unsafe "
+            "construction styles (concat / f-string / %% / .format() / "
+            "dynamic identifier) and whitelists 4 safe alternatives "
+            "(parametrized DB-API, SQLAlchemy text() bindparams, ORM "
+            "filter syntax, psycopg.sql.Identifier). Inherits "
+            "PolicyGate fail-mode chain — default ``warn`` in "
+            "mainstream, ``hard_deny`` in strict / paranoid. Per-call "
+            "escape ``# CONCINNO_DISABLE:<reason>``."
+        ),
+        "description_zh": (
+            "Regex 偵測 SQL injection — 5 種不安全構造（concat / "
+            "f-string / %% / .format() / 動態識別子）+ 4 種安全寫法 "
+            "白名單（parametrized / SQLAlchemy bindparams / ORM "
+            "filter / psycopg.sql.Identifier）。繼承 PolicyGate "
+            "fail-mode 鏈。逐行 escape：``# CONCINNO_DISABLE:<reason>``。"
+        ),
+        "recommended": True,
+        "severity": "major",
+        "params": {
+            "min_severity": {
+                "type": "str",
+                "default": "medium",
+                "options": ["low", "medium", "high", "critical"],
+                "recommended": "medium",
+                "risk_low": (
+                    "``low`` keeps every match incl. dynamic-identifier "
+                    "interpolation — sharded systems and metaprogramming "
+                    "spike false positives."
+                ),
+                "risk_high": (
+                    "``critical`` keeps only the user-input concat shape "
+                    "— f-string / %% / .format() injections slip through."
+                ),
+                "risk_low_zh": (
+                    "``low`` 連動態識別子也算 — 分片系統與元程式設計"
+                    "誤判率高"
+                ),
+                "risk_high_zh": (
+                    "``critical`` 只剩 user-input concat — f-string / "
+                    "%% / .format() injection 會漏掉"
+                ),
+            },
+            "skip_test_files": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabling test-fixture skip flags every "
+                    "``' OR 1=1 --`` literal in pytest fixtures — "
+                    "drowns the audit log in intentional bad-string bait."
+                ),
+                "risk_off_zh": (
+                    "關閉測試檔跳過後，pytest fixture 裡刻意的 "
+                    "``' OR 1=1 --`` 字串會被全部標記，audit log "
+                    "充滿假警報"
                 ),
             },
         },

@@ -57,6 +57,19 @@ from concinno.security.deserialize_guard import (  # noqa: F401
     DeserializeFinding,
     DeserializeGuard,
 )
+from concinno.security.http_client_guard import (  # noqa: F401
+    DEFAULT_ALLOWLIST,
+    DEFAULT_DENYLIST,
+    PRODUCTION_HOST_PATTERNS,
+    SECRET_HEADER_PATTERNS,
+    HttpClientFinding,
+    HttpClientGuard,
+    HttpClientPipelineGuard,
+    HttpRequestPayload,
+    extract_payload,
+    parse_curl_command,
+    parse_python_http_kwargs,
+)
 from concinno.security.llm_judge_guard import (  # noqa: F401
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MAX_CACHE_SIZE,
@@ -103,6 +116,19 @@ from concinno.security.policy_gate import (  # noqa: F401
     Severity,
     ThreatCategory,
     ToolNameMatcher,
+)
+from concinno.security.rce_injection_guard import (  # noqa: F401
+    RCE_PATTERN_SEVERITY,
+    RceFinding,
+    RceInjectionBaseGuard,
+    RceInjectionGuard,
+    RcePayload,
+    extract_code_payload,
+)
+from concinno.security.sql_injection_guard import (  # noqa: F401
+    SqlInjectionFinding,
+    SqlInjectionGuard,
+    extract_sql_payload,
 )
 from concinno.security.ssrf_guard import (  # noqa: F401
     CLOUD_METADATA_HOSTS,
@@ -222,4 +248,27 @@ __all__ = [
     "DEFAULT_FAILURE_THRESHOLD",
     "DEFAULT_MAX_CALLS",
     "DEFAULT_WINDOW_S",
+    # 4.6.0 — RCE injection guard
+    "RCE_PATTERN_SEVERITY",
+    "RceFinding",
+    "RceInjectionBaseGuard",
+    "RceInjectionGuard",
+    "RcePayload",
+    "extract_code_payload",
+    # 4.6.0 — SQL injection guard
+    "SqlInjectionFinding",
+    "SqlInjectionGuard",
+    "extract_sql_payload",
+    # 4.6.0 — HTTP-client request-shape policy gate
+    "DEFAULT_ALLOWLIST",
+    "DEFAULT_DENYLIST",
+    "HttpClientFinding",
+    "HttpClientGuard",
+    "HttpClientPipelineGuard",
+    "HttpRequestPayload",
+    "PRODUCTION_HOST_PATTERNS",
+    "SECRET_HEADER_PATTERNS",
+    "extract_payload",
+    "parse_curl_command",
+    "parse_python_http_kwargs",
 ]
