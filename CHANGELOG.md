@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `concinno skill-emerge {list, show, accept, reject, prune}` CLI
+  (W3 carryover post-ship): out-of-band review workflow for drafts
+  staged by `SkillEmergenceGuard`. `accept` installs the draft to
+  `~/.claude/skills/<slug>/SKILL.md` (refuses to overwrite existing
+  Skills without `--force`) and emits a ZIQ reward=1.0 outcome;
+  `reject` deletes the draft and emits reward=0.0; `prune` clears
+  resolved entries from the index. Live install root override via
+  env `CONCINNO_LIVE_SKILL_ROOT`. New public helper
+  `concinno.skills.skill_emergence_guard.live_skill_root()`. The
+  guard's stderr notice now points at the CLI rather than the
+  manual move/delete fallback.
+
 ## [4.5.0] - 2026-04-28 — Week 3: Hermes Port wave-2 + Token Audit Autopilot + W3 ecosystem ship
 
 Plan v3 (jolly-sauteeing-journal.md) Week 3 release. Same-day triple+

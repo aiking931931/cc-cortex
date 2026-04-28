@@ -1770,6 +1770,10 @@ def main() -> None:
     from concinno.observability.token_audit.cli import register as _register_token_audit
     _register_token_audit(sub)
 
+    # 4.5.x carryover — W3 SkillEmergenceGuard accept/reject CLI
+    from .skill_emerge_cmd import register as _register_skill_emerge
+    _register_skill_emerge(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)

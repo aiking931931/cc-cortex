@@ -126,6 +126,42 @@ def _enable_ux_injection_for_legacy_tests(
         pass
 
 
+# 4.4.0 (CircuitBreakerGuard process-wide shared registry): when the
+# ``circuit_breaker_guard`` feature is enabled (e.g. via
+# ``_restore_default_on_for_legacy_tests`` below) and a guard is built
+# without ``share_state_with``, every guard converges on a single
+# ``_BreakerStateRegistry`` singleton. That makes the legacy tests in
+# ``test_escalation.py`` (and any other module that constructs guards
+# implicitly via ``LLMEscalator`` or :class:`CircuitBreakerGuard()`)
+# leak per-resource breaker state across test cases — a tier that
+# tripped OPEN in one test stays OPEN in the next, masking the tier-
+# specific behaviour under test.
+#
+# Reset the singleton between tests so each case starts from a clean
+# slate. ``tests/security/conftest.py`` already does this for the
+# security suite; this autouse fixture extends the contract to the
+# rest of the test tree without forcing every test author to remember
+# the reset call. Tests that explicitly want to share breaker state
+# across cases can pass ``share_state_with=<sibling>`` between guards
+# — that path bypasses the singleton lookup and is unaffected.
+@pytest.fixture(autouse=True)
+def _reset_shared_breaker_registry_global() -> None:
+    """Clear the process-wide breaker registry before AND after each
+    test. Best-effort import so test environments missing the security
+    module (e.g. minimal-deps CI shards) still run.
+    """
+    try:
+        from concinno.security.circuit_breaker_guard import (
+            reset_shared_breaker_registry,
+        )
+    except Exception:
+        yield
+        return
+    reset_shared_breaker_registry()
+    yield
+    reset_shared_breaker_registry()
+
+
 # 4.0.0 (default-off feature gates): the SHIP-LEVEL default for every
 # blocker feature flips to ``enabled=False``. The legacy test suites
 # were written assuming guards-default-ON and assert e.g. "this

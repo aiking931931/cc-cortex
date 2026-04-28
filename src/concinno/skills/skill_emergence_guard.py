@@ -88,6 +88,7 @@ __all__ = [
     "SkillDraft",
     "SkillEmergenceGuard",
     "draft_root",
+    "live_skill_root",
     "propose_draft",
 ]
 
@@ -197,9 +198,9 @@ class SkillDraft:
             f"`~/.claude/skills/{self.slug}/SKILL.md` to install.\n"
             f"- **Reject**: delete `{self.slug}.md` from "
             f"`~/.concinno/skill_drafts/`.\n"
-            "- A `concinno skill-emerge accept|reject` CLI subcommand is "
-            "planned for a 4.5.x patch wave; until it lands, the manual "
-            "move/delete steps above are the supported workflow.\n"
+            f"- Run `concinno skill-emerge accept {self.slug}` to install, "
+            f"or `concinno skill-emerge reject {self.slug}` to discard. "
+            f"`concinno skill-emerge list` shows pending drafts.\n"
         )
         return body
 
@@ -219,6 +220,20 @@ def draft_root() -> Path:
     if override:
         return Path(override)
     return Path.home() / ".concinno" / "skill_drafts"
+
+
+def live_skill_root() -> Path:
+    """Return the live Skill install directory used by ``skill-emerge accept``.
+
+    Override via env ``CONCINNO_LIVE_SKILL_ROOT`` for tests / sandboxed
+    deployments. Default ``~/.claude/skills`` (Claude Code's standard
+    Skill discovery path). The CLI never writes here automatically —
+    only on explicit ``concinno skill-emerge accept <slug>``.
+    """
+    override = os.environ.get("CONCINNO_LIVE_SKILL_ROOT", "").strip()
+    if override:
+        return Path(override)
+    return Path.home() / ".claude" / "skills"
 
 
 def _state_path() -> Path:
@@ -685,11 +700,10 @@ class SkillEmergenceGuard:
         """Inline stderr notice. No-op if no emit hook supplied."""
         msg = (
             f"concinno: SkillEmergenceGuard proposed draft '{draft.name}' "
-            f"at {md_path}. Review and edit the draft, then move it to "
-            f"`~/.claude/skills/{draft.slug}/SKILL.md` to install, or "
-            f"delete the draft file to discard. (A "
-            f"`concinno skill-emerge accept|reject` CLI subcommand is "
-            f"planned for a 4.5.x patch wave.)"
+            f"at {md_path}. Review and edit the draft, then run "
+            f"`concinno skill-emerge accept {draft.slug}` to install at "
+            f"`~/.claude/skills/{draft.slug}/SKILL.md`, or "
+            f"`concinno skill-emerge reject {draft.slug}` to discard."
         )
         emitter = self._stderr_emit
         if emitter is None:

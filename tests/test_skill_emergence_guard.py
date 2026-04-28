@@ -474,14 +474,13 @@ def test_stderr_emit_called_on_propose(
     )
     g.observe(_signal())
     assert len(captured) == 1
-    # 4.5.0 ship-fix (red-team HIGH-4): the inline notice now points the
-    # operator at the manual move/delete workflow because the
-    # ``concinno skill-emerge`` argparse subcommand is deferred to a
-    # 4.5.x patch wave. Both the install path and the discard path must
-    # still be present so the operator knows what to do without the
-    # subcommand.
+    # 4.5.x carryover: the inline notice now points the operator at
+    # the ``concinno skill-emerge accept|reject`` CLI (the W3 carryover
+    # subcommand has shipped). The install path and both verbs must
+    # appear so the operator knows what to run.
     assert "~/.claude/skills" in captured[0]
-    assert "delete" in captured[0]
+    assert "skill-emerge accept" in captured[0]
+    assert "skill-emerge reject" in captured[0]
 
 
 def test_stderr_emit_failure_swallowed(
