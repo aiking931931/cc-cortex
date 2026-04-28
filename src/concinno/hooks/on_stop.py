@@ -455,6 +455,55 @@ def main(hook_data: dict | None = None) -> None:
     _memory_lifecycle_stop(hook_data)
     _memory_lifecycle_session_end(hook_data)
 
+    # --- Optional: concinno-skills-session-search lifecycle (0.1.0+) ---
+    # ``on_stop`` indexes this session's transcript text (best-effort
+    # Haiku summary inside the sub-pkg). ``on_session_end`` rides the
+    # same Stop event because CC has no native ``SessionEnd`` hook —
+    # mirrors the concinno-skills-memory wiring above.
+    _session_search_lifecycle_stop(hook_data)
+    _session_search_lifecycle_session_end(hook_data)
+
+
+def _session_search_lifecycle_stop(hook_data: dict) -> None:
+    """Optional concinno-skills-session-search wiring; absence is silent."""
+    try:
+        from concinno_skills_session_search.lifecycle import (
+            LifecycleContext as _SearchCtx,
+        )
+        from concinno_skills_session_search.lifecycle import (
+            on_stop as _search_on_stop,
+        )
+
+        # Hook payload includes the transcript path / id but not the
+        # full transcript text. Pass session_id only; transcript-text
+        # capture is the consumer's responsibility (e.g. the Concinno
+        # session capture daemon writes the transcript file and the
+        # caller indexes it via the CLI ``--reindex`` path). Keeping
+        # this wire as id-only avoids reading megabytes inside a hot
+        # hook path.
+        _search_on_stop(
+            _SearchCtx(session_id=hook_data.get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
+
+
+def _session_search_lifecycle_session_end(hook_data: dict) -> None:
+    """Optional concinno-skills-session-search retention prune; absence is silent."""
+    try:
+        from concinno_skills_session_search.lifecycle import (
+            LifecycleContext as _SearchCtx,
+        )
+        from concinno_skills_session_search.lifecycle import (
+            on_session_end as _search_on_session_end,
+        )
+
+        _search_on_session_end(
+            _SearchCtx(session_id=hook_data.get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
+
 
 def _memory_lifecycle_stop(hook_data: dict) -> None:
     """Optional concinno-skills-memory wiring; absence is silent."""
