@@ -26,6 +26,24 @@ def main(hook_data: dict | None = None) -> None:
     except (ImportError, Exception):
         pass
 
+    # --- Module: token_audit_autopilot (begin per-session audit) ---
+    # Default-OFF per 4.0.0 opt-in policy. Honours feature flag.
+    try:
+        from concinno.core.config import get_config
+        from concinno.observability.token_audit.audit import get_audit
+
+        cfg = get_config()
+        if cfg.feature("token_audit_autopilot", "enabled"):
+            sid = (hook_data or {}).get("session_id", "")
+            audit = get_audit(session_id=sid or None, enabled=True)
+            audit.begin_session()
+        else:
+            # Force singleton into disabled mode so any in-session
+            # record_* call is a cheap no-op.
+            get_audit(enabled=False)
+    except (ImportError, Exception):
+        pass
+
     # --- Module: cognitive (start session profiling) ---
     try:
         from concinno.cognitive import on_session_start

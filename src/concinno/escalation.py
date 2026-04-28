@@ -205,10 +205,22 @@ class LLMEscalator:
         if self._cb_guard is None and self._gate_enabled():
             # Auto-construct a guard whose cooldown / threshold come
             # from the escalator's own constructor args so behaviour
-            # is consistent with the legacy breaker layer.
+            # is consistent with the legacy breaker layer. We also
+            # match ``backoff_base_s`` to the configured ``cooldown_s``
+            # so the operator-supplied cooldown is honoured even on
+            # the first open (the guard's ``_open_breaker`` clamps to
+            # ``max(initial_cooldown_s, backoff_base_s)`` which would
+            # otherwise round a 0.01 s test cooldown up to the 1.0 s
+            # default backoff base).
             self._cb_guard = CircuitBreakerGuard(
                 failure_threshold=self._circuit_threshold,
                 cooldown_s=self._circuit_cooldown_s,
+                backoff_base_s=min(
+                    self._circuit_cooldown_s, 1.0
+                ),
+                backoff_max_s=max(
+                    self._circuit_cooldown_s, 60.0
+                ),
                 # Disable the rate-limit window — the legacy breaker
                 # does not enforce one and we don't want the upgrade
                 # to introduce a new failure mode.

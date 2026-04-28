@@ -704,6 +704,58 @@ def _run_auto_checkpoint(
         _emit_stderr(f"auto-checkpoint → {os.path.basename(result)}")
 
 
+def _build_emergence_shape(tool_name: str, tool_input: dict) -> str:
+    """Canonical workflow fingerprint — same shape across runs.
+
+    Stripped of arguments / file paths / timestamps so the same
+    workflow primitive collapses to one fingerprint regardless of
+    which file it touches.
+    """
+    if tool_name == "Bash":
+        cmd = str(tool_input.get("command", "") or "")
+        head = cmd.strip().split(None, 2)[:2]
+        return " ".join(head)
+    if tool_name in ("Edit", "Write", "NotebookEdit"):
+        fp = str(tool_input.get("file_path") or tool_input.get("path") or "")
+        if "." in os.path.basename(fp):
+            return os.path.splitext(fp)[1].lstrip(".")
+    return ""
+
+
+def _run_skill_emergence(
+    tool_name: str, tool_input: dict, hook_data: dict,
+) -> None:
+    """Feed one observation into SkillEmergenceGuard.
+
+    Default-OFF (4.0.0 SEMVER baseline); the guard's internal
+    ``_is_enabled`` check short-circuits when the feature is off so
+    this section costs nothing in the disabled common case.
+    """
+    try:
+        from concinno.skills.skill_emergence_guard import (
+            EmergenceSignal,
+            SkillEmergenceGuard,
+        )
+
+        shape = _build_emergence_shape(tool_name, tool_input)
+        tool_result_text = ""
+        raw_result = hook_data.get("tool_result", "")
+        if isinstance(raw_result, str):
+            tool_result_text = raw_result
+        elif isinstance(raw_result, dict):
+            tool_result_text = str(raw_result.get("stdout", ""))
+        success = "error" not in tool_result_text.lower()
+        emerge = SkillEmergenceGuard(stderr_emit=_emit_stderr)
+        emerge.observe(EmergenceSignal(
+            tool_name=tool_name,
+            canonical_shape=shape,
+            success=success,
+            had_user_correction=False,
+        ))
+    except Exception:
+        pass  # never block the hook
+
+
 def _run_streak_ux(
     tool_name: str, tool_input: dict, guard_ctx: str,
     hook_data: dict, fragments: list[str],
@@ -787,6 +839,10 @@ def main(hook_data: dict | None = None) -> None:
             fragments.append(pip_ctx)
     except Exception:
         pass
+
+    # 5.46 SkillEmergenceGuard — observe tool-call patterns and propose
+    # Skill drafts (default-OFF; internal feature check short-circuits).
+    _run_skill_emergence(tool_name, tool_input, hook_data)
 
     # 5.5 ThinkingDepthGuard — record ALL tools, warn only on Edit
     try:

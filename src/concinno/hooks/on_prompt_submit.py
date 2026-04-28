@@ -412,6 +412,15 @@ def handle_prompt_submit(
     if skill_ctx:
         contexts.append(skill_ctx)
 
+    # 13. progressive Skill disclosure (HP7 — 4.5.0) — three-layer L1/L2/L3
+    #     router. Cheap inverted-index list_l1() + ZIQ-routed top-k.
+    #     Off by default (DEFAULT_OFF_4_0_0); when enabled, surfaces a
+    #     short advisory listing the top-k disclosable skills for the
+    #     current prompt without forcing a load_l2.
+    disclosure_ctx = _skill_disclosure_inject(user_prompt)
+    if disclosure_ctx:
+        contexts.append(disclosure_ctx)
+
     return {"contexts": contexts}
 
 
@@ -471,6 +480,44 @@ def _skill_proactive_router_inject(user_prompt: str) -> str | None:
         result = propose_skills(user_prompt)
         text = (result.additional_context or "").strip()
         return text or None
+    except Exception:
+        return None
+
+
+def _skill_disclosure_inject(user_prompt: str) -> str | None:
+    """Best-effort progressive Skill disclosure inject (HP7 — 4.5.0).
+
+    Wires :class:`concinno.skills.disclosure.SkillDisclosure` into the
+    UserPromptSubmit hook chain. Surfaces top-k disclosable Skills for
+    the current prompt as a short advisory line; does not force L2 load
+    so the prompt stays cheap.
+
+    Failure-safe: any exception (missing skills dir, malformed
+    SKILL.md frontmatter, ZIQ bus down) swallows silently — the
+    underlying class never raises but the import path might.
+
+    Gated by ``feature_config['skill_disclosure']['enabled']`` (default
+    False per the 4.0.0 opt-in policy).
+    """
+    if not user_prompt or not user_prompt.strip():
+        return None
+    try:
+        from concinno.core.config import get_config
+        from concinno.skills.disclosure import SkillDisclosure
+
+        cfg = get_config()
+        if not cfg.feature("skill_disclosure", "enabled"):
+            return None
+        top_k = int(cfg.feature("skill_disclosure", "top_k_routing") or 5)
+        sd = SkillDisclosure(top_k=top_k)
+        results = sd.route(user_prompt, top_k=top_k)
+        if not results:
+            return None
+        lines = [
+            f"  /{r.name} (score {r.score:.2f})"
+            for r in results
+        ]
+        return "Skill disclosure (L1) — candidates:\n" + "\n".join(lines)
     except Exception:
         return None
 

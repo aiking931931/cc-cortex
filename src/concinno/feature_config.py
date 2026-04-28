@@ -504,6 +504,82 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "skill_disclosure": {
+        "category": "behavioral",
+        "description": (
+            "Three-layer Skill progressive disclosure (L1 always-loaded "
+            "frontmatter / L2 trigger-loaded ≤50-line summary / L3 "
+            "explicit-invoke full bundle). ZIQ-routed: P(skill | query) "
+            "∝ SPS(description, query) × FTRL_weight(skill_history). "
+            "Off by default per 4.0.0 opt-in policy."
+        ),
+        "description_zh": (
+            "技能三層漸進式揭露（L1 常駐 frontmatter / L2 觸發載 ≤50 行摘要 "
+            "/ L3 顯式調用完整 bundle）。ZIQ 路由：P(skill | query) ∝ "
+            "SPS(描述, 查詢) × FTRL_weight(技能歷史)。4.0.0 起預設關閉，"
+            "opt-in 啟用。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": False,
+                "recommended": False,
+                "risk_off": (
+                    "Disabled — disclosure router silent; agent does not "
+                    "see L1 candidates surfaced from skills dir"
+                ),
+                "risk_off_zh": (
+                    "關閉 — 揭露路由靜默；代理看不到 skills dir 中"
+                    "L1 候選"
+                ),
+            },
+            "top_k_routing": {
+                "type": "int",
+                "default": 5,
+                "min": 1,
+                "max": 20,
+                "recommended": 5,
+                "risk_low": (
+                    "At 1 only the single best match is shown — useful "
+                    "candidates are silently dropped"
+                ),
+                "risk_high": (
+                    "Above 20 the advisory grows past the noise floor "
+                    "and floods the prompt"
+                ),
+            },
+            "l1_cache_ttl_sec": {
+                "type": "int",
+                "default": 300,
+                "min": 60,
+                "max": 3600,
+                "recommended": 300,
+            },
+            "min_route_score": {
+                "type": "float",
+                "default": 0.15,
+                "min": 0.0,
+                "max": 1.0,
+                "recommended": 0.15,
+            },
+            "ftrl_alpha": {
+                "type": "float",
+                "default": 0.1,
+                "min": 0.001,
+                "max": 1.0,
+                "recommended": 0.1,
+            },
+            "ftrl_decay": {
+                "type": "float",
+                "default": 0.99,
+                "min": 0.5,
+                "max": 1.0,
+                "recommended": 0.99,
+            },
+        },
+    },
     "insight_engine": {
         "category": "cognitive",
         "description": "Proactive knowledge injection when user prompt matches blind-spot rules",
@@ -3181,6 +3257,190 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
         "recommended": True,
+        "severity": "minor",
+    },
+    "skill_emergence_guard": {
+        "category": "behavioral",
+        "enabled": False,  # default OFF per 4.0.0 SEMVER-MAJOR opt-in policy
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "description": (
+            "Auto-propose Claude Code Skill drafts from observed tool-call "
+            "patterns — repeated workflows, error→success recoveries, and "
+            "user-correction signals. Drafts land in "
+            "~/.concinno/skill_drafts for the user to accept or reject; "
+            "the guard never installs a Skill directly."
+        ),
+        "description_zh": (
+            "從觀察到的工具呼叫模式自動提議 Claude Code Skill 草稿 —— "
+            "重複工作流、錯誤→成功修復、用戶糾正訊號。草稿寫到 "
+            "~/.concinno/skill_drafts 由使用者接受或拒絕；"
+            "本 guard 永遠不直接安裝 Skill。"
+        ),
+        "params": {
+            "max_auto_skills_per_day": {
+                "type": "int",
+                "default": 5,
+                "min": 1,
+                "max": 20,
+                "recommended": 5,
+            },
+            "min_pattern_occurrences": {
+                "type": "int",
+                "default": 3,
+                "min": 2,
+                "max": 10,
+                "recommended": 3,
+            },
+            "cooldown_hours": {
+                "type": "float",
+                "default": 2.0,
+                "min": 0.5,
+                "max": 24.0,
+                "recommended": 2.0,
+            },
+            "draft_retention_days": {
+                "type": "int",
+                "default": 30,
+                "min": 7,
+                "max": 90,
+                "recommended": 30,
+            },
+        },
+        "recommended": False,
+        "severity": "minor",
+    },
+    # ── 4.5.0 W3 — Token Audit Autopilot ──
+    #
+    # Per-session token overhead audit (skills / MCP / sub-agents /
+    # system floor) with a ZIQ FTRL-driven advisor for stale skills.
+    # Default-OFF per 4.0.0 opt-in policy.
+    "token_audit_autopilot": {
+        "category": "observability",
+        "enabled": False,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "none",
+        "consequences_if_off": (
+            "無 per-session token overhead 審計與閒置技能封存建議；"
+            "context window 預算優化失去能見度。"
+        ),
+        "consequences_if_off_en": (
+            "No per-session token overhead audit and no archive "
+            "advisor for stale skills — context-window budget "
+            "optimisation loses observability."
+        ),
+        "description": (
+            "Per-session token overhead audit (skills / MCP / "
+            "sub-agents / system floor) with ZIQ FTRL-routed "
+            "advisor for stale skills."
+        ),
+        "description_zh": (
+            "session 級 token 開銷審計（技能 / MCP / 子代理 / 系統地板），"
+            "ZIQ FTRL 路由式建議封存閒置技能。"
+        ),
+        "params": {
+            "system_prompt_floor_tokens": {
+                "type": "int",
+                "default": 14000,
+                "min": 0,
+                "max": 50000,
+                "recommended": 14000,
+                "risk_low": (
+                    "0 disables the floor anchor — totals will under"
+                    "report the actual prompt cost."
+                ),
+                "risk_high": (
+                    "Above 30k anchors the floor too aggressively; "
+                    "every session reports a misleading high baseline."
+                ),
+                "risk_low_zh": (
+                    "0 取消地板錨定，總計會低估實際 prompt cost。"
+                ),
+                "risk_high_zh": (
+                    "高於 30k 地板過度錨定，每 session 報告誤導性的"
+                    "高基線。"
+                ),
+            },
+            "skill_archive_days_threshold": {
+                "type": "int",
+                "default": 30,
+                "min": 7,
+                "max": 180,
+                "recommended": 30,
+                "risk_low": (
+                    "Below 7 days the advisor will flag freshly-loaded "
+                    "skills as stale — too aggressive."
+                ),
+                "risk_high": (
+                    "Above 90 days the advisor never recommends — "
+                    "stale skills accumulate."
+                ),
+                "risk_low_zh": (
+                    "低於 7 天會把剛載入的技能當閒置 — 太激進。"
+                ),
+                "risk_high_zh": (
+                    "高於 90 天 advisor 永遠不建議，閒置技能堆積。"
+                ),
+            },
+            "archive_retention_days": {
+                "type": "int",
+                "default": 90,
+                "min": 30,
+                "max": 365,
+                "recommended": 90,
+                "risk_low": (
+                    "Below 30 days the operator may lose recently"
+                    "-archived skills before they realise they need them."
+                ),
+                "risk_high": (
+                    "Above 180 days archive-root disk usage grows"
+                    " without bound."
+                ),
+                "risk_low_zh": (
+                    "低於 30 天會在操作員意識到需要恢復前就過期。"
+                ),
+                "risk_high_zh": (
+                    "高於 180 天 archive 根目錄無上限成長。"
+                ),
+            },
+            "audit_jsonl_retention_days": {
+                "type": "int",
+                "default": 90,
+                "min": 7,
+                "max": 365,
+                "recommended": 90,
+                "risk_low": "Below 7 days erases history too quickly.",
+                "risk_high": (
+                    "Above 180 days the jsonl directory grows"
+                    " unboundedly."
+                ),
+                "risk_low_zh": "低於 7 天歷史紀錄太快被清。",
+                "risk_high_zh": "高於 180 天 jsonl 無上限成長。",
+            },
+            "ftrl_alpha": {
+                "type": "float",
+                "default": 0.1,
+                "min": 0.001,
+                "max": 1.0,
+                "recommended": 0.1,
+                "risk_low": (
+                    "Below 0.01 the advisor barely learns from"
+                    " accept/reject feedback."
+                ),
+                "risk_high": (
+                    "Above 0.5 a single rejection can swing weights"
+                    " too aggressively."
+                ),
+                "risk_low_zh": (
+                    "低於 0.01 advisor 幾乎不從用戶決策學習。"
+                ),
+                "risk_high_zh": (
+                    "高於 0.5 單一拒絕會過度擺動權重。"
+                ),
+            },
+        },
+        "recommended": False,
         "severity": "minor",
     },
 }

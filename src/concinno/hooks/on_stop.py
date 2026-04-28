@@ -301,6 +301,29 @@ def _build_git_size_monitor() -> Callable[[], str | None]:
     return _run
 
 
+def _build_token_audit(hook_data: dict) -> Callable[[], None]:
+    """Flush per-session token audit jsonl on Stop.
+
+    Default-OFF per 4.0.0 opt-in. Honours
+    ``token_audit_autopilot.enabled``. Best-effort — disk failures /
+    feature off both no-op silently.
+    """
+    def _run() -> None:
+        try:
+            from concinno.core.config import get_config
+            from concinno.observability.token_audit.audit import get_audit
+
+            cfg = get_config()
+            if not cfg.feature("token_audit_autopilot", "enabled"):
+                return
+            sid = hook_data.get("session_id", "")
+            audit = get_audit(session_id=sid or None)
+            audit.end_session()
+        except Exception:
+            return
+    return _run
+
+
 def _build_sweep_guard(hook_data: dict) -> Callable[[], str | None]:
     """Warn (or block) when .git residual state is present at stop.
 
@@ -444,6 +467,7 @@ def main(hook_data: dict | None = None) -> None:
         _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
         _StopModule("orphan_scan", _build_orphan_scan(hook_data), timeout_s=15.0),
         _StopModule("git_size_monitor", _build_git_size_monitor(), timeout_s=5.0),
+        _StopModule("token_audit", _build_token_audit(hook_data), timeout_s=5.0),
         _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
         _StopModule("notify", _build_notify(hook_data), timeout_s=15.0),
     ]

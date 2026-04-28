@@ -1766,6 +1766,10 @@ def main() -> None:
     from .approval_mode_cmd import register as _register_approval_mode
     _register_approval_mode(sub)
 
+    # 4.5.0 — W3 Token Audit Autopilot (per-session overhead audit + ZIQ FTRL archive advisor)
+    from concinno.observability.token_audit.cli import register as _register_token_audit
+    _register_token_audit(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)
