@@ -48,13 +48,16 @@ file is rewritten atomically (``write_text`` to a tempfile, then
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
+import sys
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 # Default thresholds — match FEATURE_META so tests stay aligned.
 DEFAULT_ARCHIVE_DAYS_THRESHOLD: int = 30
@@ -62,6 +65,85 @@ DEFAULT_ARCHIVE_RETENTION_DAYS: int = 90
 DEFAULT_SOFT_EVIDENCE_WINDOW: int = 10  # sessions
 DEFAULT_FTRL_ALPHA: float = 0.1
 DEFAULT_SCORE_GATE: float = 0.6
+
+
+# ── Multi-process file lock (W3.x carryover #8) ───────────────────
+#
+# ``ArchiveAdvisor.accept`` and ``ArchiveAdvisor.reject`` are
+# read-modify-write on a single JSON state file. Two concurrent
+# processes (e.g. one operator-driven CLI invocation and one hook
+# spawned from a different shell) can both load the same snapshot,
+# mutate independently, and last-writer-wins drops the earlier
+# update. The atomic ``tmp + replace`` only protects against crash
+# atomicity; it does not serialise concurrent processes.
+#
+# Stdlib-only fix: ``fcntl.flock`` on POSIX, ``msvcrt.locking`` on
+# Windows. Both auto-release on process exit so a crashed peer
+# never leaves a stale lock. Lock granularity is per-state-file
+# (the lock path mirrors the state file with a ``.lock`` suffix).
+# Hot path adds two open + flock + close calls to each accept /
+# reject; the cost is dwarfed by the JSON serialisation already in
+# place.
+
+_IS_WINDOWS = sys.platform == "win32"
+
+
+@contextlib.contextmanager
+def _file_lock(lock_path: Path) -> Iterator[IO[bytes]]:
+    """Acquire an exclusive lock on ``lock_path`` for the duration
+    of the ``with`` block. Stdlib-only: ``fcntl`` on POSIX,
+    ``msvcrt`` on Windows. The lock auto-releases on process exit
+    so a crashed peer cannot leave the file unrecoverable.
+
+    The lock file is created if missing and is *not* deleted on
+    release — peers re-use it on subsequent calls.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # ``a+b`` so the file is created if missing and the seek
+    # position does not affect the lock. Binary mode keeps Windows
+    # ``msvcrt.locking`` from translating newlines.
+    fh = open(lock_path, "a+b")  # noqa: SIM115 - released in finally
+    try:
+        if _IS_WINDOWS:
+            import msvcrt  # type: ignore[import-not-found,unused-ignore]
+
+            # ``LK_LOCK`` retries up to ~10 sec then raises OSError.
+            msvcrt.locking(  # type: ignore[attr-defined,unused-ignore]
+                fh.fileno(),
+                msvcrt.LK_LOCK,  # type: ignore[attr-defined,unused-ignore]
+                1,
+            )
+        else:
+            import fcntl  # type: ignore[import-not-found,unused-ignore]
+
+            fcntl.flock(  # type: ignore[attr-defined,unused-ignore]
+                fh.fileno(),
+                fcntl.LOCK_EX,  # type: ignore[attr-defined,unused-ignore]
+            )
+        yield fh
+    finally:
+        try:
+            if _IS_WINDOWS:
+                import msvcrt  # type: ignore[import-not-found,unused-ignore]
+
+                # Rewind to byte 0 because LK_UNLCK works on the
+                # current position; we locked byte 0 above.
+                with contextlib.suppress(OSError):
+                    fh.seek(0)
+                    msvcrt.locking(  # type: ignore[attr-defined,unused-ignore]
+                        fh.fileno(),
+                        msvcrt.LK_UNLCK,  # type: ignore[attr-defined,unused-ignore]
+                        1,
+                    )
+            else:
+                import fcntl  # type: ignore[import-not-found,unused-ignore]
+
+                fcntl.flock(  # type: ignore[attr-defined,unused-ignore]
+                    fh.fileno(),
+                    fcntl.LOCK_UN,  # type: ignore[attr-defined,unused-ignore]
+                )
+        finally:
+            fh.close()
 
 
 def _default_state_path() -> Path:
@@ -230,34 +312,32 @@ class ArchiveAdvisor:
         """
         if not skill:
             return
-        state = self._load_state()
-        rec = state.setdefault(skill, {})
-        rec["last_used"] = _iso(_now())
-        rec["count"] = int(rec.get("count", 0)) + 1
-        sessions = rec.setdefault("sessions_loaded_in", [])
-        if session_id and session_id not in sessions:
-            sessions.append(session_id)
-            # Cap the window to keep state file small.
-            if len(sessions) > self._soft_window * 4:
-                sessions[:] = sessions[-self._soft_window * 4 :]
-        self._save_state(state)
+        with self._locked_state_op() as state:
+            rec = state.setdefault(skill, {})
+            rec["last_used"] = _iso(_now())
+            rec["count"] = int(rec.get("count", 0)) + 1
+            sessions = rec.setdefault("sessions_loaded_in", [])
+            if session_id and session_id not in sessions:
+                sessions.append(session_id)
+                # Cap the window to keep state file small.
+                if len(sessions) > self._soft_window * 4:
+                    sessions[:] = sessions[-self._soft_window * 4 :]
 
     def record_load(self, skill: str, *, session_id: str = "") -> None:
         """Update the soft-evidence sessions list on plain skill load."""
         if not skill or not session_id:
             return
-        state = self._load_state()
-        rec = state.setdefault(skill, {})
-        sessions = rec.setdefault("sessions_loaded_in", [])
-        if session_id not in sessions:
-            sessions.append(session_id)
-            if len(sessions) > self._soft_window * 4:
-                sessions[:] = sessions[-self._soft_window * 4 :]
-        # If we have no last_used record yet, anchor it now so the
-        # threshold clock starts from first-load.
-        rec.setdefault("last_used", _iso(_now()))
-        rec.setdefault("count", 0)
-        self._save_state(state)
+        with self._locked_state_op() as state:
+            rec = state.setdefault(skill, {})
+            sessions = rec.setdefault("sessions_loaded_in", [])
+            if session_id not in sessions:
+                sessions.append(session_id)
+                if len(sessions) > self._soft_window * 4:
+                    sessions[:] = sessions[-self._soft_window * 4 :]
+            # If we have no last_used record yet, anchor it now so the
+            # threshold clock starts from first-load.
+            rec.setdefault("last_used", _iso(_now()))
+            rec.setdefault("count", 0)
 
     # ─── Cleanup helpers ───────────────────────────────────────────
 
@@ -326,20 +406,25 @@ class ArchiveAdvisor:
         return float(day_component * soft_component * ftrl_modifier)
 
     def _update_ftrl(self, skill: str, *, accepted: bool) -> None:
-        """Update the per-skill FTRL weight on user decision."""
-        state = self._load_state()
-        rec = state.setdefault(skill, {})
-        weight = float(rec.get("ftrl_weight", 0.0))
-        # Reward 1.0 (accepted) → push score up; reward 0.0 (reject)
-        # → pull down. Centred FTRL update around 0.5.
-        target = 1.0 if accepted else -1.0
-        weight = weight + self._alpha * (target - 0.0)
-        # Soft cap to avoid runaway weights.
-        weight = max(-5.0, min(5.0, weight))
-        rec["ftrl_weight"] = weight
-        rec["last_decision_at"] = _iso(_now())
-        rec["last_decision"] = "accept" if accepted else "reject"
-        self._save_state(state)
+        """Update the per-skill FTRL weight on user decision.
+
+        Multi-process safe (W3.x #8): the read-modify-write is held
+        under :meth:`_locked_state_op` so two concurrent ``accept``
+        calls from different processes serialise on the lock and
+        neither weight update is lost.
+        """
+        with self._locked_state_op() as state:
+            rec = state.setdefault(skill, {})
+            weight = float(rec.get("ftrl_weight", 0.0))
+            # Reward 1.0 (accepted) → push score up; reward 0.0 (reject)
+            # → pull down. Centred FTRL update around 0.5.
+            target = 1.0 if accepted else -1.0
+            weight = weight + self._alpha * (target - 0.0)
+            # Soft cap to avoid runaway weights.
+            weight = max(-5.0, min(5.0, weight))
+            rec["ftrl_weight"] = weight
+            rec["last_decision_at"] = _iso(_now())
+            rec["last_decision"] = "accept" if accepted else "reject"
 
     def _emit_outcome(self, skill: str, *, accepted: bool) -> None:
         """Best-effort emit to the ZIQ outcome bus."""
@@ -392,6 +477,37 @@ class ArchiveAdvisor:
             tmp.replace(self._state_path)
         except OSError:
             return
+
+    @property
+    def _lock_path(self) -> Path:
+        """Sidecar lock file beside the JSON state. The lock is
+        per-state-file so two advisors pointed at distinct paths do
+        not contend; two advisors sharing a path serialise on it."""
+        return self._state_path.with_suffix(self._state_path.suffix + ".lock")
+
+    @contextlib.contextmanager
+    def _locked_state_op(
+        self,
+    ) -> Iterator[dict[str, dict[str, Any]]]:
+        """Multi-process-safe read-modify-write on the state file
+        (W3.x carryover #8). Wraps load + caller mutation + save in
+        a single OS-level exclusive lock so two concurrent CLI / hook
+        invocations cannot last-writer-wins each other's updates.
+
+        Usage::
+
+            with self._locked_state_op() as state:
+                state.setdefault(skill, {})["count"] = ...
+
+        On exit (normal or exception), state is persisted via
+        :meth:`_save_state` and the lock is released.
+        """
+        with _file_lock(self._lock_path):
+            state = self._load_state()
+            try:
+                yield state
+            finally:
+                self._save_state(state)
 
 
 __all__ = [

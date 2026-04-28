@@ -24,6 +24,7 @@ from concinno.guards.base import GuardContext
 from concinno.guards.cbua_pipeline_guard import (
     CbuaPipelineGuard,
     _is_delivery_command,
+    _is_ship_pipeline_command,
 )
 
 
@@ -664,6 +665,184 @@ class TestWiredoOneShot:
 
 
 # ── 9. _is_delivery_command ───────────────────────────────────
+
+
+class TestShipPipelineDetector:
+    """W3.x carryover #5 — ship-pipeline turn-shape detector.
+
+    Verifies that two or more ship-shaped Bash commands inside the
+    last 5 calls flip ``ship_pipeline_active`` and that this flag
+    suppresses the Dichotomy + B1 reminders that produced ~25
+    unactionable warnings during the W3 cc_w3_ship cycle.
+    """
+
+    @pytest.mark.parametrize(
+        "cmd,expected",
+        [
+            ("", False),
+            ("ls -la", False),
+            ("cat file.txt", False),
+            # Core delivery verbs (overlap with _is_delivery_command)
+            ("git commit -m 'x'", True),
+            ("git push origin main", True),
+            ("twine upload dist/*", True),
+            ("python -m build", True),
+            # Verification steps (broader than _is_delivery_command)
+            ("git status", True),
+            ("git log --oneline -5", True),
+            ("git diff --stat", True),
+            ("git tag -a v1.0", True),
+            ("git stash", True),
+            ("twine check dist/*", True),
+            ("pytest tests/foo.py -q", True),
+            ("ruff check src/", True),
+            ("ruff format src/", True),
+            ("mypy --strict src/foo.py", True),
+            ("python -m twine upload dist/*", True),
+            ("python -m pytest -q", True),
+            ("hatch build", True),
+            ("gh pr create --fill", True),
+            ("gh release create v1.0", True),
+            ("gh run watch", True),
+            ("npm run build", True),
+            ("npm test", True),
+            ("cargo build", True),
+            ("docker build -t x .", True),
+            ("tail -f deploy.log", True),
+            ("tail -100 build.log", True),
+            # Compound: any segment counts
+            ("pytest && git commit -m 'x'", True),
+            ("ls; git status", True),
+            # Negative: not a ship verb
+            ("python my_script.py", False),
+            ("pip install something", False),
+            ("echo hi", False),
+        ],
+    )
+    def test_ship_pipeline_pattern(self, cmd, expected):
+        assert _is_ship_pipeline_command(cmd) is expected
+
+    def test_active_after_two_ship_commands(self, guard, tmp_path):
+        """Two ship-shaped Bash calls in a row → flag flips on."""
+        _preseed_complexity(tmp_path, "complicated")
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git status"})
+        state = _state(tmp_path)
+        assert state.get("ship_pipeline_active") is False
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git commit -m 'wip'"})
+        state = _state(tmp_path)
+        assert state.get("ship_pipeline_active") is True
+
+    def test_active_resets_when_window_clears(self, guard, tmp_path):
+        """5 non-ship Bash calls evict ship-shaped ones from the window."""
+        _preseed_complexity(tmp_path, "complicated")
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git status"})
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git commit -m 'wip'"})
+        assert _state(tmp_path).get("ship_pipeline_active") is True
+        # Five non-ship Bash calls evict both ship commands from
+        # the 5-deep window.
+        for cmd in ("ls -la", "echo a", "echo b", "echo c", "echo d"):
+            _run(guard, tmp_path, tool_name="Bash",
+                 tool_input={"command": cmd})
+        assert _state(tmp_path).get("ship_pipeline_active") is False
+
+    def test_b1_suppressed_when_ship_active(self):
+        """B1 ``結構思考未見`` reminder must not fire mid-ship."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 3,
+                "b1_shown": False,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        # No B1 missing → no reminder at all in this minimal state.
+        assert reminder is None
+
+    def test_b1_fires_when_ship_inactive_baseline(self):
+        """Sanity check: B1 still fires when ship_pipeline_active is False
+        — the suppression must be conditional, not a permanent silence."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 3,
+                "b1_shown": False,
+                "ship_pipeline_active": False,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "B1" in reminder.context
+
+    def test_dichotomy_suppressed_when_ship_active(self):
+        """Dichotomy 框架偵測 must not fire mid-ship even when the
+        ``dichotomy_seen`` flag was set earlier (e.g. commit message
+        body contained binary-choice phrasing)."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 5,
+                "b1_shown": True,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is None
+
+    def test_dichotomy_fires_when_ship_inactive_baseline(self):
+        """Sanity: Dichotomy reminder still fires outside ship pipelines."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 5,
+                "b1_shown": True,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+                "ship_pipeline_active": False,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "Dichotomy" in reminder.context
+
+    def test_a5_redteam_still_fires_during_ship(self):
+        """A5 red-team-not-dispatched is a *safety* signal and must NOT
+        be suppressed by ship-pipeline activity. The agent could be
+        shipping the very thing that needs red-team review."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 10,
+                "b1_shown": True,
+                "redteam_dispatched": False,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=True,
+        )
+        assert reminder is not None
+        assert "A5" in reminder.context
+
+    def test_wiredo_still_fires_during_ship(self):
+        """WIREDO is a delivery reminder — ship pipeline is exactly
+        when it should fire. Suppression would defeat the purpose."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 5,
+                "b1_shown": True,
+                "wiredo_just_fired": True,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "WIREDO" in reminder.context
 
 
 class TestIsDeliveryCommand:

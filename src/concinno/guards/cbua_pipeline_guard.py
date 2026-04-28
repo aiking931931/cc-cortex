@@ -135,6 +135,51 @@ _DELIVERY_VERB = re.compile(
     re.IGNORECASE,
 )
 
+# Ship-pipeline turn-shape detector (W3.x carryover #5):
+# Broader than ``_DELIVERY_VERB`` because it includes the *verification*
+# steps that surround the actual delivery verb — pytest sweeps, twine
+# check, git status / log / diff, build re-runs, tag creation,
+# `gh pr create`. When two or more of these fire in a small sliding
+# window, the operator is in a sequential ship cycle and CBUA's
+# Dichotomy + B1 ``結構思考未見`` reminders become noise (none of
+# the per-step turns are dichotomy decisions; the heavy reading
+# happened earlier in the session).
+#
+# See ``feedback_hook_dichotomy_false_positive_w3_ship.md`` for the
+# W3 cc_w3_ship pipeline that surfaced this — ~25 unactionable
+# warnings during the 4.5.0 quadruple-ship turn shape.
+_SHIP_PIPELINE_VERB = re.compile(
+    r"^\s*(?:git\s+(?:commit|push|tag|status|log|diff|add|stash)"
+    r"|gh\s+(?:pr|release|run)"
+    r"|twine\s+(?:upload|check)"
+    r"|python\s+-m\s+(?:build|twine|pytest|ruff)"
+    r"|pytest\b"
+    r"|ruff\s+(?:check|format)"
+    r"|mypy\b"
+    r"|npm\s+(?:publish|run\s+build|test)"
+    r"|cargo\s+(?:publish|build|test)"
+    r"|docker\s+(?:build|push)"
+    r"|hatch\s+build"
+    r"|tail\s+-f?\s*\d*"  # log tailing during ship verify
+    r")",
+    re.IGNORECASE,
+)
+
+# Sliding-window size for ship-pipeline detection. Two ship-shaped
+# commands inside the last ``_SHIP_WINDOW`` Bash calls = active.
+_SHIP_WINDOW = 5
+_SHIP_THRESHOLD = 2
+
+
+def _is_ship_pipeline_command(cmd: str) -> bool:
+    """True if any top-level segment of cmd looks like a ship step."""
+    if not cmd:
+        return False
+    for segment in _DELIVERY_SEPARATORS.split(cmd):
+        if _SHIP_PIPELINE_VERB.match(segment):
+            return True
+    return False
+
 
 def _is_delivery_command(cmd: str) -> bool:
     """True if any top-level segment of cmd starts with a delivery verb."""
@@ -205,6 +250,18 @@ def _update_cbua_state(
             else:
                 state["polling_streak"] = 0
             state["last_bash_sig"] = sig
+
+            # Ship-pipeline turn-shape window (W3.x carryover #5).
+            # Track the last ``_SHIP_WINDOW`` Bash commands as a
+            # bool list; ``ship_pipeline_active`` is true when at
+            # least ``_SHIP_THRESHOLD`` of them are ship-shaped.
+            window: list[bool] = list(state.get("ship_window") or [])
+            window.append(_is_ship_pipeline_command(raw_cmd))
+            window = window[-_SHIP_WINDOW:]
+            state["ship_window"] = window
+            state["ship_pipeline_active"] = (
+                sum(1 for x in window if x) >= _SHIP_THRESHOLD
+            )
 
     # Dichotomy hardening kept (distinct RLHF-bias anchor per MEMORY).
     # B1/C1/U1/WIREDO_TABLE content regex removed in 2.8.0 —
@@ -499,10 +556,23 @@ class CbuaPipelineGuard(BaseGuard):
         edit_count = state.get("edit_count", 0)
         missing: list[str] = []
 
+        # Ship-pipeline turn-shape detection (W3.x carryover #5):
+        # When the operator is in a sequential ship cycle (≥2 ship-
+        # shaped Bash calls in the last 5), Dichotomy + B1 reminders
+        # are noise. Each step is small; the heavy reasoning happened
+        # earlier in the session. See
+        # ``feedback_hook_dichotomy_false_positive_w3_ship.md`` for
+        # the W3 cc_w3_ship pipeline that surfaced this regression.
+        ship_pipeline_active = bool(state.get("ship_pipeline_active"))
+
         # B1: structured thinking marker (after 3+ edits, all Complicated+).
         # Only signal source now is ``_behavioral_silent_ack`` (reads/bash
         # threshold). Content regex removed 2.8.0 (MEMORY #27).
-        if not state.get("b1_shown") and edit_count >= 3:
+        if (
+            not state.get("b1_shown")
+            and edit_count >= 3
+            and not ship_pipeline_active
+        ):
             missing.append(
                 "B1 結構思考未見 — 結構化思考預期行為訊號缺席："
                 "reads>=3 OR bash>=8 + edits>=3 才算結構化迭代"
@@ -518,6 +588,7 @@ class CbuaPipelineGuard(BaseGuard):
             state.get("dichotomy_seen")
             and not state.get("integrative_shown")
             and edit_count >= 2
+            and not ship_pipeline_active
         ):
             missing.append(
                 "🔀 Dichotomy 框架偵測 — 先問「A+B 在更高層級共存？」"

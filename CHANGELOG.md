@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ArchiveAdvisor._locked_state_op` (W3.x carryover #8, ~75 LoC +
+  8 tests): multi-process file-level lock for Token Audit Autopilot's
+  archive accept / reject flow. The atomic `tmp + replace` previously
+  protected against crash atomicity but not concurrent writers — two
+  CLI invocations (or one CLI + one hook) could last-writer-wins
+  each other's FTRL updates. Stdlib-only fix: `fcntl.flock` on POSIX,
+  `msvcrt.locking` on Windows; locks auto-release on process exit.
+  Lock file lives next to the state file (`<state>.json.lock`).
+  4 process × 100 iterations stress test confirms zero lost writes.
+
+- `MemoryIndex._ensure_fts5_table` (W3.x carryover #3, self-heal
+  hook called from `add` / `delete` / `search`): if the FTS5 virtual
+  table is dropped externally (e.g. a careless migration or manual
+  `DROP TABLE`), subsequent operations rebuild it inline instead of
+  raising `OperationalError`. Plus 9 new race / corruption / recovery
+  tests covering high-fanout writers, reader/writer racing,
+  delete/search racing, `PRAGMA integrity_check` after stress, and
+  cross-instance writers on the same db.
+
+- `concinno.guards.cbua_pipeline_guard._is_ship_pipeline_command`
+  (W3.x carryover #5, sliding-window detector + 14 tests): suppresses
+  Dichotomy + B1 reminders inside a ship cycle. When two or more
+  ship-shaped Bash calls (commit / build / twine / tag / push /
+  pytest verify / etc.) appear within the last 5 tool calls,
+  `state["ship_pipeline_active"]` flips on and `_generate_reminder`
+  skips the noise that produced ~25 unactionable warnings during
+  the W3 cc_w3_ship pipeline. A5 red-team and WIREDO reminders
+  are deliberately NOT suppressed — they are safety / delivery
+  signals that should fire exactly when a ship is in flight.
+
 - `concinno.skills.user_correction_signal` (W3.x carryover #7,
   ~110 LoC + 17 tests): per-turn hand-off so HP2
   `SkillEmergenceGuard` trigger #3 (`user_correction`) actually
