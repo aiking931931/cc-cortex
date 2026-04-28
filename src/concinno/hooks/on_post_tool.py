@@ -745,12 +745,22 @@ def _run_skill_emergence(
         elif isinstance(raw_result, dict):
             tool_result_text = str(raw_result.get("stdout", ""))
         success = "error" not in tool_result_text.lower()
+        # W3.x carryover #7 — read the per-turn correction signal that
+        # ``on_prompt_submit`` persisted to ``~/.concinno/state/``. The
+        # default-False fallback when the file is missing / corrupt /
+        # stale keeps the trigger opt-in (HP2 trigger #3 stays dormant
+        # until the prompt-submit hook actually fires).
+        try:
+            from concinno.skills.user_correction_signal import is_active
+            had_correction = is_active()
+        except Exception:
+            had_correction = False
         emerge = SkillEmergenceGuard(stderr_emit=_emit_stderr)
         emerge.observe(EmergenceSignal(
             tool_name=tool_name,
             canonical_shape=shape,
             success=success,
-            had_user_correction=False,
+            had_user_correction=had_correction,
         ))
     except Exception:
         pass  # never block the hook
@@ -922,6 +932,8 @@ def _memory_lifecycle_post_tool_use(tool_name: str, hook_data: dict) -> None:
     try:
         from concinno_skills_memory.lifecycle import (
             LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
             on_post_tool_use as _memory_on_post_tool_use,
         )
 

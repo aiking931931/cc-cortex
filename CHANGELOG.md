@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `concinno.skills.user_correction_signal` (W3.x carryover #7,
+  ~110 LoC + 17 tests): per-turn hand-off so HP2
+  `SkillEmergenceGuard` trigger #3 (`user_correction`) actually
+  fires. `record_prompt(text)` is called from
+  `on_prompt_submit.handle_prompt_submit` and runs
+  `concinno.knowledge.is_correction` against the user message;
+  `is_active(ttl_seconds=1800)` is read by
+  `on_post_tool._run_skill_emergence` so the
+  `EmergenceSignal.had_user_correction` field reflects the most
+  recent prompt instead of being hard-coded `False`. Atomic JSON
+  file at `~/.concinno/state/user_correction_signal.json`
+  (override env `CONCINNO_USER_CORRECTION_SIGNAL_PATH`). Stale
+  records (older than the TTL or with future timestamps) are
+  treated as inactive.
+
 - `concinno skill-emerge {list, show, accept, reject, prune}` CLI
   (W3 carryover post-ship): out-of-band review workflow for drafts
   staged by `SkillEmergenceGuard`. `accept` installs the draft to

@@ -421,6 +421,17 @@ def handle_prompt_submit(
     if disclosure_ctx:
         contexts.append(disclosure_ctx)
 
+    # 14. user-correction signal — persist for the post-tool hook so
+    #     SkillEmergenceGuard's trigger #3 (user_correction) can fire.
+    #     The two hooks run in different processes; the file at
+    #     ``~/.concinno/state/user_correction_signal.json`` is the
+    #     hand-off. Best-effort — never blocks prompt submission.
+    try:
+        from concinno.skills.user_correction_signal import record_prompt
+        record_prompt(user_prompt)
+    except Exception:
+        pass
+
     _memory_lifecycle_user_prompt_submit(user_prompt, session_id)
     return {"contexts": contexts}
 
@@ -433,6 +444,8 @@ def _memory_lifecycle_user_prompt_submit(
     try:
         from concinno_skills_memory.lifecycle import (
             LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
             on_user_prompt_submit as _memory_on_user_prompt_submit,
         )
 
