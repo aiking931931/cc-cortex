@@ -147,6 +147,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard's stderr notice now points at the CLI rather than the
   manual move/delete fallback.
 
+### Removed (5 SAFE-TO-DELETE, no external API surface, ~1,639 LoC)
+
+- `concinno.whitepaper_guard` — vaporware FEATURE_META declaration; no
+  implementation ever existed.
+- `concinno.proposal_guard` — single-callsite stop guard, user-disabled
+  by default. The `EXCUSE_SCANNER_JUDGE`-equivalent prompt template was
+  not part of this guard so nothing else needs migrating.
+- `concinno.excuse_scanner` — stop-event regex scanner. The
+  `EXCUSE_SCANNER_JUDGE` Haiku prompt template stays in
+  `concinno.prompt_hooks` (unchanged); only the regex module is removed.
+- `concinno.sedimentation_gate` — stop-event blocker, never re-exported
+  in `concinno/__init__.py`. CLAUDE.md "Core Modules" table doc-drift
+  fix bundled.
+- `concinno.git_size_monitor` — duplicates the `git_health` Task
+  Scheduler approach (see `~/.claude/rules/switches.md#24`). User
+  policy disables it by default.
+
+### Removed (BREAKING)
+
+- `concinno.inject.CognitiveAnchorGuard` and its helpers
+  (`classify_risk` / `get_anchor_prompt` / `get_base_identity`) are
+  removed from the `concinno.inject` facade. Use `IntentAnchorGuard`
+  instead — it provides equivalent intent-anchoring behaviour with a
+  cleaner API. Callers importing
+  `from concinno.inject import CognitiveAnchorGuard` must migrate.
+
+### Removed (GAIA orphan)
+
+- `concinno.skills.public.agent.erl_retriever` — confirmed no internal
+  consumers via re-grep. Module never wired in.
+
 ## [4.5.0] - 2026-04-28 — Week 3: Hermes Port wave-2 + Token Audit Autopilot + W3 ecosystem ship
 
 Plan v3 (jolly-sauteeing-journal.md) Week 3 release. Same-day triple+
