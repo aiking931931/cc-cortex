@@ -102,6 +102,7 @@ __all__ = [
     "DEFAULT_FAILURE_THRESHOLD",
     "DEFAULT_MAX_CALLS",
     "DEFAULT_WINDOW_S",
+    "reset_shared_breaker_registry",
 ]
 
 
@@ -258,6 +259,45 @@ class _BreakerStateRegistry:
             return list(self._states.keys())
 
 
+# ── Shared (process-wide) registry singleton ───────────────────────
+
+
+_shared_registry_lock = threading.Lock()
+_shared_registry_instance: _BreakerStateRegistry | None = None
+
+
+def _shared_breaker_registry() -> _BreakerStateRegistry:
+    """Return the process-wide shared registry (lazy-instantiated).
+
+    4.4.0+ default for :class:`CircuitBreakerGuard`. Two default-
+    constructed guards now converge on the same registry so they
+    agree on breaker state for a logical resource — the legacy
+    behaviour (per-instance registry) is preserved when the operator
+    passes ``share_state_with=False`` to opt out.
+
+    Tests that need a clean slate can monkey-patch this module's
+    ``_shared_registry_instance`` to ``None`` between cases.
+    """
+    global _shared_registry_instance
+    if _shared_registry_instance is None:
+        with _shared_registry_lock:
+            if _shared_registry_instance is None:
+                _shared_registry_instance = _BreakerStateRegistry()
+    return _shared_registry_instance
+
+
+def reset_shared_breaker_registry() -> None:
+    """Drop the shared registry singleton — primarily for tests.
+
+    A subsequent default-constructed :class:`CircuitBreakerGuard`
+    will re-create it. Has no effect on guards that explicitly
+    passed ``share_state_with=<sibling>`` or ``share_state_with=False``.
+    """
+    global _shared_registry_instance
+    with _shared_registry_lock:
+        _shared_registry_instance = None
+
+
 # ── Guard ──────────────────────────────────────────────────────────
 
 
@@ -328,7 +368,7 @@ class CircuitBreakerGuard(PolicyGate):
         backoff_max_s: float = DEFAULT_BACKOFF_MAX_S,
         rate_limit_severity: Severity = "medium",
         circuit_open_severity: Severity = "high",
-        share_state_with: "CircuitBreakerGuard | None" = None,
+        share_state_with: "CircuitBreakerGuard | bool | None" = None,
         time_source: Callable[[], float] | None = None,
     ) -> None:
         super().__init__(
@@ -373,13 +413,27 @@ class CircuitBreakerGuard(PolicyGate):
         self._circuit_open_severity: Severity = circuit_open_severity
         self._time_source = time_source if time_source is not None else time.monotonic
 
-        if share_state_with is not None:
-            # Sharing the same registry across guards permits e.g.
-            # one wrapper per worker thread to converge on the same
-            # breaker state for a logical resource.
+        if share_state_with is False:  # type: ignore[comparison-overlap]
+            # Explicit opt-out — operator wants instance-private state
+            # (test fixtures, multi-tenant isolation, intentional
+            # divergent breaker tuning per call site). Pass
+            # ``share_state_with=False`` to get the legacy per-instance
+            # registry without naming a sibling guard.
+            self._registry = _BreakerStateRegistry()
+        elif share_state_with is not None:
+            # Operator handed in a sibling guard — share that exact
+            # registry. This branch existed in the legacy contract.
             self._registry = share_state_with._registry
         else:
-            self._registry = _BreakerStateRegistry()
+            # Default (4.4.0+): shared process-wide registry so two
+            # ``CircuitBreakerGuard()`` instances guarding ``api.foo``
+            # converge on the same breaker state. Previously two
+            # default-constructed instances each started with their
+            # own registry, which silently broke "same logical
+            # resource, different wrapper" deployments (e.g. one
+            # guard per worker thread / async task wrapping the
+            # same upstream API).
+            self._registry = _shared_breaker_registry()
 
     # ── PolicyGate hook ────────────────────────────────────────────
 

@@ -429,13 +429,83 @@ def record_arm_outcome(arm: str, reward: float, persist: bool = True) -> None:
         reward: Outcome in [0, 1]; 1 = task succeeded, 0 = task failed.
             Values outside [0, 1] are clamped.
         persist: Whether to save the router state to disk.
+
+    Side effect (4.4.0+ ZIQ wave-2 wire):
+        Emits an ``Outcome`` on the ZIQ bus under tunable
+        ``"gaia.meta_arm"`` so the global FTRL learner sees the same
+        signal as the local ``ArmFTRL``. Best-effort — bus errors do
+        not break the local update.
     """
     if arm not in ARMS:
         return
+    clamped = max(0.0, min(1.0, float(reward)))
     router = _default_router()
-    router.update(arm, max(0.0, min(1.0, float(reward))))
+    router.update(arm, clamped)
     if persist:
         router.save()
+    # Fan-out the outcome to the ZIQ bus (wave-2 wire). Treat
+    # ``reward >= 0.5`` as a "correct" arm choice for classification
+    # reward semantics — symmetric with the local ArmFTRL update.
+    try:
+        from concinno.ziq_emit_helpers import emit_classification_outcome
+
+        emit_classification_outcome(
+            "gaia.meta_arm",
+            value=arm,
+            correct=clamped >= 0.5,
+            confidence=clamped if clamped >= 0.5 else (1.0 - clamped),
+            source="concinno.gaia_meta_router.record_arm_outcome",
+            metadata={"reward": clamped, "persisted": bool(persist)},
+        )
+    except Exception:
+        # Best-effort — never break the meta-router on bus failure.
+        pass
+
+
+def record_judge_arm_outcome(
+    arm: str,
+    correct: bool,
+    *,
+    confidence: float = 1.0,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Record an external-judge arm outcome on the ZIQ bus.
+
+    The judge layer (haiku / opus / self) selects an arm per query;
+    callers that have evaluated the judge's verdict against ground
+    truth feed the result here so the FTRL posterior over judge arms
+    converges. Lives in ``gaia_meta_router`` instead of a stand-alone
+    ``judge_arm`` module because the judge is consumed by the same
+    GAIA / Sancio pipelines that route SAS/MAS/hybrid — co-locating
+    keeps the wire surface small.
+
+    Args:
+        arm: One of ``"self"``, ``"haiku"``, ``"opus"``. Unknown values
+            are silently ignored to mirror :func:`record_arm_outcome`.
+        correct: True iff the judge's verdict matched ground truth.
+        confidence: Optional [0, 1] confidence used when ``correct``
+            is True (lower confidence on a correct verdict still pulls
+            the FTRL toward this arm but more slowly). Ignored when
+            ``correct`` is False — wrong verdicts contribute
+            ``1.0 - confidence`` reward.
+        metadata: Optional context (latency, token count, judge prompt
+            id) forwarded to the bus subscribers.
+    """
+    if arm not in ("self", "haiku", "opus"):
+        return
+    try:
+        from concinno.ziq_emit_helpers import emit_classification_outcome
+
+        emit_classification_outcome(
+            "judge.arm",
+            value=arm,
+            correct=bool(correct),
+            confidence=max(0.0, min(1.0, float(confidence))),
+            source="concinno.gaia_meta_router.record_judge_arm_outcome",
+            metadata=dict(metadata or {}),
+        )
+    except Exception:
+        pass
 
 
 __all__ = [
@@ -444,6 +514,7 @@ __all__ = [
     "ArmDecision",
     "ArmFTRL",
     "record_arm_outcome",
+    "record_judge_arm_outcome",
     "reset_default_router",
     "select_arm",
     "select_arm_with_reason",

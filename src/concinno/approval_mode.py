@@ -420,6 +420,16 @@ def _smart_decision(
         * SPS = 0.10 (low blast) ⇒ posterior tracks FTRL closely — a
           handful of "proceed" clicks moves the threshold quickly.
 
+        * **Cold-start safety override** (4.4.0 ship-fix): when no FTRL
+          observation has ever been recorded for this bucket
+          (``state == ApprovalState()`` Jeffreys prior 1/1), the raw
+          posterior collapses to ``proceed_probability() = 0.5`` and a
+          50/50 routing toss can authorise an irreversible action on the
+          *very first call* before the operator has trained the bucket.
+          We force ``should_ask=True`` on that path — operator's first
+          answer trains the FTRL and subsequent calls follow the regular
+          posterior-vs-threshold rule.
+
     The closed form is intentionally simple (no log-odds maths) because
     the operator should be able to read this code and predict the
     routing — the ZIQ first-principle "explainability beats accuracy
@@ -427,10 +437,31 @@ def _smart_decision(
     """
     sps = compute_sps_score(blast_radius)
     bucket = _bucket_key(blast_radius, tunable)
-    state = config.ftrl.get(bucket, ApprovalState())
+    state = config.ftrl.get(bucket)
+    threshold = _resolve_threshold()
+    if state is None:
+        # Cold start: no prior observation in this bucket. Pure
+        # Beta(1,1) Jeffreys prior gives a 50% posterior which is
+        # a coin-flip on whether to ask — that's unsafe for
+        # high-blast tunables. Default to ``ask`` so the operator's
+        # first answer trains the FTRL.
+        cold_state = ApprovalState()
+        ftrl_p = cold_state.proceed_probability()
+        reason = (
+            f"smart cold-start: no FTRL history for bucket={bucket!r}, "
+            f"defaulting to ask (sps={sps:.2f} ftrl_proceed_prob={ftrl_p:.3f} "
+            f"threshold={threshold:.3f})"
+        )
+        return ApprovalDecision(
+            should_ask=True,
+            mode=ApprovalMode.SMART,
+            sps=sps,
+            ftrl_proceed_prob=ftrl_p,
+            threshold=threshold,
+            reason=reason,
+        )
     ftrl_p = state.proceed_probability()
     posterior_proceed = (1.0 - sps) * ftrl_p
-    threshold = _resolve_threshold()
     should_ask = posterior_proceed < threshold
     reason = (
         f"smart routing: sps={sps:.2f} "

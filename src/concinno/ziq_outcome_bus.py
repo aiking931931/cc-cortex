@@ -115,8 +115,60 @@ def is_bus_disabled() -> bool:
 _DEFAULT_MAX_HZ = 10_000.0
 
 
-def _rate_limit_hz() -> float:
-    """Per-tunable max emits/sec. Override via ``CONCINNO_ZIQ_BUS_MAX_HZ``."""
+def _rate_limit_hz(tunable: str | None = None) -> float:
+    """Resolve max emits/sec for ``tunable`` (or the global default).
+
+    Resolution order (later wins, all silent on parse error):
+
+    1. ``_DEFAULT_MAX_HZ`` (10 000 Hz / tunable).
+    2. Global env override ``CONCINNO_ZIQ_BUS_MAX_HZ``.
+    3. **Per-tunable env override** ``CONCINNO_ZIQ_BUS_MAX_HZ__<TUNABLE>``
+       — dotted-path tunables flatten to upper-case underscore (e.g.
+       ``gaia.meta_arm`` → ``CONCINNO_ZIQ_BUS_MAX_HZ__GAIA_META_ARM``).
+       Lets an operator clamp a single noisy producer (the meta-arm
+       in a tight loop) to e.g. 50 Hz without touching the global
+       10 kHz ceiling that healthier producers depend on.
+    4. **Per-tunable FEATURE_META override**
+       ``feature_config.FEATURE_META["ziq_outcome_bus"]["params"]
+       ["per_tunable_rate_hz"][<tunable>]`` — config-file route for
+       operators who prefer JSON over env vars. Lazy-loaded so the
+       core bus stays a stdlib-only module.
+    """
+    # Per-tunable env override has the highest precedence.
+    if tunable:
+        env_key = "CONCINNO_ZIQ_BUS_MAX_HZ__" + tunable.upper().replace(".", "_")
+        per_tun_env = os.environ.get(env_key, "").strip()
+        if per_tun_env:
+            try:
+                v = float(per_tun_env)
+                if v > 0.0:
+                    return v
+            except ValueError:
+                pass
+        # FEATURE_META per-tunable override — soft import to avoid
+        # forcing feature_config load on every emit when the bus is
+        # used standalone (tests, smoke scripts).
+        try:  # pragma: no cover - soft path covered indirectly
+            from concinno.feature_config import FEATURE_META
+
+            entry = FEATURE_META.get("ziq_outcome_bus") or {}
+            params = entry.get("params") or {}
+            per_tun = params.get("per_tunable_rate_hz")
+            if isinstance(per_tun, dict):
+                spec = per_tun.get(tunable)
+                if isinstance(spec, dict):
+                    candidate = spec.get("default")
+                else:
+                    candidate = spec
+                try:
+                    v = float(candidate)  # type: ignore[arg-type]
+                    if v > 0.0:
+                        return v
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
+    # Global env override — backwards-compat with the 4.4.0 default.
     raw = os.environ.get("CONCINNO_ZIQ_BUS_MAX_HZ", "").strip()
     if not raw:
         return _DEFAULT_MAX_HZ
@@ -307,10 +359,10 @@ class ZIQOutcomeBus:
         if self.is_pinned(outcome.tunable):
             return
         # Race-condition guard: cap per-tunable emit rate at
-        # ``_rate_limit_hz()`` events/sec (sliding 1-second window).
-        # Drop excess silently and increment ``_dropped`` counter so
-        # producers can be audited via ``dropped_count(tunable)``.
-        max_hz = _rate_limit_hz()
+        # ``_rate_limit_hz(<tunable>)`` events/sec (sliding 1-second
+        # window). Drop excess silently and increment ``_dropped``
+        # counter so producers can be audited via ``dropped_count``.
+        max_hz = _rate_limit_hz(outcome.tunable)
         # Snapshot subscribers under lock; dispatch outside lock so a
         # slow callback doesn't serialize emits across all tunables.
         with self._lock:

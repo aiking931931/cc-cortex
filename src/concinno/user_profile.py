@@ -638,7 +638,45 @@ def render_profile_for_field_read(
     out = "\n".join(lines)
     cap = max_chars if max_chars is not None else current_char_budget()
     if len(out) > cap:
-        out = out[: max(0, cap - 1)] + "…"
+        # Middle-elision instead of tail-truncation. The original tail
+        # cut silently dropped the last directive(s) — the most recent
+        # operator pin is also the highest-signal item, and dropping it
+        # without a marker meant the LLM never saw the cut. Splitting in
+        # half keeps both the role/language header (top) and the latest
+        # directives (bottom) and inserts a visible ``…[truncated NN
+        # chars]…`` marker so the LLM is aware of elision (mirrors
+        # ``field_read`` v2 breadcrumb philosophy).
+        if cap <= 0:
+            return ""
+        marker_template = "…[truncated {n} chars]…"
+        # Reserve room for the worst-case marker length so the math
+        # below cannot under-shoot the cap on degenerate small caps.
+        worst_marker_len = len(marker_template.format(n=len(out)))
+        if cap <= worst_marker_len + 4:
+            # Cap too small for a meaningful split — fall back to
+            # tail truncation but with the legacy ellipsis so this
+            # branch stays compatible with very small budgets.
+            return out[: max(0, cap - 1)] + "…"
+        # Compute halves so total length equals cap (after subtracting
+        # the actual marker rendered for the dropped span).
+        keep = cap - worst_marker_len
+        head_len = keep // 2
+        tail_len = keep - head_len
+        head = out[:head_len]
+        tail = out[-tail_len:] if tail_len > 0 else ""
+        dropped = max(0, len(out) - head_len - tail_len)
+        marker = marker_template.format(n=dropped)
+        truncated = head + marker + tail
+        # Defensive trim — middle-elision arithmetic should already fit
+        # but keep a safety net for unicode width edge cases.
+        if len(truncated) > cap:
+            overflow = len(truncated) - cap
+            if tail_len > overflow:
+                tail = tail[overflow:]
+                truncated = head + marker + tail
+            else:
+                truncated = truncated[: max(0, cap - 1)] + "…"
+        return truncated
     return out
 
 

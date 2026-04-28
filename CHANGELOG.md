@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0] - 2026-04-28 — Week 3: Hermes Port wave-2 + Token Audit Autopilot + W3 ecosystem ship
+
+Plan v3 (jolly-sauteeing-journal.md) Week 3 release. Same-day triple+
+ship after Week 2 4.4.0 ✅ LIVE earlier on 2026-04-28. Power-user
+vertical full-stack pivot continues: HP2 SkillEmergenceGuard + HP7
+Skill progressive disclosure + observability/token_audit + Memory
+cleanroom 0.2.0 + Sancio 1.3.0 (M1 step 3) + Cigito v3 0.0.1 (W2
+distill data 5k pairs first publish) all land same day. All new
+features default-OFF per the 4.0.0 SEMVER opt-in baseline.
+
+### Added — Wave-1 (Hermes Port wave-2 + Token Audit)
+
+- `concinno.skills.skill_emergence_guard` (HP2, 745 LoC + 38 tests):
+  observe PostToolUse patterns (repeat workflows / error→success
+  recovery / user-correction) → stage Skill draft to
+  `~/.concinno/skill_drafts/<slug>.md` for operator review. Caps:
+  `max_auto_skills_per_day=5` / `min_pattern_occurrences=3` /
+  `cooldown_hours=2` / `draft_retention_days=30`. ZIQ FTRL learns
+  from accept/reject. Wired into `hooks/on_post_tool.py:5.46`. Never
+  auto-installs into `~/.claude/skills/` — operator runs
+  `concinno skill-emerge accept|reject <slug>`.
+
+- `concinno.skills.disclosure` (HP7, 497 LoC + 29 tests): three-layer
+  Skill progressive disclosure (L1 frontmatter always-loaded /
+  L2 ≤50-line summary on route hit / L3 full SKILL.md + sibling
+  files on explicit invoke). Routing math
+  `P(skill | query) ∝ SPS(token-cosine) × FTRL_weight`; SPS scorer
+  swap-able via `sps_scorer` constructor kwarg for SBERT / Voyage
+  drop-in. Wired into `hooks/on_prompt_submit.py:#13`. Cleanroom
+  note: shares the name `progressive_disclosure` with the
+  `concinno-skills-memory` module, but governs skill routing not
+  memory snippet promotion — different schema, no import.
+
+- `concinno.observability.token_audit` (1448 LoC + 55 tests):
+  per-session token overhead audit for skills, MCP tools,
+  sub-agents, and the static system-prompt floor. Records run in
+  memory (lock-protected, char-based to stay model-agnostic), flush
+  to JSON-Lines under `~/.concinno/audit/token_audit_<session>.jsonl`
+  on Stop. `ArchiveAdvisor` proposes archive candidates for skills
+  with 30 d of zero invocation; `accept()` *moves* the skill
+  directory (not deletes) to `~/.concinno/skills_archive/<date>/` for
+  90 d retention. ZIQ FTRL learns from operator accept/reject.
+  Wired into `hooks/on_session_start.py` + `hooks/on_stop.py` + new
+  `concinno token-audit summary|advisor` CLI subcommand. Cleanroom:
+  not a fork of `slima4/claude-tui`. `ENABLE_TOOL_SEARCH` carried as
+  schema-only optional field — no unverified savings figure baked
+  in. Hard-delete forbidden: archive flow uses `shutil.move()` only.
+
+### Changed — Carryover (W2 R+B+G ship-gate verdicts + W2 partial)
+
+- `ziq_outcome_bus._rate_limit_hz(tunable=None)` accepts per-tunable
+  env override `CONCINNO_ZIQ_BUS_MAX_HZ__<TUNABLE>` on top of the
+  global `CONCINNO_ZIQ_BUS_MAX_HZ`. Closes W2 R+B+G item #1.
+
+- `approval_mode` smart-mode cold-start prior is now `ask` (was
+  50/50 random). Closes W2 R+B+G item #2.
+
+- `render_profile_for_field_read` uses middle-elision with
+  `…[truncated N chars]…` marker; the last directive is preserved
+  instead of silently dropped. Closes W2 R+B+G item #3.
+
+- `CircuitBreakerGuard` defaults to a process-wide shared registry
+  singleton; two default-constructed guards converge on the same
+  breaker state for a logical resource. Operators wanting
+  instance-private state pass `share_state_with=False` to opt out.
+  Tests get isolation via the new `tests/security/conftest.py`
+  autouse fixture that calls `reset_shared_breaker_registry()`
+  between cases. Closes W2 R+B+G item #4.
+
+- `gaia_meta_router` emits `gaia.meta_arm` and the new
+  `record_judge_arm_outcome()` helper emits `judge.arm` outcomes to
+  the ZIQ bus. Brings the Plan v1 W2 ZIQ-wires count from 12/18 to
+  14/18.
+
+### Pkg ecosystem (same-day triple+ ship)
+
+- `concinno-skills-memory` 0.1.0 → 0.2.0: SQLite FTS5 index +
+  `concinno-memory-viewer` 127.0.0.1 web viewer + 5/5 lifecycle
+  hook (SessionStart / UserPromptSubmit / PostToolUse / Stop /
+  SessionEnd). 99/99 tests (69 baseline + 30 new).
+
+- `sancio-runtime` (persona-api) 1.2.0 → 1.3.0: SessionStart/Stop
+  hook fan-out subscriber registry + built-in MCP server runtime
+  (`sancio mcp start`, stdio transport) + `sancio doctor`
+  diagnostic CLI. 1027/1027 tests pass.
+
+- `cigito-v3` 0.0.1 first publish: W2 milestone — 5,000 distill
+  pairs from existing Concinno trajectories + ZIQ outcome emit
+  logs + CBUA stage transitions + FieldRead compression breakeven
+  hits. $0 GPU cost; pure stdlib; zero `concinno` imports;
+  AGPL-3.0-only.
+
+### Tests
+
+- 38 (HP2) + 29 (HP7) + 55 (Token Audit) + 53 (circuit_breaker
+  with new conftest fixture) + carryover regression — all green
+  alongside the W2 baseline. Memory 0.2.0: 99/99. Sancio 1.3.0:
+  1027/1027. Cigito v3: 21/21.
+
+### Carryover (deferred to 4.5.x patch wave)
+
+- `had_user_correction` upstream flag from `on_prompt_submit.py`
+  feeding into HP2 `EmergenceSignal` (currently always `False`)
+- `concinno skill-emerge accept|reject <slug>` CLI argparse wiring
+- HP2 `on_post_tool.py main()` 163-line pre-existing structural
+  lint threshold (not regressed; not fixed)
+- Token Audit multi-process file-level lock for archive accept/reject
+- 4 non-categorical ZIQ wires still pending
+
 ## [4.4.0] - 2026-04-28 — Week 2: Hermes Port wave-1 + ZIQ wires + Power user pivot
 
 Plan v3 (jolly-sauteeing-journal.md, approved 2026-04-28) Week 2

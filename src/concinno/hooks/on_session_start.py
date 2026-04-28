@@ -121,6 +121,24 @@ def main(hook_data: dict | None = None) -> None:
     # --- narrower-scope v4: inject active preset into agent context ---
     _emit_active_preset()
 
+    # --- Optional: concinno-skills-memory lifecycle (0.2.0+) ---
+    _memory_lifecycle_session_start(hook_data)
+
+
+def _memory_lifecycle_session_start(hook_data: dict | None) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+            on_session_start as _memory_on_session_start,
+        )
+
+        _memory_on_session_start(
+            _MemoryCtx(session_id=(hook_data or {}).get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
+
 
 def _emit_tier1_mount() -> None:
     """Emit Tier1 skill mount block as ``hookSpecificOutput.additionalContext``.

@@ -421,7 +421,26 @@ def handle_prompt_submit(
     if disclosure_ctx:
         contexts.append(disclosure_ctx)
 
+    _memory_lifecycle_user_prompt_submit(user_prompt, session_id)
     return {"contexts": contexts}
+
+
+def _memory_lifecycle_user_prompt_submit(
+    user_prompt: str,
+    session_id: str,
+) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+            on_user_prompt_submit as _memory_on_user_prompt_submit,
+        )
+
+        _memory_on_user_prompt_submit(
+            _MemoryCtx(session_id=session_id, user_prompt=user_prompt)
+        )
+    except (ImportError, Exception):
+        pass
 
 
 def _handoff_resume_inject(user_prompt: str) -> str | None:

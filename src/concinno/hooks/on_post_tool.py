@@ -840,6 +840,9 @@ def main(hook_data: dict | None = None) -> None:
     except Exception:
         pass
 
+    # 5.47 Optional concinno-skills-memory candidate capture (0.2.0+).
+    _memory_lifecycle_post_tool_use(tool_name, hook_data)
+
     # 5.46 SkillEmergenceGuard — observe tool-call patterns and propose
     # Skill drafts (default-OFF; internal feature check short-circuits).
     _run_skill_emergence(tool_name, tool_input, hook_data)
@@ -906,6 +909,36 @@ def main(hook_data: dict | None = None) -> None:
     # 6. Output
     if fragments:
         _emit_output(fragments, session_id=hook_data.get("session_id", ""))
+
+
+def _memory_lifecycle_post_tool_use(tool_name: str, hook_data: dict) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent.
+
+    Captures the just-finished tool's output as a *candidate* snippet
+    (no auto-write — gating happens in :func:`on_stop`'s lifecycle
+    invocation). Any ImportError or runtime failure is swallowed so
+    the host hook keeps running.
+    """
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+            on_post_tool_use as _memory_on_post_tool_use,
+        )
+
+        tool_response = hook_data.get("tool_response", {}) or {}
+        if isinstance(tool_response, dict):
+            output = str(tool_response.get("output", ""))
+        else:
+            output = str(tool_response)
+        _memory_on_post_tool_use(
+            _MemoryCtx(
+                session_id=hook_data.get("session_id", ""),
+                tool_name=tool_name,
+                tool_output=output,
+            )
+        )
+    except (ImportError, Exception):
+        pass
 
 
 if __name__ == "__main__":

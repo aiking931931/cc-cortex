@@ -273,9 +273,18 @@ def test_describe_lists_ftrl_buckets(fake_home: Path) -> None:
 def test_threshold_env_lowers_ask_bar(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Setting threshold near 0 ⇒ smart mode rarely asks."""
+    """Setting threshold near 0 ⇒ smart mode rarely asks.
+
+    Provide a non-cold-start FTRL state (Jeffreys+epsilon) so the
+    threshold knob is the variable under test rather than the
+    4.5.0 cold-start safety override (R+B+G W2 verdict #2: a
+    bucket with no observations always returns should_ask=True).
+    """
     monkeypatch.setenv(am._THRESHOLD_ENV, "0.001")
-    cfg = am.ApprovalConfig(mode=am.ApprovalMode.SMART)
+    cfg = am.ApprovalConfig(
+        mode=am.ApprovalMode.SMART,
+        ftrl={"blast:medium": am.ApprovalState(alpha=2.0, beta=2.0)},
+    )
     d = am.decide("medium", config=cfg)
     assert d.should_ask is False
 

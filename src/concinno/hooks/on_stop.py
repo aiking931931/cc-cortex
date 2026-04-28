@@ -481,6 +481,47 @@ def main(hook_data: dict | None = None) -> None:
     _check_block_decisions(modules)
     _emit_stderr_outputs(modules)
 
+    # --- Optional: concinno-skills-memory lifecycle (0.2.0+) ---
+    # Two-step: ``on_stop`` evaluates pending candidate snippets (default
+    # defer = no auto-write), then ``on_session_end`` prunes stale rows
+    # past the 90-day retention window. CC has no native ``SessionEnd``
+    # hook event, so the prune step rides Stop with the standard
+    # try/except wrapper. Either side raising ImportError or any runtime
+    # error is silently swallowed so a hook subscriber bug cannot crash
+    # the host pipeline.
+    _memory_lifecycle_stop(hook_data)
+    _memory_lifecycle_session_end(hook_data)
+
+
+def _memory_lifecycle_stop(hook_data: dict) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+            on_stop as _memory_on_stop,
+        )
+
+        _memory_on_stop(
+            _MemoryCtx(session_id=hook_data.get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
+
+
+def _memory_lifecycle_session_end(hook_data: dict) -> None:
+    """Optional concinno-skills-memory retention prune; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+            on_session_end as _memory_on_session_end,
+        )
+
+        _memory_on_session_end(
+            _MemoryCtx(session_id=hook_data.get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
+
 
 def _fallback_sequential(hook_data: dict) -> None:
     """Emergency fallback: run critical modules sequentially (no asyncio).
