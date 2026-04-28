@@ -32,7 +32,6 @@ Escape valves (by decreasing priority):
 
 Layered with sibling guards:
 - ``handoff_required_guard`` covers "no handoff written"
-- ``excuse_scanner`` / ``sedimentation_gate`` cover "unresolved in dialog"
 - ``sweep_guard`` covers "unresolved in git filesystem state"
 Together they enforce CLAUDE.md "任務結束順手修" ironclad rule.
 """

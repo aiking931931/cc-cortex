@@ -88,7 +88,6 @@ def _register_quality(pipe: GuardPipeline) -> None:
     from concinno.overflow_gate import OverflowGate
     from concinno.pre_tool_guards import BashPythonGuard, ReadBudgetGuard, ReadFirstGuard
     from concinno.premise_gate import PremiseGate
-    from concinno.proposal_guard import ProposalGuard
     from concinno.sentinel import (
         ConsecutiveFailGuard,
         HijackGuard,
@@ -119,7 +118,6 @@ def _register_quality(pipe: GuardPipeline) -> None:
     pipe.register(SentinelGuard())
     pipe.register(FileTrackerGuard())
     pipe.register(BoundaryGuard())
-    pipe.register(ProposalGuard())
     pipe.register(UIVerifyGuard())
     pipe.register(ButterflyGuard())
     # RLHF Side-Effect gates (2026-03-26)
@@ -164,7 +162,6 @@ def _register_quality(pipe: GuardPipeline) -> None:
 def _register_cognitive(pipe: GuardPipeline) -> None:
     """Layer 3: COGNITIVE — knowledge injection."""
     from concinno.cognitive import CognitiveGuard
-    from concinno.cognitive_anchor import CognitiveAnchorGuard
     from concinno.confidence_gate import ConfidenceGate
     from concinno.hypothesis_tracker import HypothesisTrackerGuard
     from concinno.milestone_gate import MilestoneGate
@@ -174,7 +171,6 @@ def _register_cognitive(pipe: GuardPipeline) -> None:
     pipe.register(CognitiveGuard())
     pipe.register(ConfidenceGate())
     pipe.register(HypothesisTrackerGuard())
-    pipe.register(CognitiveAnchorGuard())
     # CBUA v2: intent anchoring (2026-04-10)
     from concinno.intent_anchor_guard import IntentAnchorGuard
     pipe.register(IntentAnchorGuard())

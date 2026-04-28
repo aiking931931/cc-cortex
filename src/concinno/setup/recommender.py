@@ -68,7 +68,6 @@ PROFILES: dict[str, Profile] = {
         feature_overrides={
             "destruction_guard": {"enabled": True},
             "release_authorization": {"enabled": False, "disabled": True},
-            "sedimentation_gate": {"enabled": False},
             "handoff_required_guard": {"enabled": False},
             "premise_gate": {"enabled": False},
             "consecutive_fail_gate": {"enabled": False},
@@ -88,7 +87,6 @@ PROFILES: dict[str, Profile] = {
         ),
         feature_overrides={
             "destruction_guard": {"enabled": True},
-            "sedimentation_gate": {"enabled": True},
             "handoff_required_guard": {"enabled": True},
             "premise_gate": {"enabled": True},
             "consecutive_fail_gate": {"enabled": True, "max_fails": 2},
@@ -97,7 +95,6 @@ PROFILES: dict[str, Profile] = {
             "code_guard": {"enabled": True},
         },
         notes=[
-            "SedimentationGate stops Stop until corrections are sedimented.",
             "PremiseGate forces an external-docs check before citing limits.",
             "ConsecutiveFailGuard trips at 2 fails (stricter than default 3).",
         ],
@@ -111,7 +108,6 @@ PROFILES: dict[str, Profile] = {
         feature_overrides={
             "destruction_guard": {"enabled": True},
             "release_authorization": {"enabled": False, "disabled": True},
-            "sedimentation_gate": {"enabled": False},
             "handoff_required_guard": {"enabled": False},
             "premise_gate": {"enabled": False},
             "consecutive_fail_gate": {"enabled": False},
@@ -142,7 +138,6 @@ PROFILES: dict[str, Profile] = {
             "git_safety": {"enabled": True},
             "dep_audit": {"enabled": True},
             "premise_gate": {"enabled": True},
-            "sedimentation_gate": {"enabled": True},
             "handoff_required_guard": {"enabled": True},
             "wiredo": {"enabled": True},
         },

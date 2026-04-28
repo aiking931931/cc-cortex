@@ -24,7 +24,6 @@ from concinno.field_read import (
     compress_breakeven_for,
 )
 
-
 # ── compress_breakeven_for_route ───────────────────────────
 
 

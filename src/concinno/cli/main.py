@@ -76,10 +76,6 @@ MODULES = {
         "description": "Enterprise delivery gate — verified results, not guesses",
         "default": True,
     },
-    "proposal_guard": {
-        "description": "Block proposals without side-effect analysis (Poka-Yoke)",
-        "default": True,
-    },
     "ui_verify": {
         "description": "Lock after deploy+UI changes until screenshot verification",
         "default": True,

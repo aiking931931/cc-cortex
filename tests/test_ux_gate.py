@@ -13,7 +13,6 @@ Gated UX inject sites verified here:
   - :mod:`concinno.guards.cbua_pipeline_guard` — ``on_post_tool``
   - :mod:`concinno.wiredo_guards` — ``WiredoGuard.check``
   - :mod:`concinno.think_inject` — ``ThinkInjectionGuard.on_post_tool``
-  - :mod:`concinno.cognitive_anchor` — ``CognitiveAnchorGuard.check``
   - :mod:`concinno.intent_anchor_guard` — ``IntentAnchorGuard.check``
 
 NOT gated (safety layer — verified to still fire even with UX off):

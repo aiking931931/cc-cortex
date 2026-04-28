@@ -57,7 +57,6 @@ Concinno is **the full agent-capability bag for anything CC can do today**. Sanc
 | `IntentAnchorGuard` | Periodic re-injection of user's original intent |
 | `InitialIntentProbe` | Probe user's root purpose for Complex+ tasks |
 | `VerifyBeforeWriteGuard` | Verify external references before writing |
-| `SedimentationGate` | Block stop when corrections not sedimented |
 | `TaskOrchestrator` | Session-level task decomposition and tracking |
 | `CostTracker` | Per-session token/cost tracking with budget ceiling |
 | `ProgressReporter` | Formatted milestone reports |

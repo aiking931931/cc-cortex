@@ -24,8 +24,9 @@ Tier ladder (alpha_t thresholds match ZIQRetrieval defaults):
 * ``chaotic``     ``alpha_t >= 0.90`` — all ziq_routed features ON
 
 Context budget override: when ``ctx_tokens / yellow_zone_tokens > 0.80`` the
-router force-enables the ``cognitive_anchor`` feature regardless of tier (this
-is the in-tree analogue of the historical ``field_read`` override).
+router force-enables the ``consecutive_fail_gate`` feature regardless of tier
+(this is the in-tree analogue of the historical ``field_read`` override —
+post-4.6.0 ``cognitive_anchor`` removal).
 
 The router NEVER mutates ZIQ or FeatureConfig state. It is a pure function
 of (query, ctx_tokens, user_overrides) plus the metadata snapshot.
@@ -61,9 +62,10 @@ Tier = Literal["simple", "complicated", "complex", "chaotic"]
 # Names that appear in the original spec but are not real features
 # (wiredo_block, arbiter, cbua_redteam, field_read) are mapped to the
 # closest in-tree analogues:
-#   - arbiter / cbua_redteam → cognitive_anchor + consecutive_fail_gate
-#   - field_read             → cognitive_anchor (ctx-budget override)
+#   - arbiter / cbua_redteam → consecutive_fail_gate
+#   - field_read             → consecutive_fail_gate (ctx-budget override)
 #   - wiredo_block           → delivery_gate
+# Post-4.6.0: cognitive_anchor / proposal_guard / whitepaper_guard removed.
 _SIMPLE_BASE: frozenset[str] = frozenset({
     "butterfly_guard",
     "token_gate",
@@ -78,7 +80,6 @@ _COMPLICATED_ADD: frozenset[str] = frozenset({
 })
 
 _COMPLEX_ADD: frozenset[str] = frozenset({
-    "cognitive_anchor",
     "consecutive_fail_gate",
     "clarity_gate",
     "hijack_gate",
@@ -87,8 +88,6 @@ _COMPLEX_ADD: frozenset[str] = frozenset({
 _CHAOTIC_ADD: frozenset[str] = frozenset({
     "delivery_gate",
     "ui_verify",
-    "proposal_guard",
-    "whitepaper_guard",
     "design_theory",
     "insight_engine",
 })
@@ -140,8 +139,9 @@ class ZIQFeatureRouter:
 
     # Feature force-enabled when ctx pressure exceeds CTX_FORCE_RATIO of
     # the yellow_zone_tokens budget. Was historically named field_read; the
-    # in-tree analogue is cognitive_anchor.
-    CTX_FORCED_FEATURE: str = "cognitive_anchor"
+    # post-4.6.0 in-tree analogue is consecutive_fail_gate (cognitive_anchor
+    # removed in the 4.6.0 KILL 10 cleanup wave).
+    CTX_FORCED_FEATURE: str = "consecutive_fail_gate"
     CTX_FORCE_RATIO: float = 0.80
 
     def __init__(

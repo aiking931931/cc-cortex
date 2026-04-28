@@ -82,7 +82,6 @@ _SESSION_RESTART_FEATURES = frozenset({
     "prompt_guard",
     "streak_ux",
     "language_enforce",
-    "cognitive_anchor",
     "deny_marker",
     "token_display",
 })

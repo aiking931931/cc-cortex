@@ -120,7 +120,6 @@ _DEFAULTS = {
         "delivery_gate": {"mode": "hard_deny", "max_iterations": 5},
         "bash_background_gate": {"mode": "step_back_first"},
         "python_c_gate": {"mode": "step_back_first"},
-        "whitepaper_guard": {"mode": "hard_deny"},
         "clarity_gate": {"mode": "step_back_first", "min_clarity": 0.4},
         # Hard quality (PostToolUse lint-level) — params only; no
         # ``enabled`` key (ship-level default decided by

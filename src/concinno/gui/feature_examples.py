@@ -154,10 +154,6 @@ EXAMPLES: dict[str, str] = {
         "forces the LLM to drop them into a file with `Write` "
         "instead so the shell / auditor can see them."
     ),
-    "whitepaper_guard": (
-        "Guards against unverified whitepaper / benchmark claims in "
-        "written artifacts."
-    ),
     "clarity_gate": (
         "Hard-gate for document-writing tools — refuses output that "
         "reads like marketing boilerplate."
@@ -165,10 +161,6 @@ EXAMPLES: dict[str, str] = {
     "hijack_gate": (
         "Protects against prompt-injection hijack patterns in "
         "read-back content."
-    ),
-    "proposal_guard": (
-        "Refuses to let the LLM silently ship a proposal-shaped task "
-        "(design doc, RFC) without an explicit confirmation step."
     ),
     "ui_verify": (
         "After UI edits (React / HTML / CSS) demand a visual "
@@ -185,10 +177,6 @@ EXAMPLES: dict[str, str] = {
         "look up docs instead of hammering the same path.\n\n"
         "Example: `max_fails=3`. 3 `pytest` runs red in a row → gate "
         "redirects to knowledge search."
-    ),
-    "cognitive_anchor": (
-        "Session-wide anchoring phrases so the LLM stays on the "
-        "original intent when context gets noisy."
     ),
     "design_theory": (
         "Surfaces design-principle nudges (SOLID, Law of Demeter, "

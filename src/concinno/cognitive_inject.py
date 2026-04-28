@@ -55,11 +55,12 @@ import re
 # All injected text MUST follow:
 #   1. Token cap: L0 ≤60t | L1 ≤80t | L2 ≤200t | Delivery ≤80t
 #   2. U-shape attention: most important at FIRST and LAST line
-#   3. Gas-state → cognitive_anchor.py ONLY. Here = pure imperative.
+#   3. Gas-state lived in cognitive_anchor.py (removed in 4.6.0 KILL 10
+#      cleanup); this module remains pure imperative regardless.
 #   4. Line cap: L0 ≤5 | L1 ≤7 | L2 ≤10 | Delivery ≤7 (hard max)
 
 # L0: Unhardnable process rules (~40t, ≤4 lines). Pure imperative.
-# Gas-state lives in cognitive_anchor.py (identity). Here = operations.
+# Historic gas-state lived in cognitive_anchor.py (removed); operations only.
 _L0_HARD_RULES = """\
 - Fix all errors you see now. ✅done ⏸half(where+why).
 - Unsure → look it up. Don't guess.

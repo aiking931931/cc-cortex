@@ -160,10 +160,10 @@ class StaticCache:
           4. ``<workspace>/.concinno/l0.md``
           5. ``<workspace>/CLAUDE.md`` (as iron-laws source)
 
-        Red team #3 — the previous author-specific defaults
-        (``projects/concinno/src/concinno/cognitive_anchor.py`` and
-        ``.claude/rules/00-L0.md``) violated CCC hard rule #1 and
-        silently left the cache empty for any non-author workspace.
+        Red team #3 — previous author-specific defaults (an in-tree
+        identity module + ``.claude/rules/00-L0.md``) violated CCC hard
+        rule #1 and silently left the cache empty for any non-author
+        workspace.
         """
         identity_path = os.environ.get("CONCINNO_IDENTITY_PATH", "")
         if not identity_path and workspace:

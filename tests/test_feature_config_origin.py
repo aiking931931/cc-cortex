@@ -123,8 +123,6 @@ class TestFeatureMetaFlagsAudit:
             "boundary_guard",
             "publish_scan",
             "identity_guard",
-            "whitepaper_guard",
-            "proposal_guard",
             "ui_verify",
             "read_first_gate",
             "bash_background_gate",

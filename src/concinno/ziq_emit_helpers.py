@@ -37,7 +37,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 __all__ = [
     "emit_boolean_outcome",
     "emit_budget_outcome",

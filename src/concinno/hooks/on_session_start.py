@@ -130,6 +130,8 @@ def _memory_lifecycle_session_start(hook_data: dict | None) -> None:
     try:
         from concinno_skills_memory.lifecycle import (
             LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
             on_session_start as _memory_on_session_start,
         )
 

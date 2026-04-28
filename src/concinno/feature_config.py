@@ -50,13 +50,13 @@ Wiring status (2.7.0 — every feature in this table is now live):
 
   Metadata-only
   -------------
-  ``typescript``, ``whitepaper_guard``, ``language_enforce``,
+  ``typescript``, ``language_enforce``,
   ``deny_marker``, ``token_display``, ``handoff_format``,
   ``pipeline_mode``, ``handoff_required_guard``, ``identity_guard``,
   ``butterfly_guard``, ``code_guard``, ``boundary_guard``,
-  ``agent_cap``, ``cognitive_anchor``, ``design_theory``,
+  ``agent_cap``, ``design_theory``,
   ``token_gate``, ``structural_guard``, ``ui_verify``,
-  ``publish_scan``, ``proposal_guard``, ``sentinel_gate``,
+  ``publish_scan``, ``sentinel_gate``,
   ``consecutive_fail_gate``, ``hijack_gate`` — every one has either
   a ``BaseGuard`` subclass picked up by the pipeline dispatch or a
   direct ``cfg.feature()`` call at its hook entry point. Use
@@ -117,19 +117,17 @@ VALID_FAIL_MODES: frozenset[str] = frozenset({
 # coordination / rendering features that don't deny tool calls or
 # block agent flow.
 DEFAULT_OFF_4_0_0: frozenset[str] = frozenset({
-    # hard_gate (21)
+    # hard_gate (18)
     "agent_cap", "bash_background_gate", "boundary_guard",
     "butterfly_guard", "clarity_gate", "consecutive_fail_gate",
     "delivery_gate", "handoff_required_guard", "hijack_gate",
-    "identity_guard", "prompt_guard", "proposal_guard",
+    "identity_guard", "prompt_guard",
     "publish_scan", "publish_scan_guard", "python_c_gate",
     "read_first_gate", "release_authorization", "sentinel_gate",
-    "token_gate", "ui_verify", "whitepaper_guard",
-    # soft_gate (4)
-    "excuse_scanner", "handoff_claim_guard", "sedimentation_gate",
+    "token_gate", "ui_verify",
+    # soft_gate (2)
+    "handoff_claim_guard",
     "semver_gate",
-    # info / repo-hygiene (1) — user listed off in cc_config.json
-    "git_size_monitor",
     # external module (no FEATURE_META entry; honoured via
     # meta_enabled_default fallback chain)
     "premise_gate",
@@ -747,25 +745,6 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "whitepaper_guard": {
-        "category": "hard_gate",
-        "severity_if_off": "major",
-        "consequences_if_off": "白皮書 IP 關鍵字外洩到外部路徑風險",
-        "description": "Block whitepaper IP keywords from leaking to external paths",
-        "description_zh": "阻擋白皮書核心 IP 關鍵字外流到外部路徑",
-        "ziq_autotunable": False,
-        "cosmetic": False,
-        "params": {
-            "mode": {
-                "type": "str",
-                "default": "hard_deny",
-                "options": ["step_back_first", "hard_deny", "off"],
-                "recommended": "hard_deny",
-                "risk_off": "Gate disabled — whitepaper content may leak",
-                "risk_off_zh": "Gate 關閉 — 白皮書內容可能外流",
-            },
-        },
-    },
     "clarity_gate": {
         "category": "hard_gate",
         "severity_if_off": "major",
@@ -845,25 +824,6 @@ FEATURE_META: dict[str, dict[str, Any]] = {
                 "risk_high": "Above 0.95 almost never forces stop — model wastes entire context",
                 "risk_low_zh": "低於 0.6 太早強制停止",
                 "risk_high_zh": "高於 0.95 幾乎不會強制停止，模型浪費整個上下文",
-            },
-        },
-    },
-    "proposal_guard": {
-        "category": "hard_gate",
-        "severity_if_off": "major",
-        "consequences_if_off": "Planning 新 proposal 無副作用分析警告失效",
-        "description": "Block new proposals in planning files without side-effect analysis",
-        "description_zh": "規劃檔新提案缺少副作用分析時阻擋（動序 Poka-Yoke）",
-        "ziq_autotunable": False,
-        "cosmetic": False,
-        "params": {
-            "mode": {
-                "type": "str",
-                "default": "step_back_first",
-                "options": ["step_back_first", "hard_deny", "off"],
-                "recommended": "step_back_first",
-                "risk_off": "Gate disabled — proposals without side-effect analysis pass through",
-                "risk_off_zh": "Gate 關閉 — 無副作用分析的提案不會被攔截",
             },
         },
     },
@@ -956,33 +916,6 @@ FEATURE_META: dict[str, dict[str, Any]] = {
                 "risk_high": "Above 10 lets the model waste many calls before intervening",
                 "risk_low_zh": "低於 2 只重試一次就擋，太激進",
                 "risk_high_zh": "高於 10 讓模型浪費太多次呼叫才介入",
-            },
-        },
-    },
-    # ── Cognitive Anchor (red-team injection) ──
-    "cognitive_anchor": {
-        "category": "context",
-        "description": (
-            "Inject solid-state language red-team prompts before high-risk"
-            " operations (architecture edits, large deletions, new modules, deploys)"
-        ),
-        "description_zh": (
-            "高風險操作前注入固態語言紅隊提示"
-            "（架構修改、大量刪除、新模組、部署）"
-        ),
-        "ziq_autotunable": True,
-        "cosmetic": False,
-        "params": {
-            "deletion_threshold": {
-                "type": "int",
-                "default": 50,
-                "min": 20,
-                "max": 200,
-                "recommended": 50,
-                "risk_low": "Below 20 triggers on minor edits — too noisy",
-                "risk_high": "Above 200 misses significant deletions",
-                "risk_low_zh": "低於 20 連小改動都觸發，太吵",
-                "risk_high_zh": "高於 200 會漏掉重大刪除",
             },
         },
     },
@@ -1252,12 +1185,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         "cosmetic": False,
         "severity_if_off": "major",
         "consequences_if_off": (
-            "Dynamic-code construction patterns (f-string into "
-            "os.system / subprocess shell=True / eval+user_input / "
-            "compile(..., 'exec')) reach disk unflagged. A single "
-            "agent-generated line such as ``os.system(f\"echo "
-            "{user_input}\")`` becomes an RCE primitive once the "
-            "interpolated source is attacker-controllable."
+            "Dynamic-code construction (f-string→shell, eval/exec on "
+            "user input, compile('exec')) reaches disk unflagged; one "
+            "agent line becomes an RCE primitive."
         ),
         "description": (
             "AST + regex scan for RCE-injection patterns "
@@ -1329,11 +1259,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         "cosmetic": False,
         "severity_if_off": "major",
         "consequences_if_off": (
-            "Outbound HTTP-client tool calls (curl/wget/requests/"
-            "httpx/aiohttp) leave the agent without any request-shape "
-            "policy. Bearer-token leaks in Authorization headers, "
-            "form-encoded POST exfil, and DELETE/PUT against "
-            "production-shape hosts ship un-flagged."
+            "HTTP-client tool calls (curl/wget/requests/httpx/aiohttp) "
+            "ship without request-shape policy: bearer-token leaks, "
+            "POST exfil, DELETE on prod hosts ship un-flagged."
         ),
         "description": (
             "Request-semantic policy gate for HTTP-client tool calls. "
@@ -1568,11 +1496,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         "cosmetic": False,
         "severity_if_off": "major",
         "consequences_if_off": (
-            "Agent-written code that interpolates user input into SQL "
-            "(string-concat / f-string / %% / .format()) ships to disk "
-            "unflagged — single agent edit can introduce OWASP A03:2021 "
-            "Injection. The guard is the only static-analysis layer "
-            "covering query construction in the Concinno security stack."
+            "Agent code interpolating user input into SQL "
+            "(concat/f-string/%%/.format()) ships unflagged — single "
+            "edit introduces OWASP A03:2021 Injection."
         ),
         "description": (
             "Regex-based SQL injection scanner. Detects 5 unsafe "
@@ -1843,46 +1769,6 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         "cosmetic": False,
         "params": {},
     },
-    "excuse_scanner": {
-        "category": "soft_gate",
-        "severity_if_off": "minor",
-        "consequences_if_off": (
-            "蝴蝶效應未沉澱 excuse（'不是我的問題' / 'pre-existing'）不再被 stop "
-            "hook 阻擋，pre-existing bug 可累積"
-        ),
-        "description": (
-            "Scan assistant transcript for 'not-my-fault' excuses about "
-            "pre-existing issues that were acknowledged but never fixed. "
-            "Block stop until those issues are addressed or recorded."
-        ),
-        "description_zh": (
-            "掃 assistant 訊息找 '不是我的問題 / pre-existing / 先跳過' "
-            "等推卸詞，若該問題沒被後續 Edit/Write 處理則阻擋停止"
-        ),
-        "ziq_autotunable": False,
-        "cosmetic": False,
-        "params": {},
-    },
-    "sedimentation_gate": {
-        "category": "soft_gate",
-        "severity_if_off": "minor",
-        "consequences_if_off": (
-            "用戶糾正不再強制沉澱進 feedback_*.md / KB；"
-            "三次糾正同錯誤的學習迴圈會中斷"
-        ),
-        "description": (
-            "CBUA Law #5 enforcement: when corrections logged this "
-            "session but no feedback_*.md modified, block stop until "
-            "sedimentation evidence appears."
-        ),
-        "description_zh": (
-            "本 session 偵測到用戶糾正但未寫入 feedback_*.md / KB 時"
-            "阻擋停止；連續 2 次 block 後降級為 warning（防 deadlock）"
-        ),
-        "ziq_autotunable": False,
-        "cosmetic": False,
-        "params": {},
-    },
     "handoff_claim_guard": {
         "category": "soft_gate",
         "severity_if_off": "minor",
@@ -1902,39 +1788,6 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         "ziq_autotunable": False,
         "cosmetic": False,
         "params": {},
-    },
-    "git_size_monitor": {
-        "category": "info",
-        "severity_if_off": "none",
-        "consequences_if_off": (
-            ".git/objects/pack 超過閾值不再警告；repo 變肥變慢時無提示"
-        ),
-        "description": (
-            "Stop-hook warning when .git/objects/pack/*.pack sums above "
-            "CONCINNO_GIT_SIZE_WARN_GB (default 5 GB). "
-            "Honours CONCINNO_GIT_SIZE_MONITOR_DISABLED + the legacy "
-            "CC_GIT_HEALTH_DISABLED alias documented in switches.md."
-        ),
-        "description_zh": (
-            "stop hook 偵測 .git/objects/pack/ 超過閾值（預設 5 GB）時警告；"
-            "可由 CONCINNO_GIT_SIZE_MONITOR_DISABLED 或舊 alias "
-            "CC_GIT_HEALTH_DISABLED 關閉"
-        ),
-        "ziq_autotunable": False,
-        "cosmetic": False,
-        "params": {
-            "warn_gb": {
-                "type": "float",
-                "default": 5.0,
-                "min": 0.5,
-                "max": 100.0,
-                "recommended": 5.0,
-                "risk_low": "Below 0.5 GB warns on healthy repos (noise)",
-                "risk_high": "Above 100 GB never fires for any human repo",
-                "risk_low_zh": "低於 0.5 GB 對健康 repo 也警告（噪音）",
-                "risk_high_zh": "高於 100 GB 永遠不會觸發",
-            },
-        },
     },
     # ── Pipeline Mode ──
     "pipeline_mode": {

@@ -258,7 +258,10 @@ class ThinkInjectGuard(BaseGuard):
             or ctx.tool_name == "Bash"
         )
         if is_write:
-            # Dedup with cognitive_anchor
+            # Historic dedup namespace was ``cognitive_anchor`` — feature
+            # removed in 4.6.0 KILL 10 cleanup wave; the read still works
+            # against an empty default so legacy state-store entries are
+            # tolerated without crashing on missing namespace.
             path = ctx.tool_input.get("file_path", "") or ""
             anchor = store.read(
                 "cognitive_anchor", "state", default={},

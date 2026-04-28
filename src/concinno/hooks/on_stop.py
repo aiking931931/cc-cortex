@@ -196,22 +196,6 @@ def _build_auto_delivery(hook_data: dict) -> Callable[[], str | None]:
     return _run
 
 
-def _build_excuse_scanner(hook_data: dict) -> Callable[[], str | None]:
-    """Scan conversation for unresolved 'not my fault' excuses — block stop."""
-    def _run() -> str | None:
-        from concinno.excuse_scanner import on_stop as excuse_stop
-        return excuse_stop(hook_data)
-    return _run
-
-
-def _build_sedimentation_gate(hook_data: dict) -> Callable[[], str | None]:
-    """CBUA Law #5: block stop when corrections exist but not sedimented."""
-    def _run() -> str | None:
-        from concinno.sedimentation_gate import on_stop as sed_stop
-        return sed_stop(hook_data)
-    return _run
-
-
 def _build_wiredo_block(hook_data: dict) -> Callable[[], str | None]:
     """Multi-type WIREDO verification via ArtifactPipeline.
 
@@ -288,19 +272,6 @@ def _build_notify(hook_data: dict) -> Callable[[], None]:
     return _run
 
 
-def _build_git_size_monitor() -> Callable[[], str | None]:
-    """Warn when ``.git/objects/pack/`` crosses a GB threshold.
-
-    Added 2026-04-18 after `git gc --prune=now` silent-failure audit:
-    without a visible size signal, users don't notice repo bloat until
-    push/fetch latency screams. Pack-only fast path keeps this <10 ms.
-    """
-    def _run() -> str | None:
-        from concinno.git_size_monitor import git_size_monitor_hook
-        return git_size_monitor_hook()
-    return _run
-
-
 def _build_token_audit(hook_data: dict) -> Callable[[], None]:
     """Flush per-session token audit jsonl on Stop.
 
@@ -343,9 +314,7 @@ def _build_sweep_guard(hook_data: dict) -> Callable[[], str | None]:
 
 _BLOCK_PREFIXES = {
     "stop_guard": "STOP_BLOCK:",
-    "excuse_scanner": "EXCUSE_BLOCK:",
     "wiredo_block": "WIREDO_BLOCK:",
-    "sedimentation_gate": "SEDIMENTATION_BLOCK:",
     "handoff_claim": "HANDOFF_CLAIM_BLOCK:",
     "handoff_required": "HANDOFF_REQUIRED_BLOCK:",
     "sweep_guard": "SWEEP_BLOCK:",
@@ -353,8 +322,6 @@ _BLOCK_PREFIXES = {
 
 _BLOCK_REASONS = {
     "STOP_BLOCK": lambda reason: reason,
-    "EXCUSE_BLOCK": lambda reason: reason,
-    "SEDIMENTATION_BLOCK": lambda reason: reason,
     "WIREDO_BLOCK": lambda dims: (
         f"WIREDO verification failed: {dims}. "
         f"Fix failed dimensions before stopping."
@@ -406,7 +373,6 @@ def _emit_stderr_outputs(modules: list[_StopModule]) -> None:
             "auto_delivery",
             "auto_commit",
             "inline_squash",
-            "git_size_monitor",
             "sweep_guard",
         ):
             print(result_str, file=sys.stderr)
@@ -458,15 +424,12 @@ def main(hook_data: dict | None = None) -> None:
         _StopModule("multi_instance", _build_multi_instance(), timeout_s=5.0),
         _StopModule("stop_guard", _build_stop_guard(hook_data), timeout_s=5.0),
         _StopModule("auto_delivery", _build_auto_delivery(hook_data), timeout_s=10.0),
-        _StopModule("excuse_scanner", _build_excuse_scanner(hook_data), timeout_s=5.0),
-        _StopModule("sedimentation_gate", _build_sedimentation_gate(hook_data), timeout_s=5.0),
         _StopModule("wiredo_block", _build_wiredo_block(hook_data), timeout_s=15.0),
         _StopModule("handoff_claim", _build_handoff_claim(hook_data), timeout_s=5.0),
         _StopModule("handoff_required", _build_handoff_required(hook_data), timeout_s=5.0),
         _StopModule("sweep_guard", _build_sweep_guard(hook_data), timeout_s=5.0),
         _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
         _StopModule("orphan_scan", _build_orphan_scan(hook_data), timeout_s=15.0),
-        _StopModule("git_size_monitor", _build_git_size_monitor(), timeout_s=5.0),
         _StopModule("token_audit", _build_token_audit(hook_data), timeout_s=5.0),
         _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
         _StopModule("notify", _build_notify(hook_data), timeout_s=15.0),
@@ -498,6 +461,8 @@ def _memory_lifecycle_stop(hook_data: dict) -> None:
     try:
         from concinno_skills_memory.lifecycle import (
             LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
             on_stop as _memory_on_stop,
         )
 
@@ -513,6 +478,8 @@ def _memory_lifecycle_session_end(hook_data: dict) -> None:
     try:
         from concinno_skills_memory.lifecycle import (
             LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
             on_session_end as _memory_on_session_end,
         )
 
