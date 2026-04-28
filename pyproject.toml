@@ -130,6 +130,16 @@ dev = [
     "hypothesis>=6.0",
     "ruff>=0.4",
 ]
+# Hermes Port wave-3 HP5 (Week 4 / 4.6.0) — GEPA evolution as
+# optional dep. ``concinno.evolution`` provides a thin adapter so
+# operators can plug a Pareto-efficient evolutionary search loop on
+# top of any concinno Skill / prompt artefact. Upstream package is
+# MIT (verified 2026-04-28 via PyPI: gepa 0.1.1, gepa-ai/gepa
+# repository). Kept out of ``all`` — opt in explicitly because the
+# search loop calls an external LLM for reflection and is not free.
+evolution = [
+    "gepa>=0.1.1",
+]
 # Config GUI — localhost FastAPI + single-page Vanilla JS frontend for
 # visualizing / editing every FEATURE_META switch and ``~/.concinno/*.json``
 # file without round-tripping through an LLM. Launch via ``concinno gui``.

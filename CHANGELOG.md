@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `concinno.evolution` (Hermes Port wave-3 HP5, W4 / 4.6.0 launch,
+  ~250 LoC + 20 tests): optional GEPA (Genetic Pareto-efficient
+  evolutionary search via LLM reflection) integration. Upstream
+  ``gepa>=0.1.1`` (MIT, https://github.com/gepa-ai/gepa) installed
+  via ``pip install "concinno[evolution]"``. ``GepaAdapter`` wraps
+  ``gepa.run`` with concinno's artefact contract; lazy import keeps
+  the zero-runtime-dep core untouched. ``EvolutionExtraNotInstalled``
+  inherits ``ImportError`` and carries the install hint so first-run
+  failures are actionable. ``attach_outcome_bus`` decouples the FTRL
+  emission seam from the GEPA contract. API-shape-first ship — full
+  search-loop wiring is W4 carryover, but the public class signature
+  is stable.
+
 - `ArchiveAdvisor._locked_state_op` (W3.x carryover #8, ~75 LoC +
   8 tests): multi-process file-level lock for Token Audit Autopilot's
   archive accept / reject flow. The atomic `tmp + replace` previously
