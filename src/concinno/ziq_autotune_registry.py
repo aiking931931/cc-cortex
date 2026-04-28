@@ -61,6 +61,53 @@ class TunableSpec:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+def _resolve_field_read_compress_breakeven() -> "TunableSpec":
+    """Build the field_read.compress_breakeven_tokens spec from FEATURE_META.
+
+    Sub-agent K wave-2 dedup (4.4.0). The schema lives in
+    ``concinno.feature_config.FEATURE_META["field_read"]["params"]
+    ["compress_breakeven_tokens"]`` (recommended/min/max/default
+    hardened by ``test_feature_meta_schema_v2_36``). To avoid
+    drift between FEATURE_META and the ZIQ registry we resolve the
+    bounds here at import time. On any failure we fall back to the
+    historical hardcoded values so the registry still loads even if
+    feature_config is partially broken.
+    """
+    fallback_preset: int = 2500
+    fallback_vmin: float = 1500.0
+    fallback_vmax: float = 4000.0
+    try:
+        from concinno.feature_config import FEATURE_META
+
+        fr_meta = FEATURE_META.get("field_read", {})
+        params = fr_meta.get("params", {}) if isinstance(fr_meta, dict) else {}
+        cbt = params.get("compress_breakeven_tokens", {})
+        if isinstance(cbt, dict):
+            preset = int(cbt.get("default", fallback_preset))
+            vmin = float(cbt.get("min", fallback_vmin))
+            vmax = float(cbt.get("max", fallback_vmax))
+        else:
+            preset, vmin, vmax = fallback_preset, fallback_vmin, fallback_vmax
+    except Exception:
+        preset, vmin, vmax = fallback_preset, fallback_vmin, fallback_vmax
+    return TunableSpec(
+        target="field_read.compress_breakeven_tokens",
+        preset=preset,
+        kind="continuous",
+        vmin=vmin,
+        vmax=vmax,
+        source=(
+            "concinno.feature_config.FEATURE_META "
+            "['field_read']['params']['compress_breakeven_tokens']"
+        ),
+        note=(
+            "Token threshold above which FieldRead compression pays off "
+            "(plan §63 4.4.0). Schema source-of-truth = feature_config "
+            "FEATURE_META; ZIQ registry resolves at import time."
+        ),
+    )
+
+
 # Registry of >= 10 tunable hyperparameters found via static scan of
 # concinno source on 2026-04-21. Each entry links back to its declaration
 # site so future auditors can verify the preset is still current.
@@ -151,6 +198,7 @@ TUNABLE_REGISTRY: dict[str, TunableSpec] = {
         source="concinno.field_read.FieldReadConfig (line ~862)",
         note="Memory extraction token budget.",
     ),
+    "field_read.compress_breakeven_tokens": _resolve_field_read_compress_breakeven(),
     # ── Few-shot retrieval ────────────────────────────────
     "fewshot.min_token_len": TunableSpec(
         target="fewshot.min_token_len",

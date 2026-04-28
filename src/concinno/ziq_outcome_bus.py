@@ -24,6 +24,14 @@ Ordering:
     under the lock. Subscribers see events in the same order they were
     emitted (last-emit-wins for the same key when consumer keeps state).
 
+Race-condition guard (plan §244 — Plan C 2026-04-28):
+    Per-tunable rate limiter caps emit storms at
+    ``CONCINNO_ZIQ_BUS_MAX_HZ`` events/sec (default 100). Excess emits are
+    dropped silently to protect FTRL learners from runaway producers (e.g.
+    a guard in a tight loop). Tracked under the same lock that guards
+    subscribers so the rate budget is consistent across threads. Dropped
+    emits are counted via ``dropped_count(tunable)`` for audit.
+
 Manual override (``manual_override`` / ``pin``):
     User-pinned values short-circuit ``emit()`` — no dispatch happens
     when ``is_pinned(tunable)`` is true. Pin file lives at
@@ -75,6 +83,24 @@ def is_bus_disabled() -> bool:
     }
 
 
+# ── Race-condition rate limiter ─────────────────────────────────
+
+
+_DEFAULT_MAX_HZ = 100.0
+
+
+def _rate_limit_hz() -> float:
+    """Per-tunable max emits/sec. Override via ``CONCINNO_ZIQ_BUS_MAX_HZ``."""
+    raw = os.environ.get("CONCINNO_ZIQ_BUS_MAX_HZ", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_HZ
+    try:
+        v = float(raw)
+        return v if v > 0.0 else _DEFAULT_MAX_HZ
+    except ValueError:
+        return _DEFAULT_MAX_HZ
+
+
 # ── Pin file ────────────────────────────────────────────────────
 
 
@@ -116,8 +142,10 @@ class Outcome:
     Attributes:
         tunable: Dotted-path identifier matching a key in
             ``ziq_autotune_registry.TUNABLE_REGISTRY``.
-        value: The parameter value that produced this outcome
-            (numeric / bool — what the autotuner suggested).
+        value: The parameter value that produced this outcome —
+            numeric / bool for continuous/threshold tunables, string
+            for categorical / arm-selection tunables (e.g.
+            ``judge.arm = "haiku"|"sonnet"|"opus"``).
         reward: Higher = better. Convention: 1.0 = full success,
             0.0 = total failure, intermediate = partial credit.
         timestamp: Unix seconds when the outcome occurred.
@@ -127,12 +155,12 @@ class Outcome:
             for audit trails.
 
     Validation: ``__post_init__`` rejects empty tunable / non-finite
-    reward / non-numeric value to fail loud at the producer instead of
-    silently corrupting consumer state.
+    reward / unsupported value type to fail loud at the producer instead
+    of silently corrupting consumer state.
     """
 
     tunable: str
-    value: float | int | bool
+    value: float | int | bool | str
     reward: float
     timestamp: float = field(default_factory=time.time)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -141,9 +169,10 @@ class Outcome:
     def __post_init__(self) -> None:
         if not self.tunable or not isinstance(self.tunable, str):
             raise ValueError("Outcome.tunable must be a non-empty string")
-        if not isinstance(self.value, (int, float, bool)):
+        if not isinstance(self.value, (int, float, bool, str)):
             raise TypeError(
-                f"Outcome.value must be int/float/bool, got {type(self.value).__name__}"
+                "Outcome.value must be int/float/bool/str, got "
+                f"{type(self.value).__name__}"
             )
         try:
             r = float(self.reward)
@@ -175,6 +204,12 @@ class ZIQOutcomeBus:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._subscribers: dict[str, list[_Subscriber]] = {}
+        # Race-condition rate limiter — track recent emit timestamps per
+        # tunable (sliding window = 1 second). Drop emits that exceed
+        # ``_rate_limit_hz()`` events/sec to protect FTRL learners from
+        # runaway producers (e.g. a guard called in a tight loop).
+        self._emit_window: dict[str, list[float]] = {}
+        self._dropped: dict[str, int] = {}
         # In-memory pin cache — refreshed lazily on every is_pinned() call
         # because the file may be edited by a CLI between emits.
 
@@ -245,9 +280,31 @@ class ZIQOutcomeBus:
             return
         if self.is_pinned(outcome.tunable):
             return
+        # Race-condition guard: cap per-tunable emit rate at
+        # ``_rate_limit_hz()`` events/sec (sliding 1-second window).
+        # Drop excess silently and increment ``_dropped`` counter so
+        # producers can be audited via ``dropped_count(tunable)``.
+        max_hz = _rate_limit_hz()
         # Snapshot subscribers under lock; dispatch outside lock so a
         # slow callback doesn't serialize emits across all tunables.
         with self._lock:
+            now = time.time()
+            window = self._emit_window.setdefault(outcome.tunable, [])
+            # Evict timestamps older than 1 second.
+            cutoff = now - 1.0
+            i = 0
+            for ts in window:
+                if ts >= cutoff:
+                    break
+                i += 1
+            if i:
+                del window[:i]
+            if len(window) >= max_hz:
+                self._dropped[outcome.tunable] = (
+                    self._dropped.get(outcome.tunable, 0) + 1
+                )
+                return
+            window.append(now)
             subs = list(self._subscribers.get(outcome.tunable, ()))
         for cb in subs:
             try:
@@ -294,6 +351,25 @@ class ZIQOutcomeBus:
         """Return current subscriber count for ``tunable``."""
         with self._lock:
             return len(self._subscribers.get(tunable, ()))
+
+    def dropped_count(self, tunable: str) -> int:
+        """Return number of emits rate-limit dropped for ``tunable``.
+
+        Useful for auditing producers that may be in a tight loop
+        (rate-limit guard, plan §244 race-condition fix).
+        """
+        with self._lock:
+            return int(self._dropped.get(tunable, 0))
+
+    def reset_rate_state(self, tunable: str | None = None) -> None:
+        """Drop rate-limiter window + counter. Mainly for tests."""
+        with self._lock:
+            if tunable is None:
+                self._emit_window.clear()
+                self._dropped.clear()
+            else:
+                self._emit_window.pop(tunable, None)
+                self._dropped.pop(tunable, None)
 
 
 # ── Module-level convenience ────────────────────────────────────

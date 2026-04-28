@@ -222,6 +222,32 @@ class ActionPhaseSignalGuard(BaseGuard):
 
         total = int(new_state.get("total", 0))
         if total > 0 and total % self._interval == 0:
+            # ZIQ outcome wire (4.4.0 — sub-agent K wave-2). The
+            # interval controls advisory cadence: low = chatty (more
+            # noise but earlier feedback), high = quiet (less noise
+            # but slower self-monitoring loop). We model this as an
+            # iteration outcome where succeeded=True signals "the
+            # interval fired" — the FTRL learner then balances
+            # firing rate against downstream phase-balance health.
+            try:
+                from concinno.ziq_emit_helpers import emit_iteration_outcome
+
+                emit_iteration_outcome(
+                    "action_phase.summary_interval",
+                    value=int(self._interval),
+                    iterations_used=int(self._interval),
+                    succeeded=True,
+                    source=(
+                        "concinno.guards.action_phase_signal_guard."
+                        "ActionPhaseSignalGuard"
+                    ),
+                    metadata={
+                        "total_calls": total,
+                        "last_phase": new_state.get("last_phase", ""),
+                    },
+                )
+            except Exception:
+                pass
             return GuardResult.allow_advisory(
                 context=_format_summary(new_state),
                 reason="action_phase_summary",

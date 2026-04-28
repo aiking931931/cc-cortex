@@ -223,11 +223,42 @@ class LLMEscalator:
         else:
             fails = int(entry.get("consecutive_failures", 0)) + 1
             entry["consecutive_failures"] = fails
-            if fails >= self._circuit_threshold:
+            tripped = fails >= self._circuit_threshold
+            if tripped:
                 entry["state"] = _CB_OPEN
                 entry["opened_at"] = time.time()
             else:
                 entry["state"] = _CB_CLOSED
+            # ZIQ outcome: emit a low-reward signal when the threshold
+            # trips early ("too sensitive") and a moderate signal when
+            # we accumulate failures without tripping ("too patient").
+            # Tripping reward decays linearly toward 0 the lower the
+            # threshold; sub-threshold reward grows with consumed budget.
+            try:
+                if tripped:
+                    # Lower threshold = more aggressive trip = worse signal.
+                    # Reward in [0.0, 0.5]; threshold=20 → 0.5, threshold=2 → 0.05.
+                    reward = max(0.0, min(0.5, self._circuit_threshold / 40.0))
+                else:
+                    # Sub-threshold reward grows toward 1.0 as threshold
+                    # provides "headroom" without unnecessary trips.
+                    used_ratio = fails / max(1, self._circuit_threshold)
+                    reward = max(0.5, 1.0 - used_ratio * 0.5)
+                _get_ziq_bus().emit(
+                    Outcome(
+                        tunable="escalation.circuit_threshold",
+                        value=self._circuit_threshold,
+                        reward=reward,
+                        source="concinno.escalation.LLMEscalator",
+                        metadata={
+                            "tier": tier,
+                            "consecutive_failures": fails,
+                            "tripped": tripped,
+                        },
+                    )
+                )
+            except Exception:
+                pass
         data[tier] = entry
         self._save_breakers(data)
 
@@ -236,11 +267,33 @@ class LLMEscalator:
         entry = data.get(tier, {})
         if not isinstance(entry, dict):
             entry = {}
+        prev_failures = int(entry.get("consecutive_failures", 0))
         entry["state"] = _CB_CLOSED
         entry["consecutive_failures"] = 0
         entry["opened_at"] = 0.0
         data[tier] = entry
         self._save_breakers(data)
+        # ZIQ outcome: success after some failures = the threshold gave
+        # the tier room to recover. Reward = 1.0 if no prior failures
+        # (threshold not exercised) or scaled by recovery margin.
+        try:
+            if prev_failures > 0:
+                # Recovery — proves threshold wasn't too tight.
+                reward = 1.0
+                _get_ziq_bus().emit(
+                    Outcome(
+                        tunable="escalation.circuit_threshold",
+                        value=self._circuit_threshold,
+                        reward=reward,
+                        source="concinno.escalation.LLMEscalator",
+                        metadata={
+                            "tier": tier,
+                            "recovered_after": prev_failures,
+                        },
+                    )
+                )
+        except Exception:
+            pass
 
     # ── Public API ─────────────────────────────────────────
 

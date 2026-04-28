@@ -455,6 +455,53 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_validate_frontmatter(args: argparse.Namespace) -> int:
+    """Validate every SKILL.md under one or more roots; optionally fix.
+
+    Default roots, when no path is given, mirror the same scope tree
+    the rest of ``concinno skills`` uses:
+
+      * ``~/.claude/skills/`` (user scope)
+      * ``./.claude/skills/`` (project scope, when present)
+
+    Exit codes:
+        0 — every file passed (no errors; warnings allowed).
+        1 — at least one file had an error-level issue.
+        2 — usage / IO error.
+    """
+    from concinno.skills.frontmatter_validator import (
+        format_report_text,
+        validate_directory,
+    )
+
+    roots: list[Path] = []
+    if args.paths:
+        roots.extend(Path(p).expanduser() for p in args.paths)
+    else:
+        home_skills = Path.home() / ".claude" / "skills"
+        if home_skills.is_dir():
+            roots.append(home_skills)
+        project_skills = Path(".claude") / "skills"
+        if project_skills.is_dir():
+            roots.append(project_skills)
+
+    if not roots:
+        print(
+            "no skill roots found (pass a path or ensure "
+            "~/.claude/skills/ exists)",
+            file=sys.stderr,
+        )
+        return 2
+
+    all_reports = []
+    for root in roots:
+        all_reports.extend(validate_directory(root, fix=args.fix))
+
+    print(format_report_text(all_reports))
+    has_errors = any(r.has_errors for r in all_reports)
+    return 1 if has_errors else 0
+
+
 def _dispatch(args: argparse.Namespace) -> None:
     action = args.skills_action
     if action == "new":
@@ -467,7 +514,13 @@ def _dispatch(args: argparse.Namespace) -> None:
         sys.exit(_cmd_toggle(args.name, False))
     if action == "delete":
         sys.exit(_cmd_delete(args))
-    print("usage: concinno skills {new|list|enable|disable|delete}", file=sys.stderr)
+    if action == "validate-frontmatter":
+        sys.exit(_cmd_validate_frontmatter(args))
+    print(
+        "usage: concinno skills "
+        "{new|list|enable|disable|delete|validate-frontmatter}",
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 
@@ -545,3 +598,28 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Remove all matching directories when >1 collide by name",
     )
     p_del.set_defaults(func=_dispatch)
+
+    p_val = sub.add_parser(
+        "validate-frontmatter",
+        help=(
+            "Validate SKILL.md frontmatter against agentskills.io spec; "
+            "fill safe defaults with --fix"
+        ),
+    )
+    p_val.add_argument(
+        "paths",
+        nargs="*",
+        help=(
+            "Roots to walk (default: ~/.claude/skills/ + ./.claude/skills/). "
+            "Each entry is searched recursively for SKILL.md files."
+        ),
+    )
+    p_val.add_argument(
+        "--fix",
+        action="store_true",
+        help=(
+            "Write safe defaults for absent recommended fields "
+            "(version, triggers, user-invocable). Idempotent."
+        ),
+    )
+    p_val.set_defaults(func=_dispatch)

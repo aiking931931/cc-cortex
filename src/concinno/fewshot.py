@@ -264,6 +264,36 @@ class FewshotBank:
         for score, _idx, case in top:
             case.score = score
             out.append(case)
+
+        # ZIQ outcome wire (4.4.0 — sub-agent K wave-2). The
+        # min_token_len knob trades "hit rate" against "noise rate":
+        # too high = q_tokens shrinks to nothing → score=0 across
+        # all cases (bank effectively useless); too low = noisy
+        # short stop-word-ish tokens inflate Jaccard to spurious
+        # matches. We use "did the top result clear min_score" as
+        # a proxy for healthy filtering, with confidence anchored
+        # to the top score itself.
+        try:
+            from concinno.ziq_emit_helpers import emit_continuous_outcome
+
+            top_score = out[0].score if out else 0.0
+            # Reward grows with top-result confidence; clamp to [0,1]
+            # so emit_continuous_outcome's contract is honoured.
+            reward_value = max(0.0, min(1.0, float(top_score)))
+            emit_continuous_outcome(
+                "fewshot.min_token_len",
+                value=float(self._min_token_len),
+                reward=reward_value,
+                source="concinno.fewshot.FewshotBank.retrieve",
+                metadata={
+                    "top_score": float(top_score),
+                    "hit_count": len(out),
+                    "bank_size": len(self._cases),
+                },
+            )
+        except Exception:
+            pass
+
         return out
 
     # ── Dunder ──────────────────────────────────────────────────

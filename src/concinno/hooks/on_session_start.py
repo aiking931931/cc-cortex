@@ -92,8 +92,58 @@ def main(hook_data: dict | None = None) -> None:
     except (ImportError, Exception):
         pass
 
+    # --- Module: skill_tier1_mount (auto-mount Tier1 skills) ---
+    # Surface the curated Tier1 skill list (default 10) into the agent's
+    # primacy window so high-value Skills (memoria / kb_handoff /
+    # claude-api / awareness / ...) do not depend on the user typing the
+    # exact slash command. Hard 500 ms wall-clock budget; over-budget =
+    # silent skip. Honours ``CONCINNO_SKILL_TIER1_MOUNT_DISABLED``.
+    _emit_tier1_mount()
+
     # --- narrower-scope v4: inject active preset into agent context ---
     _emit_active_preset()
+
+
+def _emit_tier1_mount() -> None:
+    """Emit Tier1 skill mount block as ``hookSpecificOutput.additionalContext``.
+
+    Concinno 4.4.0 task #5: SessionStart auto-mount. The mount module
+    runs under a hard 500 ms wall-clock budget and never raises; this
+    wrapper handles the additional ``json`` framing for the hook
+    contract and tags the output with the same ``hookEventName`` as
+    :func:`_emit_active_preset`.
+
+    Multiple SessionStart hook emits are concatenated by CC, so this
+    call sites alongside ``_emit_active_preset`` without coordination.
+    """
+    try:
+        from concinno.skill_tier1_mount import mount_tier1_skills
+
+        result = mount_tier1_skills()
+    except Exception:
+        return
+    try:
+        if result.error:
+            sys.stderr.write(
+                f"concinno: tier1 mount error (non-fatal): {result.error}\n"
+            )
+            return
+        if result.timed_out:
+            sys.stderr.write(
+                "concinno: tier1 mount timed out at "
+                f"{result.elapsed_ms:.0f}ms (500ms budget)\n"
+            )
+        if not result.additional_context:
+            return
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": result.additional_context,
+            },
+        }
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        pass
 
 
 def _emit_active_preset() -> None:

@@ -635,6 +635,20 @@ class Microcompactor:
         """
         current = int(current_tokens)
         if current <= self._soft:
+            # Under soft = budget choice was generous enough — emit
+            # high reward signal to ZIQ.
+            try:
+                from concinno.ziq_emit_helpers import emit_budget_outcome
+
+                emit_budget_outcome(
+                    "microcompact.token_budget_soft",
+                    value=self._soft,
+                    actual=current,
+                    overflowed=False,
+                    source="concinno.cache.microcompact.Microcompactor",
+                )
+            except Exception:
+                pass
             return []
 
         if current > self._hard:
@@ -642,8 +656,41 @@ class Microcompactor:
             # target drops by the soft/hard gap so the next turn has
             # real headroom rather than landing exactly on soft.
             target = self._soft - (self._hard - self._soft)
+            # ZIQ: hard cap exceeded = both soft+hard were too low.
+            try:
+                from concinno.ziq_emit_helpers import emit_budget_outcome
+
+                emit_budget_outcome(
+                    "microcompact.token_budget_hard",
+                    value=self._hard,
+                    actual=current,
+                    overflowed=True,
+                    source="concinno.cache.microcompact.Microcompactor",
+                )
+                emit_budget_outcome(
+                    "microcompact.token_budget_soft",
+                    value=self._soft,
+                    actual=current,
+                    overflowed=True,
+                    source="concinno.cache.microcompact.Microcompactor",
+                )
+            except Exception:
+                pass
         else:
             target = self._soft
+            # ZIQ: only soft tripped, hard headroom held.
+            try:
+                from concinno.ziq_emit_helpers import emit_budget_outcome
+
+                emit_budget_outcome(
+                    "microcompact.token_budget_soft",
+                    value=self._soft,
+                    actual=current,
+                    overflowed=True,
+                    source="concinno.cache.microcompact.Microcompactor",
+                )
+            except Exception:
+                pass
 
         # Sort live calls oldest-first. Already-queued or already-deleted
         # entries are skipped but count toward savings if their bytes are

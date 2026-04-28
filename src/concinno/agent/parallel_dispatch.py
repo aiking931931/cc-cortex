@@ -435,11 +435,15 @@ class ParallelDispatcher:
                 current_depth = self._parent_context.params.fork_depth
                 if current_depth >= self._max_fork_depth:
                     self._record_reject(ForkDepthExceeded)
+                    self._emit_fork_outcome(current_depth, succeeded=False)
                     raise ForkDepthExceeded(
                         f"Fork depth {current_depth} would exceed "
                         f"max_fork_depth={self._max_fork_depth}."
                     )
                 child_ctx = self._build_child_context()
+                self._emit_fork_outcome(
+                    int(child_ctx.params.fork_depth), succeeded=True
+                )
                 notes.append(
                     f"subagent_type=None + fork enabled → fork path "
                     f"(depth {child_ctx.params.fork_depth})"
@@ -486,6 +490,34 @@ class ParallelDispatcher:
             prepared_prompt=self._prepare_prompt(request),
             notes=tuple(notes),
         )
+
+    def _emit_fork_outcome(
+        self, depth_used: int, *, succeeded: bool
+    ) -> None:
+        """ZIQ outcome wire for ``parallel_dispatch.max_fork_depth``.
+
+        Sub-agent K wave-2 (4.4.0). Best-effort emit — never raises.
+        Hitting the cap = ``succeeded=False`` (signal to raise the cap);
+        successful fork under the cap = headroom-proportional reward.
+        """
+        try:
+            from concinno.ziq_emit_helpers import emit_iteration_outcome
+
+            emit_iteration_outcome(
+                "parallel_dispatch.max_fork_depth",
+                value=int(self._max_fork_depth),
+                iterations_used=int(depth_used),
+                succeeded=succeeded,
+                source=(
+                    "concinno.agent.parallel_dispatch."
+                    "ParallelDispatcher.plan"
+                ),
+                metadata={
+                    "outcome": "forked" if succeeded else "fork_depth_exceeded",
+                },
+            )
+        except Exception:
+            pass
 
     def plan_many(self, requests: Sequence[SpawnRequest]) -> list[DispatchPlan]:
         """Batch variant of :meth:`plan`.

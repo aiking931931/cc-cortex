@@ -135,6 +135,9 @@ DEFAULT_OFF_4_0_0: frozenset[str] = frozenset({
     "premise_gate",
     # opt-in dev tool: burns LLM credits during optimization runs
     "dspy_prompt_optimization",
+    # 4.4.0 — Plan B Week 2 stateful runtime guard, default OFF per
+    # 4.0.0 default-off-gates SEMVER baseline.
+    "circuit_breaker_guard",
 })
 
 
@@ -1120,6 +1123,155 @@ FEATURE_META: dict[str, dict[str, Any]] = {
                 "risk_high_zh": (
                     "``critical`` 會過濾 dill / marshal / subprocess.shell "
                     "繞道路徑，覆蓋率不足"
+                ),
+            },
+        },
+    },
+    # ── Circuit Breaker Guard (4.4.0 Plan B Week 2) ──
+    "circuit_breaker_guard": {
+        "category": "security",
+        # Default OFF per 4.0.0 default-off-gates SEMVER baseline —
+        # also registered in DEFAULT_OFF_4_0_0 frozenset above.
+        "enabled": False,
+        # Rate / cooldown thresholds are tunable but the actionable
+        # outcome (call admitted vs denied) emits to the ZIQ bus so
+        # FTRL can learn per-resource cap settings.
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "major",
+        "consequences_if_off": (
+            "External-dependency call streams (HTTP API / RPC / LLM "
+            "provider / subprocess) lose runtime rate-limit + "
+            "circuit-breaker protection. Cascading failures and "
+            "thundering-herd retries against an already-degraded "
+            "dependency are not flagged."
+        ),
+        "description": (
+            "Stateful per-resource rate-limit + Hystrix circuit "
+            "breaker (closed / open / half_open). Exponential "
+            "backoff doubles cooldown on each re-open up to a 60s "
+            "ceiling. Inherits PolicyGate fail-mode chain — default "
+            "``warn`` in mainstream, ``hard_deny`` in strict / "
+            "paranoid. Per-line escape ``# CONCINNO_DISABLE:"
+            "circuit_breaker:<reason>``."
+        ),
+        "description_zh": (
+            "有狀態 per-resource 速率限制 + Hystrix 斷路器 "
+            "（closed / open / half_open）。指數退避每次重開 cooldown "
+            "翻倍，上限 60 秒。繼承 PolicyGate fail-mode 鏈，"
+            "mainstream warn / strict + paranoid hard_deny。逐行 "
+            "escape：``# CONCINNO_DISABLE:circuit_breaker:<reason>``。"
+        ),
+        "recommended": True,
+        "severity": "major",
+        "params": {
+            "max_calls": {
+                "type": "int",
+                "default": 60,
+                "min": 0,
+                "max": 100000,
+                "recommended": 60,
+                "risk_low": (
+                    "``0`` disables rate-limit entirely — only the "
+                    "circuit breaker stays active. Acceptable for "
+                    "internal-only resources."
+                ),
+                "risk_high": (
+                    "Above 1000 the sliding-deque memory cost climbs "
+                    "linearly per resource (each entry is ~32B)."
+                ),
+                "risk_low_zh": (
+                    "``0`` 完全停用速率限制，只剩斷路器。內部 "
+                    "資源可接受，外部依賴不建議"
+                ),
+                "risk_high_zh": (
+                    "高於 1000 後 sliding deque 每 resource 線性 "
+                    "佔記憶體（每筆 ~32B）"
+                ),
+            },
+            "window_s": {
+                "type": "float",
+                "default": 60.0,
+                "min": 0.1,
+                "max": 3600.0,
+                "recommended": 60.0,
+                "risk_low": (
+                    "Sub-second windows lose smoothing — bursts of "
+                    "successful calls trip rate-limit on their own."
+                ),
+                "risk_high": (
+                    "Windows above 1 hour mask short outages — the "
+                    "circuit breaker becomes the only active signal."
+                ),
+                "risk_low_zh": (
+                    "次秒級視窗失去平滑性，正常成功 burst 會自觸 rate-limit"
+                ),
+                "risk_high_zh": (
+                    "視窗大於 1 小時會掩蓋短時故障，只剩斷路器在運作"
+                ),
+            },
+            "failure_threshold": {
+                "type": "int",
+                "default": 5,
+                "min": 1,
+                "max": 100,
+                "recommended": 5,
+                "risk_low": (
+                    "``1`` opens on the first failure — extremely "
+                    "noisy on flaky dependencies."
+                ),
+                "risk_high": (
+                    "Above 20 the breaker tolerates long outage "
+                    "runs before opening, defeating its purpose."
+                ),
+                "risk_low_zh": (
+                    "``1`` 第一次失敗就開斷路器，flaky 依賴極吵"
+                ),
+                "risk_high_zh": (
+                    "高於 20 容忍長時間故障，斷路器形同虛設"
+                ),
+            },
+            "cooldown_s": {
+                "type": "float",
+                "default": 30.0,
+                "min": 0.0,
+                "max": 3600.0,
+                "recommended": 30.0,
+                "risk_low": (
+                    "Below 1s the next probe fires before the "
+                    "dependency has a chance to recover."
+                ),
+                "risk_high": (
+                    "Above 5 minutes the breaker outlives most "
+                    "transient outages, blocking healthy calls."
+                ),
+                "risk_low_zh": (
+                    "低於 1s 探測過早，依賴沒時間恢復"
+                ),
+                "risk_high_zh": (
+                    "高於 5 分鐘超過多數瞬時故障，會擋住已恢復的呼叫"
+                ),
+            },
+            "backoff_max_s": {
+                "type": "float",
+                "default": 60.0,
+                "min": 1.0,
+                "max": 3600.0,
+                "recommended": 60.0,
+                "risk_low": (
+                    "Low ceilings (<5s) prevent meaningful backoff "
+                    "growth — same as a flat cooldown."
+                ),
+                "risk_high": (
+                    "Above 30 minutes a single bad day pins the "
+                    "breaker open for the rest of the session."
+                ),
+                "risk_low_zh": (
+                    "上限太低（<5s）退避無實際成長，等同固定 cooldown"
+                ),
+                "risk_high_zh": (
+                    "高於 30 分鐘，一次大故障可能整個 session "
+                    "都斷路"
                 ),
             },
         },
@@ -2568,6 +2720,90 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # 4.4.0 — FieldRead v2 ZIQ tunable: per-complexity compression breakeven.
+    # Below this token count, handoff/memory text passes through
+    # uncompressed (compression's quality loss exceeds token savings).
+    # The C0Router fans out per-complexity overrides
+    # (`COMPRESS_BREAKEVEN_BY_COMPLEXITY` in field_read) — this entry is
+    # the *outcome-tunable global ceiling*: ZIQ FTRL nudges it within
+    # [vmin=1500, vmax=4000] using the `expand()` callback trigger rate
+    # as the outcome signal (frequent expand → breakeven was too low →
+    # raise it; rare expand + budget pressure → lower it). Bus wiring
+    # lives in ziq_outcome_bus (Sub-agent A scope); we register the
+    # schema here so the bus has an entry to bind on.
+    "field_read": {
+        "category": "context",
+        "description": (
+            "Selective field extraction (handoff / memory) with "
+            "per-complexity compression breakeven and "
+            "<system-context-elided/> breadcrumbs."
+        ),
+        "description_zh": (
+            "選擇性欄位抽取（交接/記憶），按複雜度動態壓縮 breakeven + "
+            "<system-context-elided/> 麵包屑回填 LLM 認知。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "none",
+        "consequences_if_off": (
+            "Handoff / memory injection 走 v1 silent-compress 路徑，"
+            "LLM 不知有東西被省，可能誤認原本沒這資訊"
+        ),
+        "consequences_if_off_en": (
+            "Handoff / memory injection falls back to v1 silent "
+            "compression — the LLM is unaware sections were elided "
+            "and may hallucinate that the information was never there."
+        ),
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabling drops back to v1 silent compressor — "
+                    "no breadcrumbs, no expand() recall."
+                ),
+                "risk_off_zh": (
+                    "關閉會退回 v1 silent compressor，無麵包屑、"
+                    "無 expand() 召回。"
+                ),
+            },
+            "compress_breakeven_tokens": {
+                "type": "int",
+                "default": 2500,
+                "min": 1500,
+                "max": 4000,
+                "recommended": 2500,
+                "risk_low": (
+                    "Below 1500 elides too aggressively — "
+                    "small handoffs lose actionable detail."
+                ),
+                "risk_high": (
+                    "Above 4000 keeps verbose history in the prompt "
+                    "and risks Lost-in-the-Middle attention drop."
+                ),
+                "risk_low_zh": "低於 1500 過度壓縮，小交接會丟可執行細節",
+                "risk_high_zh": (
+                    "高於 4000 prompt 拖長，命中 Lost-in-the-Middle 注意力"
+                    "下沉曲線"
+                ),
+            },
+            "include_breadcrumbs": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Skipping the breadcrumb tag saves ~50 tokens but "
+                    "removes the LLM's awareness signal of elision."
+                ),
+                "risk_off_zh": (
+                    "省掉麵包屑 tag 節省 ~50 tokens，但 LLM 失去「有東西"
+                    "被省」的覺察訊號"
+                ),
+            },
+        },
+    },
     # 2026-04-27 — MAR (Multi-Agent Reflexion) 4-perspective C5 self-correction.
     # Dispatches engineer / user / attacker / auditor Opus subagents in
     # parallel via the harness Agent dispatcher; aggregates findings with
@@ -3679,6 +3915,7 @@ FEATURE_TOGGLE_PROFILES: dict[str, dict[str, Any]] = {
             "destruction_guard": "hard_deny",
             "pii_guard": "hard_deny",
             "deserialize_guard": "hard_deny",
+            "circuit_breaker_guard": "hard_deny",
         },
         "fail_mode_default": "warn+log",
     },
@@ -3694,6 +3931,7 @@ FEATURE_TOGGLE_PROFILES: dict[str, dict[str, Any]] = {
             "destruction_guard": "hard_deny",
             "pii_guard": "hard_deny",
             "deserialize_guard": "hard_deny",
+            "circuit_breaker_guard": "hard_deny",
             "butterfly_guard": "hard_deny",
         },
         "fail_mode_default": "hard_deny",

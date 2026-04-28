@@ -204,7 +204,20 @@ def detect_asset_types(message: str) -> list[str]:
 
 # ── Main router ───────────────────────────────────────────
 
-# Budget allocation per complexity × tier (from red-team R3 sweet spot)
+# Budget allocation per complexity × tier (from red-team R3 sweet spot).
+#
+# Note (4.4.0): the per-complexity *compression breakeven* for FieldRead
+# v2 lives in :data:`concinno.field_read.COMPRESS_BREAKEVEN_BY_COMPLEXITY`
+# rather than here — the two tables answer different questions:
+#
+#   * ``_BUDGET_TABLE`` allocates **percent of token budget** across
+#     reasoning / action / metacognition (cognitive policy).
+#   * ``COMPRESS_BREAKEVEN_BY_COMPLEXITY`` decides **when to start
+#     compressing handoff/memory text at all** (information policy).
+#
+# Both are routed by the same :class:`ComplexityDomain` enum, but
+# keeping them separate avoids a category error and lets ZIQ FTRL tune
+# the breakeven independently of the budget split.
 _BUDGET_TABLE: dict[ComplexityDomain, tuple[int, int, int]] = {
     # (reasoning%, action%, meta%)
     # R3 revised: Simple reasoning 5→15 (prevent garbage output from under-thinking)
@@ -214,6 +227,23 @@ _BUDGET_TABLE: dict[ComplexityDomain, tuple[int, int, int]] = {
     ComplexityDomain.COMPLEX: (35, 40, 25),
     ComplexityDomain.CHAOTIC: (40, 25, 35),
 }
+
+
+def compress_breakeven_for_route(route: "CognitiveRoute") -> int:
+    """Return the FieldRead compression breakeven for a routed task.
+
+    Convenience wrapper that lets cognitive callers stay inside the
+    ``cognitive.router`` namespace instead of crossing into
+    ``concinno.field_read`` directly. Mirrors
+    :func:`concinno.field_read.compress_breakeven_for` but accepts a
+    :class:`CognitiveRoute` instead of the raw string value, so type
+    safety propagates from the routing layer.
+    """
+    # Lazy import keeps ``cognitive.router`` importable from contexts
+    # where ``field_read`` may be vendored / stripped.
+    from concinno.field_read import compress_breakeven_for
+
+    return compress_breakeven_for(route.complexity.value)
 
 _ENTRY_LEVEL: dict[ComplexityDomain, CognitiveLevel] = {
     ComplexityDomain.SIMPLE: CognitiveLevel.C1_FAST,

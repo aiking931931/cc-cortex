@@ -578,7 +578,7 @@ Target ship date: **2026-05-04** (1 week from gate decision)
 
 **Bundle landings on `save/2026-04-22-concinno-ecosystem-phase-0-1-2`** (this session):
 - `672fe1f3e feat(concinno): 4.3.0-week1 bundle — PolicyGate + PII + Deserialize + mypy fix` — 10 files / 3370 insertions / 27 deletions. Lands work whose individual sub-agent commits did not surface in HEAD (agents reported hashes that did not land — files on disk were correct, this commit lands them properly).
-- `5ffb82533 feat(concinno): Memoria 0.4.0 NUCLEAR tier` — 3 files / 928 insertions. Carryover from parallel Memoria 0.4.0 reboot-equivalent track (page combining + service cycle safelist) — distinct from 4.3.0 ship narrative, committed separately for clean history.
+- `5ffb82533 feat(concinno): Memoria 0.4.0 NUCLEAR tier` — 3 files / 928 insertions. Carryover from parallel Memoria 0.4.0 NUCLEAR deep-clean track (page combining + service cycle safelist) — distinct from 4.3.0 ship narrative, committed separately for clean history.
 - `57079b218 style(concinno): ruff auto-fix import organization` — single import-org fix surfaced post-bundle.
 
 ### Mypy strict — 7 originally targeted errors all FIXED

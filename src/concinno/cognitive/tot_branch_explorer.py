@@ -99,7 +99,7 @@ def plan_branches(
 
     # Convergence forced by budget — overrides baseline regardless of domain.
     if pct >= threshold:
-        return BranchPlan(
+        plan = BranchPlan(
             recommended_branches=1,
             should_converge=True,
             reason=(
@@ -107,12 +107,21 @@ def plan_branches(
                 f"(complexity={complexity.value}); collapse to best branch"
             ),
         )
+        _emit_tot_outcomes(
+            cap=cap,
+            threshold=threshold,
+            pct=pct,
+            branches=1,
+            converged=True,
+            complexity=complexity,
+        )
+        return plan
 
     # Simple / Complicated never benefit from parallel branches — even with
     # plenty of budget the cost-benefit (spawn overhead vs reasoning gain)
     # is negative. The router already routes these to C1/C2, not C3.
     if baseline == 1:
-        return BranchPlan(
+        plan = BranchPlan(
             recommended_branches=1,
             should_converge=False,
             reason=(
@@ -120,10 +129,19 @@ def plan_branches(
                 "single-track reasoning"
             ),
         )
+        _emit_tot_outcomes(
+            cap=cap,
+            threshold=threshold,
+            pct=pct,
+            branches=1,
+            converged=False,
+            complexity=complexity,
+        )
+        return plan
 
     # C3 territory: scale baseline against cap.
     branches = min(baseline, cap)
-    return BranchPlan(
+    plan = BranchPlan(
         recommended_branches=branches,
         should_converge=False,
         reason=(
@@ -131,6 +149,73 @@ def plan_branches(
             f"explore {branches} parallel branches (cap={cap})"
         ),
     )
+    _emit_tot_outcomes(
+        cap=cap,
+        threshold=threshold,
+        pct=pct,
+        branches=branches,
+        converged=False,
+        complexity=complexity,
+    )
+    return plan
+
+
+def _emit_tot_outcomes(
+    *,
+    cap: int,
+    threshold: float,
+    pct: float,
+    branches: int,
+    converged: bool,
+    complexity: ComplexityDomain,
+) -> None:
+    """ZIQ outcome wire for ToT tunables (4.4.0 — sub-agent K wave-2).
+
+    Two emits per ``plan_branches`` call:
+      * ``tot.max_branches`` — iteration outcome. Used = recommended
+        branch count; succeeded=True when we recommended >=1 branch
+        without exhausting the cap (recommended <= cap).
+      * ``tot.convergence_pct`` — continuous outcome. Reward grows
+        with how well the threshold separated "explore" from
+        "converge" given the observed budget pct.
+    """
+    try:
+        from concinno.ziq_emit_helpers import (
+            emit_continuous_outcome,
+            emit_iteration_outcome,
+        )
+
+        emit_iteration_outcome(
+            "tot.max_branches",
+            value=int(cap),
+            iterations_used=int(branches),
+            succeeded=(branches >= 1),
+            source="concinno.cognitive.tot_branch_explorer.plan_branches",
+            metadata={
+                "complexity": complexity.value,
+                "converged": converged,
+            },
+        )
+
+        # Convergence-quality reward: when converged at high pct or
+        # exploring at low pct, the threshold did its job → reward 1.
+        # When pct is right at the threshold (boundary call) reward
+        # drops because the decision was marginal.
+        boundary_dist = abs(pct - threshold)
+        reward = max(0.0, min(1.0, boundary_dist / max(threshold, 0.1)))
+        emit_continuous_outcome(
+            "tot.convergence_pct",
+            value=float(threshold),
+            reward=reward,
+            source="concinno.cognitive.tot_branch_explorer.plan_branches",
+            metadata={
+                "budget_consumed_pct": pct,
+                "converged": converged,
+                "complexity": complexity.value,
+            },
+        )
+    except Exception:
+        pass
 
 
 def format_plan(plan: BranchPlan) -> str:

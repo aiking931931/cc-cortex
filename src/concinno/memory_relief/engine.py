@@ -629,7 +629,7 @@ def run_cleanup(
         min_bytes: SAFE tier — only consider processes whose working set
             exceeds this floor. NUCLEAR uses 1 MB instead so even small
             tray apps get trimmed (every MB counts when the user's goal
-            is reboot-equivalence).
+            is the deep-clean delta).
         whitelist: replace the default whitelist entirely (advanced).
         extra_whitelist: append to the default whitelist (typical user
             knob — e.g. add their game / IDE here). Honoured by NUCLEAR

@@ -112,7 +112,13 @@ def test_unpin_restores_dispatch() -> None:
 # ── 6. concurrent emit thread-safe ─────────────────────────────
 
 
-def test_concurrent_emit_is_thread_safe() -> None:
+def test_concurrent_emit_is_thread_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Disable rate-limiter (default 100 Hz/tunable) so 500 events all land.
+    # We're testing thread-safety of the dispatch path, not the rate guard.
+    monkeypatch.setenv("CONCINNO_ZIQ_BUS_MAX_HZ", "100000")
+    ZIQOutcomeBus._reset_for_testing()
     bus = get_bus()
     seen: list[Outcome] = []
     seen_lock = threading.Lock()
@@ -187,7 +193,7 @@ def test_invalid_outcome_raises() -> None:
     with pytest.raises(ValueError):
         Outcome(tunable="test.x", value=1, reward=float("inf"))
     with pytest.raises(TypeError):
-        Outcome(tunable="test.x", value="not numeric", reward=1.0)  # type: ignore[arg-type]
+        Outcome(tunable="test.x", value={"not": "scalar"}, reward=1.0)  # type: ignore[arg-type]
 
 
 # ── 10. decorator @emit captures return reward ─────────────────

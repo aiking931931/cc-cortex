@@ -6,7 +6,9 @@
 @dependencies None (stdlib only)
 @exports read_handoff_fields, read_memory_fields, build_field_context,
     read_handoff_fields_v2, read_memory_fields_v2, build_field_context_v2,
-    expand, FieldReadResult, ElidedSection
+    expand, FieldReadResult, ElidedSection, render_elision_breadcrumbs,
+    build_field_context_v2_string, compress_breakeven_for,
+    COMPRESS_BREAKEVEN_BY_COMPLEXITY
 
 Problem v1 (2.5.x):
     DynamicSlots.handoff_summary exists but is never filled. Full handoff
@@ -48,7 +50,57 @@ from typing import Optional
 # across Qwen2.5-7B + Llama-3-8B: ≥2500t → Pareto improvement
 # (both compression ratio AND output quality improve).
 # Below 2500t → pass through uncompressed.
+#
+# This is the *default* breakeven. C0Router-aware callers should prefer
+# :func:`compress_breakeven_for` so the threshold scales with complexity
+# (Simple → aggressive elide / Chaotic → conservative). The constant
+# stays as a safe fallback for callers without a complexity signal.
 COMPRESS_BREAKEVEN_TOKENS = 2500
+
+# Per-complexity breakeven overrides (4.4.0 — Plan C ZIQ tunable target).
+#
+# Mapping: ComplexityDomain.value → breakeven token threshold.
+# Plumbed through :func:`compress_breakeven_for` so callers stay decoupled
+# from the cognitive.router enum import (avoids circular dependency at
+# module import time).
+#
+# Rationale:
+# - Simple tasks (1500): aggressive elide, the LLM rarely needs the
+#   long history; saving tokens wins.
+# - Complicated (2500): default — matches the legacy global constant.
+# - Complex (3500): conservative — exploration may need surrounding
+#   context to avoid premature pruning.
+# - Chaotic (4000): very conservative — emergencies require maximum
+#   recall; only elide when really necessary.
+#
+# Bounds (1500 ≤ value ≤ 4000) are mirrored in the FEATURE_META
+# `field_read.compress_breakeven_tokens` entry so ZIQ FTRL outcome
+# learning operates inside the same envelope.
+COMPRESS_BREAKEVEN_BY_COMPLEXITY: dict[str, int] = {
+    "simple": 1500,
+    "complicated": 2500,
+    "complex": 3500,
+    "chaotic": 4000,
+}
+
+
+def compress_breakeven_for(complexity: Optional[str] = None) -> int:
+    """Return the compression breakeven threshold for a complexity class.
+
+    Args:
+        complexity: ``"simple" | "complicated" | "complex" | "chaotic"``.
+            Case-insensitive. ``None`` / unknown values fall back to the
+            default :data:`COMPRESS_BREAKEVEN_TOKENS` so the function is
+            safe to call without a routed task.
+
+    Returns:
+        Token count below which the file is passed through uncompressed.
+    """
+    if not complexity:
+        return COMPRESS_BREAKEVEN_TOKENS
+    return COMPRESS_BREAKEVEN_BY_COMPLEXITY.get(
+        complexity.lower(), COMPRESS_BREAKEVEN_TOKENS,
+    )
 
 # Sections always extracted from handoff (highest value for continuation)
 _ALWAYS_SECTIONS = frozenset({
@@ -456,11 +508,22 @@ def read_handoff_fields_v2(
     handoff_path: str,
     task_keywords: Optional[list[str]] = None,
     max_tokens: int = 200,
+    *,
+    compress_breakeven: Optional[int] = None,
 ) -> FieldReadResult:
     """Extract high-value fields from a handoff file (v2 structured output).
 
     Metadata-first: returns kept content + breadcrumbs of elided sections
     so the LLM can detect when to call `expand(path, section_id)`.
+
+    Args:
+        handoff_path: Path to handoff markdown file.
+        task_keywords: Keywords to match against sections.
+        max_tokens: Maximum token budget for output.
+        compress_breakeven: Override the compression breakeven threshold
+            (typically supplied by C0Router via
+            :func:`compress_breakeven_for`). ``None`` uses the default
+            global :data:`COMPRESS_BREAKEVEN_TOKENS`.
 
     See `read_handoff_fields` for the v1 str-only compatibility shim.
     """
@@ -468,10 +531,15 @@ def read_handoff_fields_v2(
     if not text:
         return _empty_result()
 
-    # ZIQ breakeven gate: compression only pays off ≥2500t.
+    # ZIQ breakeven gate: compression only pays off above this threshold.
     # Below that, return full text (trimmed to max_tokens).
+    breakeven = (
+        compress_breakeven
+        if compress_breakeven is not None
+        else COMPRESS_BREAKEVEN_TOKENS
+    )
     raw_tokens = _estimate_tokens(text)
-    if raw_tokens < COMPRESS_BREAKEVEN_TOKENS:
+    if raw_tokens < breakeven:
         if raw_tokens <= max_tokens:
             return FieldReadResult(
                 content=text.strip(),
@@ -925,6 +993,8 @@ def build_field_context_v2(
     workspace: str,
     task_prompt: str = "",
     config: Optional[FieldReadConfig] = None,
+    *,
+    complexity: Optional[str] = None,
 ) -> FieldReadResult:
     """Build compressed field context from handoff + memory (v2).
 
@@ -933,16 +1003,47 @@ def build_field_context_v2(
     confidences. Section ids include source prefix
     (`handoff:<basename>:<id>` / `memory:<id>`) so expand() targets
     are disambiguated.
+
+    Args:
+        workspace: Project workspace root directory.
+        task_prompt: Current task description for keyword matching.
+        config: Optional configuration override.
+        complexity: Optional C0 complexity classification
+            (``"simple" | "complicated" | "complex" | "chaotic"``); when
+            supplied it routes the per-call breakeven through
+            :func:`compress_breakeven_for` so Simple tasks elide
+            aggressively while Chaotic tasks retain more context.
     """
     if not workspace:
         return _empty_result()
 
     cfg = config or FieldReadConfig()
     keywords = _extract_keywords(task_prompt) if task_prompt else []
+    breakeven = compress_breakeven_for(complexity)
 
     content_parts: list[str] = []
     all_kept: list[str] = []
     all_elided: list[ElidedSection] = []
+
+    # 0. USER profile (4.4.0 — HP3 wave-1 Hermes USER.md port).
+    # Bounded by ``user_profile.current_char_budget()`` so it cannot
+    # crowd out handoff / memory; soft-imported so a misconfigured
+    # ~/.concinno/USER.md cannot break the whole context build.
+    try:  # pragma: no cover - soft path
+        from concinno.user_profile import (
+            current_char_budget,
+            render_profile_for_field_read,
+        )
+        user_block = render_profile_for_field_read(
+            max_chars=current_char_budget(),
+        )
+        if user_block:
+            content_parts.append(user_block)
+            all_kept.append("user_profile:overview")
+    except Exception:
+        # Never fail the prompt build because of USER.md weirdness —
+        # the operator can run ``concinno user-profile show`` to debug.
+        pass
 
     # 1. Handoff
     handoff_files = _find_handoff_files(workspace)
@@ -953,7 +1054,9 @@ def build_field_context_v2(
         )
         for hf in handoff_files[:2]:
             sub = read_handoff_fields_v2(
-                hf, keywords, max_tokens=handoff_budget_each,
+                hf, keywords,
+                max_tokens=handoff_budget_each,
+                compress_breakeven=breakeven,
             )
             if sub.content:
                 basename = os.path.basename(hf)
@@ -1025,3 +1128,113 @@ def build_field_context(
     section breadcrumbs.
     """
     return build_field_context_v2(workspace, task_prompt, config).content
+
+
+# ── v2 PromptEngine integration helpers (4.4.0) ───────────
+
+
+def render_elision_breadcrumbs(
+    elided: list[ElidedSection],
+    *,
+    max_inline_ids: int = 3,
+    expand_callback: Optional[str] = None,
+) -> str:
+    """Render an ``<system-context-elided/>`` breadcrumb tag.
+
+    The tag is the visible counterpart to silent compression: the LLM
+    reads it inside the system prompt and learns *what was hidden* +
+    *how to ask for it back*. Without this signal, FieldRead v2's
+    elision is invisible — the model would hallucinate "the handoff
+    didn't mention X" when in fact X was simply elided to save tokens.
+
+    Format::
+
+        <system-context-elided count=3 reason="token-budget"
+            ids="status,history,old"
+            expand="expand(path, id)"/>
+
+    Args:
+        elided: List of :class:`ElidedSection` breadcrumbs from a
+            :class:`FieldReadResult`. Empty list yields ``""`` so this
+            helper is safe to inline-call without a guard.
+        max_inline_ids: Cap on how many ids are listed inline; remaining
+            ids are summarised as ``+N more``. Keeps overhead at
+            roughly ~50 tokens regardless of elision count (Plan target
+            line 61).
+        expand_callback: Optional override for the ``expand=...``
+            attribute. Defaults to the canonical signature; callers
+            wanting a localised hint (e.g. zh-TW) may pass their own
+            string.
+
+    Returns:
+        XML-style self-closing tag string, or ``""`` when nothing was
+        elided.
+    """
+    if not elided:
+        return ""
+    n = len(elided)
+    ids = [e.id for e in elided[:max_inline_ids]]
+    ids_str = ",".join(ids)
+    if n > max_inline_ids:
+        ids_str += f",+{n - max_inline_ids}-more"
+    cb = expand_callback or (
+        "concinno.field_read.expand(path, section_id)"
+    )
+    # Aggregate gist surface: sample first 2 gists for color, capped.
+    gist_sample = " | ".join(
+        e.gist for e in elided[:2] if e.gist
+    )
+    if gist_sample and len(gist_sample) > 80:
+        gist_sample = gist_sample[:77] + "..."
+    gist_attr = f' gist="{gist_sample}"' if gist_sample else ""
+    reason = "token-budget"
+    return (
+        f'<system-context-elided count={n} reason="{reason}" '
+        f'ids="{ids_str}"{gist_attr} expand="{cb}"/>'
+    )
+
+
+def build_field_context_v2_string(
+    workspace: str,
+    task_prompt: str = "",
+    config: Optional[FieldReadConfig] = None,
+    *,
+    complexity: Optional[str] = None,
+    include_breadcrumbs: bool = True,
+) -> str:
+    """Build a string-shaped v2 field context with elision breadcrumbs.
+
+    This is the **PromptEngine integration point** (4.4.0): drop-in
+    replacement for :func:`build_field_context` that *also* appends a
+    ``<system-context-elided/>`` tag whenever sections were skipped.
+    The tag costs roughly ~50 tokens but gives the LLM explicit
+    awareness of what was hidden, replacing the "silent compressor"
+    failure mode that motivated v2 (see module docstring "Problem v2").
+
+    Args:
+        workspace: Project workspace root directory.
+        task_prompt: Current task description for keyword matching.
+        config: Optional configuration override.
+        complexity: Optional C0 complexity classification routed through
+            :func:`compress_breakeven_for`.
+        include_breadcrumbs: Toggle for the trailing breadcrumb tag.
+            Set ``False`` to recover exact byte-for-byte parity with
+            :func:`build_field_context` (used by callers who already
+            consume the structured FieldReadResult elsewhere).
+
+    Returns:
+        Concatenated field context. When elision happened *and*
+        ``include_breadcrumbs`` is true, a ``<system-context-elided/>``
+        tag is appended on its own line.
+    """
+    result = build_field_context_v2(
+        workspace, task_prompt, config, complexity=complexity,
+    )
+    if not include_breadcrumbs or not result.sections_elided:
+        return result.content
+    crumb = render_elision_breadcrumbs(result.sections_elided)
+    if not crumb:
+        return result.content
+    if not result.content:
+        return crumb
+    return f"{result.content}\n{crumb}"

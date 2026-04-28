@@ -1758,6 +1758,14 @@ def main() -> None:
     from .preset_cmd import register as _register_preset
     _register_preset(sub)
 
+    # 4.4.0 — L2 SKILL.md frontmatter walker + reverse trigger index
+    from .l2_index_cmd import register as _register_l2_index
+    _register_l2_index(sub)
+
+    # 4.4.0 — HP6 wave-1 approval mode (manual / smart / off)
+    from .approval_mode_cmd import register as _register_approval_mode
+    _register_approval_mode(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)

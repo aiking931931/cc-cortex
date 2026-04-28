@@ -195,10 +195,37 @@ class ReflexionGuard(BaseGuard):
 
         # Decrement TTL on replay so the message ages out.
         state["ttl_remaining"] = ttl - 1
-        if state["ttl_remaining"] <= 0:
+        expired = state["ttl_remaining"] <= 0
+        if expired:
             # Clear when expired so a stale narrative cannot leak forward.
             state.pop("why_failed", None)
         _write_state(ctx, state)
+
+        # ZIQ outcome wire (4.4.0 — sub-agent K wave-2). The TTL
+        # cap controls how many subsequent calls see the narrative.
+        # iterations_used = how many replays this narrative has now
+        # served (self._ttl - new_ttl). succeeded=True on every
+        # replay (the narrative reached its consumer); succeeded=
+        # False would correspond to "narrative expired without ever
+        # being needed" — that case lives in on_post_tool when the
+        # next failure overwrites a not-yet-expired prior narrative.
+        try:
+            from concinno.ziq_emit_helpers import emit_iteration_outcome
+
+            replays_so_far = int(self._ttl) - state["ttl_remaining"]
+            emit_iteration_outcome(
+                "reflexion.injection_ttl_calls",
+                value=int(self._ttl),
+                iterations_used=int(replays_so_far),
+                succeeded=True,
+                source="concinno.guards.reflexion_guard.ReflexionGuard.check",
+                metadata={
+                    "expired_after_replay": expired,
+                    "ttl_remaining": state["ttl_remaining"],
+                },
+            )
+        except Exception:
+            pass
 
         return GuardResult.allow_advisory(
             context=str(narrative),
@@ -237,6 +264,33 @@ class ReflexionGuard(BaseGuard):
         state["error_sig"] = error_sig
         state["ttl_remaining"] = self._ttl
         _write_state(ctx, state)
+
+        # ZIQ outcome wire (4.4.0 — sub-agent K wave-2). The
+        # max_words cap controls how aggressive the truncation is.
+        # observed = actual word count of the rendered narrative;
+        # tripped=True when the narrative had to be truncated to
+        # the cap (headroom exhausted = signal the cap may be too
+        # tight). Emitting on every successful narrative build
+        # gives the FTRL learner enough signal density.
+        try:
+            from concinno.ziq_emit_helpers import emit_threshold_outcome
+
+            word_count = len(narrative.split())
+            truncated = narrative.endswith("...")
+            emit_threshold_outcome(
+                "reflexion.max_words",
+                value=int(self._max_words),
+                observed=float(word_count),
+                tripped=truncated,
+                source="concinno.guards.reflexion_guard.ReflexionGuard",
+                metadata={
+                    "word_count": word_count,
+                    "truncated": truncated,
+                },
+            )
+        except Exception:
+            pass
+
         # PostToolUse signal only — no context injection here.
         return None
 

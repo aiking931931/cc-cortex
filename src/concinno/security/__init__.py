@@ -36,6 +36,19 @@ from concinno.security.bash_validators import (  # noqa: F401
     validate_unicode_whitespace,
     validate_zsh_dangerous_commands,
 )
+from concinno.security.circuit_breaker_guard import (  # noqa: F401
+    DEFAULT_BACKOFF_BASE_S,
+    DEFAULT_BACKOFF_MAX_S,
+    DEFAULT_COOLDOWN_S,
+    DEFAULT_FAILURE_THRESHOLD,
+    DEFAULT_MAX_CALLS,
+    DEFAULT_WINDOW_S,
+    CallRecord,
+    CircuitBreakerFinding,
+    CircuitBreakerGuard,
+    CircuitBreakerSnapshot,
+    CircuitState,
+)
 from concinno.security.deserialize_guard import (  # noqa: F401
     DEFAULT_TRUSTED_MODULES,
     PATTERN_SEVERITY,
@@ -197,4 +210,16 @@ __all__ = [
     # 4.3.0 — PII guard
     "PIIGuard",
     "PIIType",
+    # 4.4.0 — Circuit breaker guard
+    "CallRecord",
+    "CircuitBreakerFinding",
+    "CircuitBreakerGuard",
+    "CircuitBreakerSnapshot",
+    "CircuitState",
+    "DEFAULT_BACKOFF_BASE_S",
+    "DEFAULT_BACKOFF_MAX_S",
+    "DEFAULT_COOLDOWN_S",
+    "DEFAULT_FAILURE_THRESHOLD",
+    "DEFAULT_MAX_CALLS",
+    "DEFAULT_WINDOW_S",
 ]
