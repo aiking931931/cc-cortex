@@ -193,8 +193,13 @@ class SkillDraft:
             "_Edit this section to describe the workflow this Skill should encode "
             "before accepting._\n\n"
             "## Acceptance\n\n"
-            f"- Accept: `concinno skill-emerge accept {self.slug}`\n"
-            f"- Reject: `concinno skill-emerge reject {self.slug}`\n"
+            f"- **Accept**: review and edit this draft, then move it to "
+            f"`~/.claude/skills/{self.slug}/SKILL.md` to install.\n"
+            f"- **Reject**: delete `{self.slug}.md` from "
+            f"`~/.concinno/skill_drafts/`.\n"
+            "- A `concinno skill-emerge accept|reject` CLI subcommand is "
+            "planned for a 4.5.x patch wave; until it lands, the manual "
+            "move/delete steps above are the supported workflow.\n"
         )
         return body
 
@@ -680,9 +685,11 @@ class SkillEmergenceGuard:
         """Inline stderr notice. No-op if no emit hook supplied."""
         msg = (
             f"concinno: SkillEmergenceGuard proposed draft '{draft.name}' "
-            f"at {md_path}. Run `concinno skill-emerge accept {draft.slug}` "
-            f"to install or `concinno skill-emerge reject {draft.slug}` "
-            f"to discard."
+            f"at {md_path}. Review and edit the draft, then move it to "
+            f"`~/.claude/skills/{draft.slug}/SKILL.md` to install, or "
+            f"delete the draft file to discard. (A "
+            f"`concinno skill-emerge accept|reject` CLI subcommand is "
+            f"planned for a 4.5.x patch wave.)"
         )
         emitter = self._stderr_emit
         if emitter is None:

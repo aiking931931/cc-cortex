@@ -474,8 +474,14 @@ def test_stderr_emit_called_on_propose(
     )
     g.observe(_signal())
     assert len(captured) == 1
-    assert "skill-emerge accept" in captured[0]
-    assert "skill-emerge reject" in captured[0]
+    # 4.5.0 ship-fix (red-team HIGH-4): the inline notice now points the
+    # operator at the manual move/delete workflow because the
+    # ``concinno skill-emerge`` argparse subcommand is deferred to a
+    # 4.5.x patch wave. Both the install path and the discard path must
+    # still be present so the operator knows what to do without the
+    # subcommand.
+    assert "~/.claude/skills" in captured[0]
+    assert "delete" in captured[0]
 
 
 def test_stderr_emit_failure_swallowed(
@@ -554,8 +560,13 @@ def test_to_markdown_includes_acceptance_commands() -> None:
         sample_canonical_shapes=["foo"],
     )
     md = d.to_markdown()
-    assert "concinno skill-emerge accept ws-foo" in md
-    assert "concinno skill-emerge reject ws-foo" in md
+    # 4.5.0 ship-fix (red-team HIGH-4): the Acceptance section now spells
+    # out the manual move/delete workflow plus a forward-pointer to the
+    # 4.5.x ``concinno skill-emerge`` subcommand. Both the install and
+    # discard paths must be present, plus the slug must appear so the
+    # operator knows which draft they are acting on.
+    assert "~/.claude/skills/ws-foo/SKILL.md" in md
+    assert "ws-foo.md" in md
     assert "## Suggested workflow" in md
 
 
