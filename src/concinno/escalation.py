@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence, cast
 
 from concinno.core.state_store import StateStore
+from concinno.ziq_outcome_bus import Outcome
+from concinno.ziq_outcome_bus import get_bus as _get_ziq_bus
 
 # ── Public constants ────────────────────────────────────────
 
@@ -320,12 +322,54 @@ class LLMEscalator:
                 )
                 attempts.append(failed)
                 failures.append((tier, f"{type(exc).__name__}: {exc}"))
+                # ZIQ pilot: emit failure outcome (reward = 0.0) so the
+                # FTRL learner sees that this max_retries setting did
+                # not save the call. Best-effort — never break the
+                # escalator on bus errors.
+                try:
+                    _get_ziq_bus().emit(
+                        Outcome(
+                            tunable="escalation.max_retries_per_tier",
+                            value=self._max_retries,
+                            reward=0.0,
+                            source="concinno.escalation.LLMEscalator",
+                            metadata={
+                                "tier": tier,
+                                "error_class": type(exc).__name__,
+                            },
+                        )
+                    )
+                except Exception:
+                    pass
                 continue
 
             self._run_stats[tier]["calls"] += 1
             self._run_stats[tier]["successes"] += 1
             self._breaker_record_success(tier)
             attempts.append(result)
+            # ZIQ pilot: emit success outcome. Reward decays with the
+            # number of retries actually consumed — a setting that
+            # required 0 retries scores 1.0; one that needed all
+            # configured retries scores 1/(1+max_retries). This gives
+            # FTRL a smooth signal to lower max_retries when the chain
+            # generally succeeds without retrying.
+            try:
+                denom = 1.0 + float(result.retries)
+                reward = 1.0 / denom if denom > 0.0 else 1.0
+                _get_ziq_bus().emit(
+                    Outcome(
+                        tunable="escalation.max_retries_per_tier",
+                        value=self._max_retries,
+                        reward=reward,
+                        source="concinno.escalation.LLMEscalator",
+                        metadata={
+                            "tier": tier,
+                            "retries_used": int(result.retries),
+                        },
+                    )
+                )
+            except Exception:
+                pass
             return EscalationResult(final=result, attempts=attempts, chain=chain)
 
         raise EscalationExhausted(failures)

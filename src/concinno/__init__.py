@@ -11,7 +11,7 @@ Legacy API (v0.5, deprecated — removed in v1.0)::
 Migration guide: https://github.com/aiking931931/concinno/blob/main/docs/migration-v05-v06.md
 """
 
-__version__ = "4.2.5"
+__version__ = "4.3.0"
 
 import warnings as _warnings
 
@@ -178,6 +178,19 @@ from concinno.ziq_autotuner import (  # noqa: F401
     AutoTuneRegime,
     ZIQAutoTuner,
     is_autotune_enabled,
+)
+from concinno.ziq_outcome_bus import (  # noqa: F401
+    Outcome,
+    ZIQOutcomeBus,
+)
+from concinno.ziq_outcome_bus import (
+    emit as ziq_emit,  # noqa: F401
+)
+from concinno.ziq_outcome_bus import (
+    get_bus as get_ziq_bus,  # noqa: F401
+)
+from concinno.ziq_outcome_bus import (
+    is_bus_disabled as is_ziq_bus_disabled,  # noqa: F401
 )
 
 # ── v0.5 legacy API (deprecated since v0.6, removed in v1.0) ─

@@ -3,19 +3,19 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## Current snapshot (2026-04-27 — **4.2.3 LIVE on PyPI** — wave-3 schema migration cleanup + Parent-B wiring + typed agent loop)
+## Current snapshot (2026-04-28 — **4.3.0 LIVE on PyPI** — Week 1 of 4-week ship cadence)
 
 | Field | Value |
 | --- | --- |
-| Registry latest (PyPI) | **`4.2.3`** ✅ (uploaded 2026-04-27 — <https://pypi.org/project/concinno/4.2.3/>) |
-| `pyproject.toml` version | `4.2.3` ✅ aligned |
-| `src/concinno/__init__.py __version__` | `4.2.3` ✅ aligned |
-| CHANGELOG.md latest release heading | `## [4.2.3] - 2026-04-27 — wave-3 schema migration cleanup + typed agent loop` → `## [4.2.2] - 2026-04-27 — wave-1 bundle` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
-| Triple-source alignment | ✅ aligned at 4.2.3 |
-| Git tag | ✅ `v4.2.3` pushed (commit `d944395` on branch `feat/2.3.0-red-team-round-3`) |
-| Inner concinno HEAD | `d944395 release(4.2.3): wave-3 schema migration cleanup + Parent-B wiring + typed agent loop` |
-| Previous release | `4.2.2` (5dc1a5c — wave-1 bundle + release_lock atomic + docstring fix) |
-| Pending Publish Queue | empty (4.2.3 published) |
+| Registry latest (PyPI) | **`4.3.0`** ✅ (uploaded 2026-04-28 — <https://pypi.org/project/concinno/4.3.0/> — HTTP 200 verified) |
+| `pyproject.toml` version | `4.3.0` ✅ aligned |
+| `src/concinno/__init__.py __version__` | `4.3.0` ✅ aligned |
+| CHANGELOG.md latest release heading | `## [4.3.0] - 2026-04-28 — Week 1 of 4-week ship cadence` → `## [4.2.5] - 2026-04-27 — release_authorization explicit default-OFF` → `## [4.2.4] - 2026-04-27 — R+B+G CBUA review verdict carryover patch` → `## [4.2.3] - 2026-04-27 — wave-3 schema migration cleanup + typed agent loop` → `## [4.2.2] - 2026-04-27` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
+| Triple-source alignment | ✅ aligned at 4.3.0 |
+| Git tag | ✅ `v4.3.0` created locally on commit `c8adf4aee` (outer ai-king has no `origin` remote — known operational pattern, PyPI is the public artifact) |
+| Outer ai-king HEAD | `c8adf4aee release(concinno): 4.3.0 — Week 1 of 4-week ship cadence` on `save/2026-04-22-concinno-ecosystem-phase-0-1-2` |
+| Previous releases | `4.2.5` (default-OFF release_authorization) → `4.2.4` (R+B+G must-fix) → `4.2.3` (wave-3 schema cleanup + typed agent loop) → `4.2.2` (wave-1 bundle + release_lock atomic) |
+| Pending Publish Queue | empty (4.3.0 published 2026-04-28). Next target: `4.4.0` (Week 2, target ship 2026-05-11). |
 | release_auth state | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)` + `Bash(python -m twine upload:*)` + `Bash(git push origin v*:*)` + `Bash(python -m twine check:*)`) green |
 | Build artifacts | ✅ `dist/concinno-4.2.3-py3-none-any.whl` + `dist/concinno-4.2.3.tar.gz` published. Only 4.2.2 + 4.2.3 left on disk (4.2.1 cleaned this session). |
 | **Post-publish ops** | None — 4.2.3 is purely additive (typed agent loop) plus three regression fixes (review_router schema unwrap / conftest tmp_path isolation / axis_arms preset alignment); no yank, no migration shim needed. |
@@ -553,6 +553,155 @@ vs local git diff → 有 delta 即孤兒警訊。
 - `src/concinno/tools/builtin/python_exec.py` + 22 tests（AST + builtin whitelist sandbox）
 - `src/concinno/tools/builtin/date_calc.py` + 14 tests（delta / parse / format，stdlib-only）
 - Release 只 scope `projects/concinno/`，其他不動
+
+## ✅ 4.3.0 Week 1 ship-gate (2026-04-28 — ALL DELIVERABLES GREEN)
+
+Plan: `C:\Users\zerox\.claude\plans\pip-4-2-5-typed-lamport.md`
+Branch: `save/2026-04-22-concinno-ecosystem-phase-0-1-2`
+Target ship date: **2026-05-04** (1 week from gate decision)
+
+### Week 1 deliverables — 11/11 work items shipped
+
+| # | Item | Commit | Tests |
+| --- | --- | --- | --- |
+| 1 | git-surgeon: rebase audit + RBG schema audit | `e381e128e` | n/a (audit) |
+| 2 | Profile fail_mode_overrides + permissive→lite alias | `7e099d99c` | 19 new |
+| 3 | PolicyGate shared base class | (in `493ab5401` + bundle) | 33 |
+| 4 | ZIQ outcome bus + escalation pilot | `3c7280ff9` | 12 |
+| 5 | release_lock + twine_pre_check integration | `498c3a08b` | 11 |
+| 6 | agent/session_loop LLM driver completion | `fe0923c5f` | 19 |
+| 7 | persona Track 2 Module A intent_router cleanroom port | `3da184e13` | 46 |
+| 8 | PII guard + 9 PII types + Luhn + redaction | bundle `672fe1f3e` | 167 |
+| 9 | Deserialize guard + AST scan unsafe pickle/yaml | bundle `672fe1f3e` | 130 |
+| 10 | Sancio chat REPL CLI (M1 step 1) | inner `a9fab38` | 18 + 53 reg |
+| 11 | Sancio skills_proactive Frontmatter auto-discovery | inner `87e6dbf` | 18 |
+
+**Bundle landings on `save/2026-04-22-concinno-ecosystem-phase-0-1-2`** (this session):
+- `672fe1f3e feat(concinno): 4.3.0-week1 bundle — PolicyGate + PII + Deserialize + mypy fix` — 10 files / 3370 insertions / 27 deletions. Lands work whose individual sub-agent commits did not surface in HEAD (agents reported hashes that did not land — files on disk were correct, this commit lands them properly).
+- `5ffb82533 feat(concinno): Memoria 0.4.0 NUCLEAR tier` — 3 files / 928 insertions. Carryover from parallel Memoria 0.4.0 reboot-equivalent track (page combining + service cycle safelist) — distinct from 4.3.0 ship narrative, committed separately for clean history.
+- `57079b218 style(concinno): ruff auto-fix import organization` — single import-org fix surfaced post-bundle.
+
+### Mypy strict — 7 originally targeted errors all FIXED
+
+`mypy --strict src/concinno/feature_config.py src/concinno/security/ src/concinno/agent/ src/concinno/persona/cognition/`:
+
+- ✅ `ssrf_guard.py:515` — redundant `cast(BlockReason, reason)` removed
+- ✅ `permission_mode.py:843` — `dict` → `dict[str, Any]` generic param added
+- ✅ `agent/session_loop.py:391/512/786` — 3× unused `# type: ignore` comments removed
+- ✅ `deserialize_guard.py:284/387` — class-var override → instance-var pattern + unused ignore removed
+
+Remaining 138 mypy strict errors (39 files) are **pre-existing in non-Week-1 modules** (`proposal_guard.py`, `equilibrium_guard.py`, `skill_router.py`, `handoff_validator.py`, `persona/pinned_memories.py`, `persona/persona.py`) — explicit carryover, not in Week 1 scope.
+
+### Ruff — All checks passed
+
+`ruff check` over Week 1 source + tests subset (12 paths): **All checks passed!** after one auto-fix to `tests/security/test_deserialize_guard.py` import organization (committed in `57079b218`).
+
+### Pytest
+
+| Run | Result | Wall clock |
+| --- | --- | --- |
+| Week 1 focused (security + profile + release + ziq + session_loop + cognition) | **439 / 439 passed** | 42 s |
+| Full Concinno regression (`pytest -x`) | **5379 passed / 7 skipped / 5 xfailed / 1 flake** | 24 m |
+| Flake re-run in isolation | **PASSED in 13.49 s** (60 s timeout — plenty of headroom) | 14 s |
+
+The single full-run failure (`tests/test_plugins_cmd_list.py::TestPerformance::test_real_system_cold_call_under_budget`) is a **system-load-sensitive performance test** that passes cleanly in isolation — not a real regression. The 24-minute concurrent-load wall-clock pushed the cold-call path over its budget threshold; in isolation the call completes well under budget.
+
+### Build + twine check
+
+- `python -m build --wheel --sdist --outdir dist/` — `concinno-4.2.5-py3-none-any.whl` + `concinno-4.2.5.tar.gz` built clean (4.2.5 because version bump for 4.3.0 is the **ship session's** first op per ship-prep contract — current bundle is dev work for next ship).
+- `python -m twine check dist/*` — both wheel + sdist **PASSED**.
+
+### Sancio runtime 1.1.0 (M1 step 1) — entry point E2E smoke
+
+- `pip install -e projects/sancio-runtime/` succeeds via `[chat]` extras (rich + prompt_toolkit optional)
+- `sancio --help` lists 3 sub-commands: `gui` / `self-update` / `chat`
+- `sancio chat --help` lists all 5 flags: `--driver` / `--model` / `--max-rounds` / `--no-scan` / `--no-rich`
+- Driver injection points to `concinno.agent.LLMDriver` Protocol (W2 wires Anthropic real driver via the example shipped in this bundle)
+
+### Sub-agent integrity issue surfaced + recovered
+
+This session's parallel Opus 4.7 sub-agents reported these commits that **did not land in any branch**:
+- `aed70af` (PII guard) — not in any ref
+- `4f5f574059...` (PolicyGate) — not in any ref
+
+The work was correct **on disk** (verified by content-equivalent test passes earlier in the session before any commit), but agents either had silent commit failure or hash hallucination. Bundle commit `672fe1f3e` recovers all work from disk into HEAD with full provenance documentation. **Lesson for future sessions** — verify reported sub-agent commit hashes exist via `git log --all --oneline | grep <hash>` before treating sub-agent reports as ship-ready.
+
+### Stale `.git/index.lock` detected and cleared
+
+A 0-byte `.git/index.lock` from 08:09 was blocking the bundle commit attempt at 08:10 (no actual git process held it). Standard recovery: `rm .git/index.lock` — same pattern executed earlier in session by the release_authorization sub-agent. No data loss.
+
+### Ship-gate decision: **🟢 GO for 2026-05-04**
+
+All Week 1 plan deliverables are landed, tested, lint-clean, mypy-clean (in-scope), and twine-checkable. The 4.3.0 ship session merely needs to:
+
+1. Bump `pyproject.toml` 4.2.5 → 4.3.0
+2. Bump `src/concinno/__init__.py __version__` 4.2.5 → 4.3.0
+3. Promote `## [Unreleased]` heading in `CHANGELOG.md` to `## [4.3.0] - 2026-05-04`
+4. Re-run `python -m build` + `twine check`
+5. `twine upload dist/concinno-4.3.0*` (publish auth permanent opt-out per session-wide directive — no string, no AskUser, autonomous)
+6. `git tag v4.3.0 && git push origin v4.3.0`
+7. Update this RELEASE_COORDINATION.md snapshot table to 4.3.0
+
+**Pending Publish Queue entry** (added by next ship session, not this one):
+
+```yaml
+- version: "4.3.0"
+  state: ready-to-publish  # set by ship session after bumps + rebuild
+  queued_by:
+    session: <next ship session id>
+    host: ai-king local
+    queued_at: <ISO-8601 of bump>
+  artifacts:
+    wheel: dist/concinno-4.3.0-py3-none-any.whl
+    sdist: dist/concinno-4.3.0.tar.gz
+    twine_check: PASSED
+    built_from: <commit hash after version bumps>
+  verification:
+    tests_full: 5379 passed / 0 real failures (1 flake re-validated in isolation)
+    ruff: clean
+    mypy_strict_in_scope: 0 errors (Week 1 modules)
+    triple_source_aligned: true (after bump)
+  blocking_on: []  # publish auth permanent opt-out, harness allow rules in place
+  expires_at: 2026-05-11T00:00+08:00  # +7d from queue
+  notes: |
+    Week 1 of 4-week ship cadence (4.3.0 → 4.4.0 → 4.5.0 → 4.6.0).
+    Bundle commits: 672fe1f3e + 5ffb82533 + 57079b218.
+    Inner sancio-runtime parallel ship: a9fab38 + 87e6dbf (pkg `persona-api` 1.1.0).
+```
+
+---
+
+## ⛔ 4.3.0 Week 1 audit (2026-04-27 git-surgeon Opus 4.7)
+
+Plan `C:\Users\zerox\.claude\plans\pip-4-2-5-typed-lamport.md` Week 1 列了
+兩個阻塞 P0，考古後發現**全部已在過去 commit 完成，下個 ship session
+不要重做**：
+
+1. **`Parent-A/B branch feat/2.3.0-red-team-round-3 rebase merge`** —
+   FALSE alarm (plan 過時)。Branch 在 `projects/concinno/` inner repo（**不是
+   outer ai-king**），且 `git log main..feat/2.3.0-red-team-round-3` 為空 →
+   branch 上每一個 commit 都已在 `main`。`v2.3.0` tag pushed + PyPI live
+   (commit `680e7c2`) + main 已遠超到 `4.2.5` (HEAD `67f4946`)。**不需要 rebase
+   任何東西**，feat branch 殘留只是 `db75381` "concinno-outer-squash-protect"
+   stash（與 outer ai-king 互動的安全 stash，與 ship 無關）。
+
+2. **`feature_config.py:2577-2601 redblue_green_review 10 float schema 修`**
+   — FALSE alarm (plan 過時 + 計數錯)。實際範圍 line 2583-2675，11 params
+   = **7 float + 3 int + 1 bool**（不是 10 float）。Schema invariant 全綠：
+   - 5-axis weight sum = 1.0 (real_done 0.20, wired 0.20, functional 0.25,
+     ai_capability 0.20, ux_friction 0.15) ✅
+   - All ZIQ tunable params 有 type/default/min/max/recommended ✅
+   - `pytest tests/guards/test_redblue_green_dispatch_guard.py` **10/10 PASS** ✅
+   - `validate_value` 對 5 個 weight 全 return `[]`(0 issue) ✅
+   - `ruff check feature_config.py` clean ✅
+   - 在 commit `a51d504e6 ship(concinno): wave-3 batch (RBG dispatch,
+     ZIQ review_router, first-run, polling, flake)` 已 ship；PyPI 4.2.3 LIVE；
+     `tests/guards/test_redblue_green_dispatch_guard.py` (~16 cases) 已加。
+
+**Action for next ship session**: Plan 的 Week 1 兩個 ⬜ 標 ✅，剩餘 P0 從第 3
+條 (`agent/session_loop.py` LLM driver) 開始。考古證據：commits `77afdf9f0`
+(red-team round-3 hardening) + `704731d` (2.3.0 release) + `680e7c2` (PyPI
+verified) + `a51d504e6` (RBG dispatch wave-3 ship).
 
 ## WIP idea backlog（尚未實作，下次 minor 一起考慮）
 

@@ -53,7 +53,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from dataclasses import dataclass, field
-from typing import Iterable, Literal, Protocol, cast
+from typing import Iterable, Literal, Protocol
 from urllib.parse import urlparse
 
 BlockReason = Literal[
@@ -512,7 +512,7 @@ class SSRFGuard:
         if reason is not None:
             return SSRFVerdict(
                 ok=False,
-                reason=cast(BlockReason, reason),
+                reason=reason,
                 url=url,
                 host=host,
                 resolved_ip=ip_str,

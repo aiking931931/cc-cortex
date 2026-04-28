@@ -49,7 +49,15 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, Optional
+
+if TYPE_CHECKING:
+    from concinno.guards.base import (
+        BaseGuard,
+        GuardCategory,
+        GuardContext,
+        GuardResult,
+    )
 
 # ── Irreversible publish operations ─────────────────────────────────
 #
@@ -158,7 +166,7 @@ def _config_path() -> Path:
     return Path.home() / ".concinno" / "release_auth.json"
 
 
-def _read_config_file(path: Path) -> tuple[dict, Optional[str]]:
+def _read_config_file(path: Path) -> tuple[dict[str, Any], Optional[str]]:
     """Read config JSON. Returns (data, warning_or_None). Fail-open."""
     try:
         if not path.is_file():
@@ -509,25 +517,34 @@ def _read_recent_user_transcript_text(session_id: str, max_chars: int = 100_000)
     return out[-max_chars:]
 
 
-def _try_import_guard_base():
+def _try_import_guard_base() -> tuple[
+    type["BaseGuard"], type["GuardCategory"],
+    type["GuardContext"], type["GuardResult"],
+]:
     """Lazy-import guard base classes — release_authorization is a stdlib-
     only module by design; the guard adapter is the one place that
     pulls in ``concinno.guards.base``. Done lazily so direct imports of
     ``release_authorization`` (e.g. from the CLI) don't drag in the
     whole guard machinery."""
     from concinno.guards.base import (
-        BaseGuard,
-        GuardCategory,
-        GuardContext,
-        GuardResult,
+        BaseGuard as _BG,
     )
-    return BaseGuard, GuardCategory, GuardContext, GuardResult
+    from concinno.guards.base import (
+        GuardCategory as _GCa,
+    )
+    from concinno.guards.base import (
+        GuardContext as _GCt,
+    )
+    from concinno.guards.base import (
+        GuardResult as _GR,
+    )
+    return _BG, _GCa, _GCt, _GR
 
 
 _BaseGuard, _GuardCategory, _GuardContext, _GuardResult = _try_import_guard_base()
 
 
-class ReleaseAuthorizationGuard(_BaseGuard):
+class ReleaseAuthorizationGuard(_BaseGuard):  # type: ignore[misc,valid-type]
     """Block irreversible publish operations until the user types
     ``go publish <pkg> <ver>`` in chat (or selects an equivalent
     AskUserQuestion option in ``ASKUSER_ANSWER`` mode).
@@ -548,7 +565,7 @@ class ReleaseAuthorizationGuard(_BaseGuard):
     feature_name = "release_authorization"
     category = _GuardCategory.SECURITY
 
-    def check(self, ctx):  # type: ignore[override]
+    def check(self, ctx: "GuardContext") -> Optional["GuardResult"]:
         if ctx.tool_name != "Bash":
             return None
         cmd = ""
@@ -630,11 +647,11 @@ def _resolve_session_identity() -> str:
             sessions = data.get("sessions", {})
             if isinstance(sessions, dict) and sessions:
                 # Pick newest session by 'started' if available.
-                def _start(item: tuple[str, dict]) -> str:
+                def _start(item: tuple[str, dict[str, Any]]) -> str:
                     return str(item[1].get("started", ""))
 
                 key, _ = max(sessions.items(), key=_start)
-                return key
+                return str(key)
         except (json.JSONDecodeError, OSError):
             pass
     return f"unknown-{socket.gethostname()}"
@@ -810,17 +827,474 @@ def acquire_for_upload(
             pass
 
 
+# ── Plan A Week 1 (4.3.0) integration: release_lock + pre_publish_check ──
+#
+# Public-facing wrappers exposing the primitives in ``coordination/``
+# plus three new advisory checks (``twine check``, version-sync,
+# optional pytest). Designed for callers that want to *report*
+# pre-publish posture **without** triggering an AskUser prompt or
+# re-introducing the publish-gate behaviour the user has permanently
+# opted out of (see ``rules/L1/release_coord.md`` opt-out banner +
+# ``feedback_publish_authorization_permanently_disabled.md``).
+#
+# Key contract (from Plan A spec):
+#   * Never raise on failure — always return a result object.
+#   * Never prompt the user.
+#   * Never block ``twine upload`` even if checks fail; caller decides.
+#   * Honour the existing ``release_auth.disabled=True`` opt-out:
+#     when set, checks still run for *information*, but every result
+#     is advisory and never escalated to AskUser / hard gate.
+#   * Honour env ``CONCINNO_RELEASE_LOCK_DISABLED=1`` to fully bypass
+#     the lock layer (used by 1-host CI/dev workflows).
+#   * Emit a single ZIQ ``Outcome`` per ``pre_publish_check`` call so
+#     the autotuner can learn the empirical fail rate over time. ZIQ
+#     bus is lazy-imported and graceful-degrades on absence.
+
+
+class LockAcquireError(Exception):
+    """Result-style error returned (not raised) when the release lock
+    cannot be taken because another live session holds it.
+
+    Subclasses :class:`Exception` so callers that *want* to raise on
+    contention can simply ``raise err``; the default
+    :func:`acquire_release_lock` flow returns the instance instead so
+    automatic retry / queue-drain is the caller's choice.
+    """
+
+    def __init__(self, package: str, holder: dict[str, object]) -> None:
+        self.package = package
+        self.holder = holder
+        super().__init__(
+            f"release lock for {package!r} held by "
+            f"session {holder.get('holder_session', '?')!r} "
+            f"(version {holder.get('version', '?')!r}, "
+            f"acquired_at {holder.get('acquired_at', '?')!r})"
+        )
+
+
+def _release_lock_disabled() -> bool:
+    """Return True when env ``CONCINNO_RELEASE_LOCK_DISABLED=1``.
+
+    Read fresh per call so tests can flip mid-run without re-import.
+    """
+    raw = os.environ.get("CONCINNO_RELEASE_LOCK_DISABLED", "").strip().lower()
+    return raw in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
+def acquire_release_lock(
+    package: str,
+    version: str,
+    session: Optional[str] = None,
+    host: Optional[str] = None,
+) -> tuple[bool, Optional[LockAcquireError]]:
+    """Try to acquire the per-package release lock for (package, version).
+
+    Wraps :class:`concinno.coordination.release_lock.ReleaseLock` to
+    expose a result-tuple API the caller can branch on without a
+    try/except block. Stale-lock auto-revoke (TTL via env
+    ``CONCINNO_RELEASE_LOCK_TTL_MIN``, default 30 min) is honoured by
+    the underlying :class:`ReleaseLock` — callers do **not** need to
+    sweep separately.
+
+    Args:
+        package: Package name (e.g. ``"concinno"``).
+        version: Target version string (e.g. ``"4.3.0"``).
+        session: Session identifier; defaults to
+            :func:`_resolve_session_identity`.
+        host: Hostname; defaults to ``socket.gethostname()``.
+
+    Returns:
+        ``(True, None)`` on successful acquire.
+        ``(False, LockAcquireError)`` when another live session holds
+        it. The error includes the holder dict so callers can format
+        their own message or re-raise.
+
+    Notes:
+        * Re-acquire by the same ``session`` is idempotent and refreshes
+          ``acquired_at`` — useful for long-running flows that survive
+          a restart with the same session id.
+        * When env ``CONCINNO_RELEASE_LOCK_DISABLED=1`` this is a no-op
+          and always returns ``(True, None)`` — used in CI / dev hosts
+          where a single agent owns the publish flow.
+        * ``release_auth.disabled=True`` does **not** disable the lock —
+          the publish opt-out is about *user authorization*, not
+          *concurrency safety*. Two parallel sessions with the gate
+          disabled still must not double-upload, so the lock stays on.
+    """
+    if _release_lock_disabled():
+        return True, None
+
+    from concinno.coordination.release_lock import ReleaseLock
+
+    resolved_session = session or _resolve_session_identity()
+    resolved_host = host or socket.gethostname()
+    lock = ReleaseLock()
+    if lock.acquire(
+        package, version, session=resolved_session, host=resolved_host
+    ):
+        return True, None
+    held = lock.check(package) or {}
+    return False, LockAcquireError(package, held)
+
+
+def release_release_lock(package: str) -> None:
+    """Release the lock for ``package``. Idempotent — no-op if absent.
+
+    Honours ``CONCINNO_RELEASE_LOCK_DISABLED=1`` (no-op when disabled,
+    matching :func:`acquire_release_lock`).
+    """
+    if _release_lock_disabled():
+        return
+    from concinno.coordination.release_lock import ReleaseLock
+
+    ReleaseLock().release(package)
+
+
+# ── Pre-publish check (advisory bundle) ────────────────────────────
+
+
+@dataclass(frozen=True)
+class PreCheckResult:
+    """Bundle of advisory pre-publish checks.
+
+    Attributes:
+        passed: True iff every executed check returned OK. False when
+            any single check reported a problem; ``reasons`` carries
+            human-readable details.
+        reasons: List of ``"<check>: <message>"`` strings, one per
+            failed check. Empty when ``passed`` is True.
+        details: Per-check raw context (return code, parsed values,
+            URLs probed). Stable schema only for the four built-in
+            checks (``twine_check``, ``pypi_registry``, ``version_sync``,
+            ``tests``); future additions may extend keys.
+
+    Contract: this is a **report**, not a gate. ``pre_publish_check``
+    never raises and never prompts. The caller decides whether to
+    proceed.
+    """
+
+    passed: bool
+    reasons: tuple[str, ...] = field(default_factory=tuple)
+    details: dict[str, object] = field(default_factory=dict)
+
+
+def _run_twine_check(dist_dir: Path) -> tuple[bool, str, dict[str, object]]:
+    """Run ``python -m twine check <dist_dir>/*`` and return (ok, msg, ctx).
+
+    Subprocess is the only sane call-site for ``twine`` — its public
+    Python API is documented as unstable. We use a fixed argv list (no
+    shell=True) and a short timeout; missing ``twine`` is reported as
+    a check failure rather than crashing the whole bundle so callers
+    in lean environments still get useful output for the other checks.
+    """
+    import shutil
+    import subprocess
+
+    ctx: dict[str, object] = {"dist_dir": str(dist_dir)}
+    if not dist_dir.is_dir():
+        return False, f"dist dir {dist_dir} does not exist", ctx
+    artifacts = sorted(dist_dir.glob("*"))
+    ctx["artifact_count"] = len(artifacts)
+    if not artifacts:
+        return False, f"dist dir {dist_dir} is empty", ctx
+    twine = shutil.which("twine")
+    if twine is None:
+        # Try ``python -m twine`` instead so callers without ``twine``
+        # on PATH but with the package installed still pass.
+        argv = [sys.executable, "-m", "twine", "check", *map(str, artifacts)]
+    else:
+        argv = [twine, "check", *map(str, artifacts)]
+    ctx["argv"] = argv
+    try:
+        proc = subprocess.run(  # noqa: S603 - argv list, no shell
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return False, f"twine check failed: {exc!r}", ctx
+    ctx["returncode"] = proc.returncode
+    ctx["stdout_tail"] = (proc.stdout or "")[-1000:]
+    ctx["stderr_tail"] = (proc.stderr or "")[-1000:]
+    if proc.returncode != 0:
+        return False, f"twine check exited {proc.returncode}", ctx
+    return True, "", ctx
+
+
+def _check_pypi_registry(
+    package: str, version: str
+) -> tuple[bool, str, dict[str, object]]:
+    """Probe pypi.org/<pkg>/<ver>/json. 404 = ok to publish, 200 = taken."""
+    ctx: dict[str, object] = {
+        "url": f"https://pypi.org/pypi/{package}/{version}/json",
+    }
+    try:
+        from concinno.coordination.release_lock import pypi_version_taken
+
+        taken = pypi_version_taken(package, version)
+    except Exception as exc:  # noqa: BLE001 - surface any error as advisory
+        ctx["error"] = repr(exc)
+        return False, f"PyPI registry probe failed: {exc!r}", ctx
+    ctx["taken"] = taken
+    if taken:
+        return False, (
+            f"{package} {version} is already on PyPI — upload would 400"
+        ), ctx
+    return True, "", ctx
+
+
+_PYPROJECT_VERSION_RE = re.compile(
+    r"""^\s*version\s*=\s*['"]([^'"]+)['"]""",
+    re.MULTILINE,
+)
+_CHANGELOG_VERSION_RE = re.compile(
+    r"^##\s*\[\s*([0-9]+\.[0-9]+\.[0-9]+(?:[A-Za-z0-9.\-]*)?)\s*\]",
+    re.MULTILINE,
+)
+
+
+def _check_version_sync(
+    target_version: str,
+    pyproject: Optional[Path] = None,
+    changelog: Optional[Path] = None,
+) -> tuple[bool, str, dict[str, object]]:
+    """Verify ``target_version`` matches pyproject.toml + first CHANGELOG entry.
+
+    The first non-``Unreleased`` ``## [X.Y.Z]`` heading in the changelog
+    is treated as the latest released version. Only the ``[Unreleased]``
+    placeholder is permitted to come before the target version (the Keep
+    a Changelog convention). Missing files report as failures so callers
+    in non-standard layouts know to skip this check.
+    """
+    pp = pyproject or Path.cwd() / "pyproject.toml"
+    cl = changelog or Path.cwd() / "CHANGELOG.md"
+    ctx: dict[str, object] = {
+        "pyproject": str(pp),
+        "changelog": str(cl),
+        "target": target_version,
+    }
+    if not pp.is_file():
+        return False, f"pyproject.toml not found at {pp}", ctx
+    try:
+        pp_text = pp.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"pyproject.toml unreadable: {exc!r}", ctx
+    pp_match = _PYPROJECT_VERSION_RE.search(pp_text)
+    if not pp_match:
+        return False, "pyproject.toml has no [project].version field", ctx
+    pp_version = pp_match.group(1)
+    ctx["pyproject_version"] = pp_version
+    if pp_version != target_version:
+        return False, (
+            f"pyproject.toml version {pp_version!r} != target "
+            f"{target_version!r}"
+        ), ctx
+    if not cl.is_file():
+        return False, f"CHANGELOG.md not found at {cl}", ctx
+    try:
+        cl_text = cl.read_text(encoding="utf-8")
+    except OSError as exc:
+        return False, f"CHANGELOG.md unreadable: {exc!r}", ctx
+    cl_versions = _CHANGELOG_VERSION_RE.findall(cl_text)
+    ctx["changelog_versions_head"] = cl_versions[:5]
+    if not cl_versions:
+        return False, "CHANGELOG.md has no '## [X.Y.Z]' headings", ctx
+    if target_version not in cl_versions:
+        return False, (
+            f"CHANGELOG.md has no entry for {target_version!r} "
+            f"(latest seen: {cl_versions[0]!r})"
+        ), ctx
+    return True, "", ctx
+
+
+def _run_tests(test_path: Optional[Path]) -> tuple[bool, str, dict[str, object]]:
+    """Run ``pytest`` against ``test_path`` (default ``tests/``).
+
+    Bounded with a 5-minute timeout so callers cannot accidentally wedge
+    the publish flow on a hung test.
+    """
+    import subprocess
+
+    target = str(test_path or (Path.cwd() / "tests"))
+    ctx: dict[str, object] = {"target": target}
+    if not Path(target).exists():
+        return False, f"test path {target} does not exist", ctx
+    argv = [sys.executable, "-m", "pytest", target, "-x", "--tb=short", "-q"]
+    ctx["argv"] = argv
+    try:
+        proc = subprocess.run(  # noqa: S603 - argv list, no shell
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return False, f"pytest failed to run: {exc!r}", ctx
+    ctx["returncode"] = proc.returncode
+    ctx["stdout_tail"] = (proc.stdout or "")[-2000:]
+    if proc.returncode != 0:
+        return False, f"pytest exited {proc.returncode}", ctx
+    return True, "", ctx
+
+
+def _emit_pre_check_outcome(
+    package: str,
+    target_version: str,
+    result: PreCheckResult,
+) -> None:
+    """Emit a single ZIQ outcome summarising the pre-check run.
+
+    Reward = 1.0 when ``passed``, 0.0 otherwise. ``value`` is the count
+    of failed checks (lower = better) so the autotuner sees both a
+    binary signal and a granularity signal. Tunable id is namespaced
+    under ``release_authorization.pre_publish_check`` so it does not
+    collide with the 19+ existing tunables.
+
+    Lazy-imported and graceful-degrades when the bus is missing or
+    disabled, so this helper is safe to call from all environments.
+    """
+    try:
+        from concinno.ziq_outcome_bus import (  # noqa: PLC0415
+            Outcome,
+            get_bus,
+            is_bus_disabled,
+        )
+    except Exception:  # pragma: no cover - bus optional
+        return
+    if is_bus_disabled():
+        return
+    try:
+        bus = get_bus()
+        bus.emit(
+            Outcome(
+                tunable="release_authorization.pre_publish_check",
+                value=len(result.reasons),
+                reward=1.0 if result.passed else 0.0,
+                metadata={
+                    "package": package,
+                    "version": target_version,
+                    "failed_checks": [r.split(":", 1)[0] for r in result.reasons],
+                },
+                source="release_authorization.pre_publish_check",
+            )
+        )
+    except Exception:  # pragma: no cover - bus is advisory
+        return
+
+
+def pre_publish_check(
+    target_version: str,
+    package: Optional[str] = None,
+    dist_dir: Optional[Path] = None,
+    pyproject: Optional[Path] = None,
+    changelog: Optional[Path] = None,
+    run_tests: bool = False,
+    test_path: Optional[Path] = None,
+) -> PreCheckResult:
+    """Run the four advisory pre-publish checks and return a result bundle.
+
+    Checks (in order):
+
+    1. ``twine_check`` — ``python -m twine check <dist_dir>/*``.
+    2. ``pypi_registry`` — ``HEAD pypi.org/<pkg>/<ver>/json``; 404 = OK.
+    3. ``version_sync`` — ``pyproject.toml``::version, first
+       ``CHANGELOG.md`` entry, and ``target_version`` agree.
+    4. ``tests`` (opt-in via ``run_tests=True``) —
+       ``python -m pytest <test_path>``.
+
+    Args:
+        target_version: Version about to be published (e.g. ``"4.3.0"``).
+        package: Package name. Defaults to the ``[project].name``
+            field parsed from ``pyproject``.
+        dist_dir: Directory containing the built wheel + sdist.
+            Defaults to ``./dist``.
+        pyproject: Override path to ``pyproject.toml``. Defaults to cwd.
+        changelog: Override path to ``CHANGELOG.md``. Defaults to cwd.
+        run_tests: If True, also run ``pytest``. Default False because
+            most callers have already run tests via their CI / pre-ship
+            workflow and re-running adds 30s+ for no signal.
+        test_path: Override pytest target. Defaults to ``./tests``.
+
+    Returns:
+        :class:`PreCheckResult`. Never raises. Never prompts the user.
+        Honours the user's permanent publish opt-out
+        (``release_auth.disabled=True``) — checks still execute, but
+        they are advisory and the caller decides whether to proceed.
+
+    Side effects:
+        Emits one ZIQ outcome on
+        ``release_authorization.pre_publish_check``. ZIQ bus absence
+        / kill-switch is silent.
+    """
+    pp = pyproject or Path.cwd() / "pyproject.toml"
+    cl = changelog or Path.cwd() / "CHANGELOG.md"
+    dd = dist_dir or Path.cwd() / "dist"
+
+    if package is None:
+        # Best-effort name parse for callers that only know the version.
+        try:
+            text = pp.read_text(encoding="utf-8") if pp.is_file() else ""
+            m = re.search(
+                r"^\s*name\s*=\s*['\"]([^'\"]+)['\"]",
+                text,
+                re.MULTILINE,
+            )
+            package = m.group(1) if m else "unknown"
+        except OSError:
+            package = "unknown"
+
+    reasons: list[str] = []
+    details: dict[str, object] = {}
+
+    ok, msg, ctx = _run_twine_check(dd)
+    details["twine_check"] = ctx
+    if not ok:
+        reasons.append(f"twine_check: {msg}")
+
+    ok, msg, ctx = _check_pypi_registry(package, target_version)
+    details["pypi_registry"] = ctx
+    if not ok:
+        reasons.append(f"pypi_registry: {msg}")
+
+    ok, msg, ctx = _check_version_sync(target_version, pp, cl)
+    details["version_sync"] = ctx
+    if not ok:
+        reasons.append(f"version_sync: {msg}")
+
+    if run_tests:
+        ok, msg, ctx = _run_tests(test_path)
+        details["tests"] = ctx
+        if not ok:
+            reasons.append(f"tests: {msg}")
+
+    result = PreCheckResult(
+        passed=not reasons,
+        reasons=tuple(reasons),
+        details=details,
+    )
+    _emit_pre_check_outcome(package, target_version, result)
+    return result
+
+
 __all__ = [
     "AuthorizationMode",
     "AuthorizationConfig",
+    "LockAcquireError",
     "PUBLISH_PATTERNS",
+    "PreCheckResult",
     "UploadAuthorization",
     "acquire_for_upload",
+    "acquire_release_lock",
     "detect_publish_operation",
     "load_config",
     "format_required_string",
     "check_authorization",
     "describe_current_config",
+    "pre_publish_check",
+    "release_release_lock",
     "ReleaseAuthorizationGuard",
 ]
 

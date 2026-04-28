@@ -46,8 +46,14 @@ def _run_cli(*argv: str, cfg: Config | None = None) -> int:
 # ── Profile registry ───────────────────────────────────────────────
 
 
-def test_three_profiles_registered() -> None:
-    assert set(FEATURE_TOGGLE_PROFILES) == {"strict", "permissive", "dev"}
+def test_profiles_registered() -> None:
+    # 4.3.0 added lite/mainstream/paranoid + kept strict/permissive/dev
+    # for backward compat. ``permissive`` is now an alias for ``lite``
+    # but still appears in the registry so existing CLI/scripts work.
+    assert set(FEATURE_TOGGLE_PROFILES) == {
+        "strict", "permissive", "dev",
+        "lite", "mainstream", "paranoid",
+    }
 
 
 def test_list_profiles_descriptions() -> None:
@@ -55,6 +61,9 @@ def test_list_profiles_descriptions() -> None:
     assert "strict" in profiles
     assert "permissive" in profiles
     assert "dev" in profiles
+    assert "lite" in profiles
+    assert "mainstream" in profiles
+    assert "paranoid" in profiles
     # Descriptions are non-empty and reference DEFAULT_OFF_4_0_0 or count.
     for desc in profiles.values():
         assert len(desc) > 10
@@ -184,6 +193,10 @@ def test_cli_list_profiles_flag(
     assert "strict" in out
     assert "permissive" in out
     assert "dev" in out
+    # 4.3.0 additions
+    assert "lite" in out
+    assert "mainstream" in out
+    assert "paranoid" in out
 
 
 def test_cli_unknown_profile_exits_nonzero(

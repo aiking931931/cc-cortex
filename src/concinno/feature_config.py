@@ -66,7 +66,10 @@ Wiring status (2.7.0 — every feature in this table is now live):
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ── Fail-mode taxonomy (4.3.0 — Plan B Step 1) ──────────────────────
 #
@@ -166,7 +169,7 @@ def meta_enabled_default(name: str) -> bool:
 
 # ── Risk Metadata ─────────────────────────────────────────
 
-FEATURE_META: dict[str, dict] = {
+FEATURE_META: dict[str, dict[str, Any]] = {
     # ── Hard Gates ──
     "token_gate": {
         "category": "hard_gate",
@@ -2974,7 +2977,7 @@ def _severity_at_or_above(name: str, threshold: str) -> bool:
         return False
 
 
-def _audit_log_path():
+def _audit_log_path() -> Path:
     """Where high-severity feature mutations are recorded.
 
     Append-only, line-delimited; one record per mutation. Path is
@@ -3100,7 +3103,7 @@ def _merge_feature_meta(
         origin = "merged:" + "+".join(present)
     # Plugin origin includes the package name for GUI surfacing.
     if "plugin" in sources and "_plugin_pkg" in sources:
-        pkg = sources["_plugin_pkg"]  # type: ignore[assignment]
+        pkg = sources["_plugin_pkg"]
         if origin == "plugin":
             origin = f"plugin:{pkg}"
         else:
@@ -3205,7 +3208,7 @@ def iter_all_features_with_origin() -> list[tuple[str, dict[str, Any], str]]:
     return rows
 
 
-def list_features(lang: str = "en") -> list[dict]:
+def list_features(lang: str = "en") -> list[dict[str, Any]]:
     """List all features (shipped + user-registered) with current
     config values."""
     try:
@@ -3237,7 +3240,7 @@ def list_features(lang: str = "en") -> list[dict]:
     return result
 
 
-def get_feature(name: str, lang: str = "en") -> Optional[dict]:
+def get_feature(name: str, lang: str = "en") -> Optional[dict[str, Any]]:
     """Get feature info with full risk metadata."""
     meta = FEATURE_META.get(name)
     if not meta:
@@ -3275,7 +3278,7 @@ def get_feature(name: str, lang: str = "en") -> Optional[dict]:
 
 
 def _validate_numeric(
-    name: str, key: str, value: Any, param: dict, ptype: str,
+    name: str, key: str, value: Any, param: dict[str, Any], ptype: str,
 ) -> list[str]:
     """Validate int or float param. Returns warnings list."""
     expected = int if ptype == "int" else (int, float)
@@ -3304,7 +3307,7 @@ def _validate_numeric(
 
 
 def _validate_str_or_bool(
-    name: str, key: str, value: Any, param: dict, ptype: str,
+    name: str, key: str, value: Any, param: dict[str, Any], ptype: str,
 ) -> list[str]:
     """Validate str or bool param. Returns warnings or errors."""
     if ptype == "str":
@@ -3507,7 +3510,7 @@ def get_routing_policy(name: str) -> str:
     return policy if policy in ROUTING_POLICY_VALUES else "ziq_routed"
 
 
-def list_with_routing(lang: str = "en") -> list[dict]:
+def list_with_routing(lang: str = "en") -> list[dict[str, Any]]:
     """Like ``list_features`` but also includes effective ``routing_policy``."""
     features = list_features(lang=lang)
     for f in features:

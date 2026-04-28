@@ -7,6 +7,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-04-28 — Week 1 of 4-week ship cadence (Plan A/B/C foundation)
+
+Plan v1 4-week ship cadence (4.3.0 → 4.4.0 → 4.5.0 → 4.6.0) — Week 1
+foundation release landing security guard infrastructure (PolicyGate
+shared base + 2 concrete guards), profile fail-mode override schema,
+ZIQ outcome bus pub/sub, agent session-loop LLM driver Protocol,
+release coordination integration (release_lock + twine_pre_check), and
+the persona Track 2 cleanroom-port starter (Module A intent_router).
+
+### Added
+
+- **`concinno.security.policy_gate`** — Shared base class for all
+  security guards (pii / deserialize / circuit_breaker / rce_injection /
+  http_client / sql_injection across Weeks 1-4). Provides a 4-tier
+  fail-mode chain (`silent` / `warn` / `warn+log` / `hard_deny`),
+  profile-aware fail-mode override resolution, escape hatch via
+  `# CONCINNO_DISABLE:<reason>` source-line marker, JSON-line audit log
+  to `~/.concinno/audit/<guard>.jsonl` with 10 MB rotation, and a lazy
+  ZIQ outcome bus emit hook that gracefully degrades when the bus is
+  absent. Concrete guards subclass `PolicyGate` and implement `scan`;
+  the public entry point is `evaluate(payload)` returning a
+  `PolicyGateResult(decision, reason, fail_mode, escaped, audit_entry)`.
+  Exports: `PolicyGate`, `Finding`, `PolicyGateResult`, `FailMode`,
+  `Severity`, `Decision` from `concinno.security`.
+- **`concinno.security.pii_guard`** — Regex-based PII leak prevention
+  guard (subclass of `PolicyGate`). Detects 9 PII types: SSN (US),
+  credit card (Luhn-validated), email (RFC 5322 subset), phone (US +
+  E.164), IPv4, IPv6, API key prefixes (`sk-…`, `ghp_…`, `AKIA…`, …),
+  passport (US/EU patterns), driver license (state-aware optional).
+  Severity-mapped per detect type. Audit-log redaction masks the
+  middle of secrets (e.g. `sk-ant-***-XXXX`). False-positive rate
+  ≤2 % on 50-sample lorem-ipsum + code-snippet benchmark. ZIQ-tunable
+  `min_severity` (default `medium`) + `luhn_strict` (default `True`) +
+  `redact_chars` (default 4). Default-warn in `mainstream` profile,
+  hard-deny in `strict`/`paranoid`.
+- **`concinno.security.deserialize_guard`** — AST-scan guard detecting
+  unsafe deserialization (`pickle.load*`, `yaml.load` without
+  `SafeLoader`, `marshal.load*`, unsafe `shelve` open). Subclass of
+  `PolicyGate`. Module trust list configurable via
+  `~/.concinno/deserialize_trusted.json`. ZIQ outcome on detection.
+- **`concinno.ziq_outcome_bus`** — Pub/sub bus for ZIQ online-learning
+  signals. Producers (guards / autotuned modules) emit
+  `Outcome(tunable, value, reward, timestamp, metadata, source)`
+  events; consumers (e.g. `ZIQAutoTuner` FTRL) subscribe and update
+  posteriors. Threading-lock concurrent-safe single-process design,
+  per-tunable causal order preserved (last-emit-wins). Manual override
+  via `~/.concinno/ziq_pinned.json` — pinned values short-circuit
+  emit dispatch (user-locked values never auto-tuned). Hard-kill via
+  `CONCINNO_ZIQ_BUS_DISABLED=1` env. Exports: `Outcome`,
+  `ZIQOutcomeBus`, `ziq_emit`, `get_ziq_bus`, `is_ziq_bus_disabled`.
+  First production wiring: `escalation.escalate()` retry path emits
+  reward `1 / (1 + retries)` on tier success, `0.0` on tier failure
+  (1 of 19 tunables — Week 2 wires the remaining 18).
+- **`concinno.agent.session_loop` LLM driver Protocol** — Driver-
+  agnostic LLM dispatch layer for the typed single-agent session loop
+  shipped in 4.2.3. New `LLMDriver` Protocol (`@runtime_checkable`)
+  with `model_id`/`complete`/`acomplete` methods, frozen
+  `LLMResponse(text, tool_calls, usage, stop_reason, raw)` dataclass,
+  `register_driver` / `get_driver` / `list_drivers` /
+  `unregister_driver` / `DriverNotFoundError` registry, and a public
+  `run_session(loop, driver, *, user_message, ctx, max_rounds, system,
+  extra_messages, on_response, **driver_kwargs) -> LLMResponse` entry
+  point. Drivers may be supplied as instances or by registry name;
+  Anthropic is an optional dep (`pip install concinno[anthropic]`).
+  Reference driver in `examples/session_loop_anthropic_driver.py` —
+  `claude-opus-4-7[1m]` with tool-use round-trip.
+- **`concinno.release_authorization` release_lock + twine_pre_check** —
+  File-based atomic `~/.concinno/release_lock.json` lock with 4 h
+  auto-expiry. `acquire_release_lock(pkg, ver, session, host)` /
+  `release_release_lock(pkg)` honor `CONCINNO_RELEASE_LOCK_DISABLED=1`
+  env. New `pre_publish_check(target_version, package, dist_dir, …)
+  -> PreCheckResult(passed, reasons, details)` runs `twine check`,
+  PyPI registry HEAD probe (404 = ok to publish, 200 = version
+  taken), `pyproject.toml` ↔ `CHANGELOG.md` version sync, and an
+  optional pytest gate. **Never raises, never AskUsers** — honors
+  the permanent publish-auth opt-out directive (only ever returns an
+  advisory `PreCheckResult`; the caller decides). ZIQ outcome wired
+  for pre-check fail rate.
+- **`concinno.feature_config` profile fail_mode_overrides + permissive
+  alias** — `FEATURE_TOGGLE_PROFILES` schema gains
+  `fail_mode_overrides: dict[str, str]` per profile. Four shipping
+  profiles `lite` / `mainstream` / `strict` / `paranoid` populate
+  this map (e.g. `lite={destruction:hard_deny, butterfly:warn}`,
+  `paranoid={all:hard_deny except cosmetic}`). Validator enforces
+  fail-mode literal ∈ `{silent, warn, warn+log, hard_deny}`. New
+  public API `get_fail_mode(feature_name, profile)` returns the
+  resolved fail mode for a feature in a given profile.
+  Backward-compat: `permissive` profile name is now an alias for
+  `lite` (both load the same configuration; old names continue to
+  work for one minor cycle before deprecation warning).
+- **`concinno.feature_config FEATURE_META["pii_guard"]` +
+  `["deserialize_guard"]`** — New first-class entries. PII params:
+  `min_severity` / `luhn_strict` / `redact_chars`. Both ZIQ-tunable
+  and profile-fail-mode-aware.
+- **`concinno.persona.cognition.intent_router`** — Persona Track 2
+  cleanroom port Module A starter. New `IntentRouter` class with
+  `IntentRouteInput` / `IntentRouteOutput` frozen dataclasses,
+  `route(input) -> output` / `execute_background(tasks)` /
+  `build_conscious_context(...)` methods. Standalone library — not
+  yet wired to the paid `/v1/persona/{id}/turn` endpoint (Track 2
+  Step 2/3 in Weeks 2-3). Cleanroom port from PSYCHE TS spec
+  (`_AI_BRAIN/05_Planning/concinno-persona-track2-spec-2026-04-25.md`
+  §2.2 Module A) — no PSYCHE TS source imported, no transpilation;
+  Python written from contract description. Inherits
+  `concinno.agent.LLMDriver` injection. Death-command-list compliance
+  verified (zero forbidden tokens in source / tests / commit message).
+- **`concinno.memory_relief` NUCLEAR tier** (separate module work,
+  parallel to 4.3.0 Concinno main scope but landed in this cycle) —
+  `SystemPoolTagInformation` pool-tag diagnostic class,
+  `SystemCombinePhysicalMemoryInformation` page-combining flush
+  (Geoff Chappell reverse-engineered `MMPHYS_COMBINE_DRY_MIGRATION`
+  flag), `SERVICE_CYCLE_SAFELIST` tuple of services confirmed safe
+  to stop+restart mid-session for DLL/font cache eviction. Used by
+  `concinno-skills-memoria` 0.4.0 (separate sub-package release).
+
+### Fixed
+
+- **mypy `--strict` cleanup** — 7 errors fixed across 4 files (no
+  behavioral change):
+  - `security/ssrf_guard.py:515` — removed redundant
+    `cast(BlockReason, reason)`
+  - `security/permission_mode.py:843` — added generic param
+    `dict[str, Any]` to `PermissionDecisionReason.metadata`
+  - `agent/session_loop.py:391` / `:512` / `:786` — removed 3 unused
+    `# type: ignore` comments
+  - `security/deserialize_guard.py:284` — class-var override of
+    `PolicyGate` instance-var moved into `__init__` instance assignment
+  - `security/deserialize_guard.py:387` — removed unused
+    `# type: ignore`
+
+### Tests
+
+- 439 new tests across all Plan v1 Week 1 deliverables:
+  19 profile fail_mode_overrides + 33 policy_gate + 12 ziq_outcome_bus
+  + 167 pii_guard + 130 deserialize_guard + 11
+  release_authorization integration + 19 session_loop driver + 46
+  persona/cognition/intent_router. Full Concinno regression: 5 379
+  passed / 7 skipped / 5 xfailed. One system-load-sensitive
+  performance test (`test_real_system_cold_call_under_budget`)
+  surfaced a single flake during the 24 m concurrent-load full run;
+  re-validated PASS in 13.49 s isolation (60 s budget — plenty of
+  headroom). Not a real regression.
+
+### Notes
+
+- Plan v1 4-week roadmap (`pip-4-2-5-typed-lamport.md`):
+  W1 → 4.3.0 + Sancio 1.1 + persona 75 % (this release).
+  W2 → 4.4.0 + Sancio 1.2 + persona 78 % (ZIQ 18-tunable wire +
+  FieldRead v2 breadcrumbs + claude-mem read-rewrite).
+  W3 → 4.5.0 + Sancio 1.3 + persona 80 % demo-ready (GUI cleanup +
+  Tier-2 rollback + deer-flow MIT vendor + OASIS Apache 2.0 dep +
+  agent-framework MIT fork-track).
+  W4 → 4.6.0 + Sancio 2.0 + Perpetuo demo + USPTO file (rce + http
+  + sql guards + KILL-10 + Concinno Core marketing).
+- `breaking_change_warning = False` for 4.3.0 — purely additive
+  (new modules + new FEATURE_META rows + backward-compat profile
+  alias). Existing API surface unchanged.
+- One pre-existing carryover not addressed: 138 mypy `--strict`
+  errors in 39 files outside Week 1 scope (`proposal_guard`,
+  `equilibrium_guard`, `skill_router`, `handoff_validator`,
+  `persona/pinned_memories`, `persona/persona`). Tracked for
+  future weekly minor cycles.
+- Sancio runtime parallel ship: `projects/sancio-runtime` 1.1.0
+  (package name `persona-api`) — `sancio chat` REPL + Frontmatter
+  semantic-trigger Skill auto-discovery. See sancio-runtime
+  `CHANGELOG.md` for details.
+
 ## [4.2.5] - 2026-04-27 — release_authorization explicit default-OFF
 
 Same-day micro-patch closing a default-on regression in 4.2.4 and earlier.

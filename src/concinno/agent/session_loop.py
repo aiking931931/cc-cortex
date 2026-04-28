@@ -46,15 +46,35 @@ import time
 import types
 import typing
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, Literal, TypeVar, cast, get_type_hints
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    Literal,
+    Protocol,
+    TypeVar,
+    cast,
+    get_type_hints,
+    runtime_checkable,
+)
 
 __all__ = [
+    "DriverNotFoundError",
+    "LLMDriver",
+    "LLMResponse",
     "RetryPolicy",
     "RunContext",
     "SessionLoop",
+    "ToolCall",
     "ToolResult",
     "ToolSpec",
+    "get_driver",
+    "list_drivers",
+    "register_driver",
+    "run_session",
     "tool",
+    "unregister_driver",
 ]
 
 T_In = TypeVar("T_In")
@@ -368,7 +388,7 @@ class SessionLoop:
             if f.name in missing:
                 has_default = (
                     f.default is not dataclasses.MISSING
-                    or f.default_factory is not dataclasses.MISSING  # type: ignore[misc]
+                    or f.default_factory is not dataclasses.MISSING
                 )
                 if not has_default:
                     return None, (
@@ -489,7 +509,7 @@ class SessionLoop:
         delay = spec.retry.base_delay
         for attempt in range(1, spec.retry.max_retries + 1):
             try:
-                value = spec.fn(instance, ctx)  # type: ignore[arg-type]
+                value = spec.fn(instance, ctx)
                 return ToolResult(status="ok", value=value, attempt=attempt)
             except Exception as exc:
                 error_msg = f"{type(exc).__name__}: {exc}"
@@ -537,3 +557,402 @@ class SessionLoop:
         )
         ctx.step += 1
         return result
+
+
+# ---------------------------------------------------------------------------
+# LLM driver layer (4.3.0 — Week 1)
+# ---------------------------------------------------------------------------
+#
+# The :class:`LLMDriver` Protocol decouples ``SessionLoop`` from any
+# specific LLM SDK. Concrete drivers (Anthropic, OpenAI, vLLM, mock) live
+# *outside* this module — typically in ``examples/`` for reference impls
+# and in user code for production. The registry pattern lets callers
+# swap drivers by string name without re-importing, and the optional
+# ``ziq_emit`` hook exposes a single point for ZIQ outcome-bus wiring
+# without coupling this module to the bus implementation (W2 lands the
+# bus; W1 only exposes the surface).
+#
+# Design choices (per L0 鐵律 #6 DoD):
+#   * Switchable: drivers are pluggable via ``register_driver`` /
+#     by passing an instance directly to ``run_session``.
+#   * 3-layer: this section (L1) is the contract; drivers (L2) are
+#     concrete; ``examples/`` (L3) demonstrates real wiring.
+#   * Lazy-load: ``anthropic`` / ``openai`` are NOT imported here —
+#     drivers in ``examples/`` are the optional-dep boundary.
+#   * CP-optimal: registry over abstract base class — adding a driver
+#     is one ``register_driver`` call, no inheritance chain to manage.
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """Tool-call request emitted by an LLM driver.
+
+    :param id: Provider-assigned identifier used to correlate the call
+        with its result on the next round-trip (Anthropic uses
+        ``tool_use.id``; OpenAI uses ``tool_calls[i].id``).
+    :param name: Tool name; matches a :class:`ToolSpec.name` registered
+        on the :class:`SessionLoop`.
+    :param arguments: Already-parsed argument dict. Drivers are
+        responsible for JSON-decoding the provider payload before
+        constructing this; the loop assumes a dict and validates against
+        the ToolSpec ``input_type`` dataclass.
+    """
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LLMResponse:
+    """Provider-agnostic completion result.
+
+    Drivers normalise their SDK-specific response objects into this
+    shape so callers (tests, ``run_session``, harness code) never depend
+    on the underlying SDK. ``raw`` is preserved escape-hatch-style for
+    callers that need provider-specific fields (cache markers, log
+    probs, etc.) without forcing the loop to know about them.
+
+    :param text: Concatenated assistant text content. Empty string when
+        the response was tool-calls-only.
+    :param tool_calls: Zero or more :class:`ToolCall` requests. When
+        non-empty, the orchestrator dispatches each one to the
+        registered :class:`ToolSpec`.
+    :param usage: Token usage dict. Convention: ``input_tokens``,
+        ``output_tokens``, optional ``cache_read_input_tokens`` /
+        ``cache_creation_input_tokens``. Empty dict if unavailable.
+    :param stop_reason: Provider-normalised stop reason. Convention:
+        ``"end_turn"`` (terminal), ``"tool_use"`` (caller should
+        dispatch tools and continue), ``"max_tokens"``, ``"stop_sequence"``,
+        ``"error"``. Drivers should map their SDK-native value to one of
+        these; unknown strings are passed through verbatim.
+    :param raw: The raw provider response object (e.g. the
+        ``anthropic.types.Message`` instance). Opaque to the loop.
+    """
+
+    text: str = ""
+    tool_calls: tuple[ToolCall, ...] = ()
+    usage: dict[str, int] = field(default_factory=dict)
+    stop_reason: str = "end_turn"
+    raw: Any = None
+
+
+@runtime_checkable
+class LLMDriver(Protocol):
+    """Protocol for any LLM provider plugged into ``SessionLoop``.
+
+    Implementations must provide:
+
+      * ``model_id`` — opaque string identifying the model (used for
+        logging / ZIQ outcome partitioning).
+      * ``complete(messages, tools=None, **kwargs)`` — synchronous
+        completion. Returns :class:`LLMResponse`.
+      * ``acomplete(messages, tools=None, **kwargs)`` — async variant.
+        Returns an awaitable that resolves to :class:`LLMResponse`.
+        Drivers without native async MAY raise ``NotImplementedError``
+        and force callers to use ``complete``.
+
+    The ``messages`` argument is a list of ``{"role", "content"}`` dicts
+    using Anthropic-style structure (``role`` ∈ ``{"user", "assistant"}``,
+    ``content`` either a string or a list of typed blocks). Drivers
+    targeting OpenAI-shaped APIs are expected to translate internally.
+
+    The ``tools`` argument is the provider's tool-spec dict list (same
+    shape Anthropic / OpenAI accept) or ``None``. Use
+    :meth:`SessionLoop.tool_specs_for_llm` to derive these from the
+    registered :class:`ToolSpec` instances.
+    """
+
+    @property
+    def model_id(self) -> str: ...  # pragma: no cover
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse: ...  # pragma: no cover
+
+    def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> Awaitable[LLMResponse]: ...  # pragma: no cover
+
+
+# ---------------------------------------------------------------------------
+# Driver registry
+# ---------------------------------------------------------------------------
+
+
+DriverFactory = Callable[..., LLMDriver]
+_DRIVER_REGISTRY: dict[str, DriverFactory] = {}
+
+
+class DriverNotFoundError(KeyError):
+    """Raised by :func:`get_driver` when a name is not registered.
+
+    Subclasses ``KeyError`` so callers that already catch ``KeyError``
+    keep working, while new code can match the more specific type.
+    """
+
+
+def register_driver(name: str, factory: DriverFactory) -> None:
+    """Register a driver factory under ``name``.
+
+    The factory is any zero-or-more-arg callable returning an object
+    that satisfies the :class:`LLMDriver` Protocol. It is invoked
+    lazily by :func:`get_driver`, so importing optional SDKs can be
+    deferred to first use.
+
+    Re-registering an existing name silently overwrites — this is
+    intentional for test isolation (a fixture can ``register_driver``
+    a mock then restore the original on teardown).
+
+    :raises ValueError: If ``name`` is empty or not a string.
+    :raises TypeError: If ``factory`` is not callable.
+    """
+    if not isinstance(name, str) or not name:
+        raise ValueError("driver name must be a non-empty string")
+    if not callable(factory):
+        raise TypeError(
+            f"factory for driver '{name}' must be callable, got "
+            f"{type(factory).__name__}"
+        )
+    _DRIVER_REGISTRY[name] = factory
+
+
+def unregister_driver(name: str) -> None:
+    """Remove a driver from the registry. No-op if absent."""
+    _DRIVER_REGISTRY.pop(name, None)
+
+
+def get_driver(name: str, /, *args: Any, **kwargs: Any) -> LLMDriver:
+    """Instantiate the driver registered under ``name``.
+
+    Forwards ``*args`` and ``**kwargs`` to the factory, so drivers that
+    need configuration (api_key, base_url, model_id override) can
+    accept them at construction time.
+
+    :raises DriverNotFoundError: If ``name`` is not registered.
+    """
+    factory = _DRIVER_REGISTRY.get(name)
+    if factory is None:
+        available = sorted(_DRIVER_REGISTRY)
+        raise DriverNotFoundError(
+            f"no driver registered under '{name}'; available: "
+            + (", ".join(available) if available else "(none)")
+        )
+    return factory(*args, **kwargs)
+
+
+def list_drivers() -> list[str]:
+    """Return the names of currently-registered drivers, sorted."""
+    return sorted(_DRIVER_REGISTRY)
+
+
+# ---------------------------------------------------------------------------
+# run_session orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _resolve_driver(driver: LLMDriver | str) -> LLMDriver:
+    """Return ``driver`` if already an instance, else look it up."""
+    if isinstance(driver, str):
+        return get_driver(driver)
+    return driver
+
+
+def _tool_specs_for_llm(loop: SessionLoop) -> list[dict[str, Any]]:
+    """Render the loop's tools into Anthropic-shaped tool specs.
+
+    Each :class:`ToolSpec` becomes one entry with ``name``,
+    ``description``, and an ``input_schema`` derived from the input
+    dataclass fields. The schema is a minimal JSON-schema dict (one
+    level of ``type`` per field, no ``$ref`` resolution); drivers that
+    need richer schemas should call back into :func:`dataclasses.fields`
+    directly.
+    """
+    specs: list[dict[str, Any]] = []
+    for t in loop.tools:
+        properties: dict[str, dict[str, Any]] = {}
+        required: list[str] = []
+        for f in dataclasses.fields(t.input_type):
+            json_type = _python_to_json_type(f.type)
+            properties[f.name] = {"type": json_type}
+            has_default = (
+                f.default is not dataclasses.MISSING
+                or f.default_factory is not dataclasses.MISSING
+            )
+            if not has_default:
+                required.append(f.name)
+        specs.append(
+            {
+                "name": t.name,
+                "description": t.description.strip() or t.name,
+                "input_schema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            }
+        )
+    return specs
+
+
+_PYTHON_TO_JSON_TYPES: dict[type, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "array",
+    dict: "object",
+}
+
+
+def _python_to_json_type(hint: Any) -> str:
+    """Best-effort Python type → JSON-schema type-name mapping.
+
+    Returns ``"string"`` for anything we cannot statically map — this
+    is permissive on purpose. The dataclass constructor remains the
+    final type gate (see :meth:`SessionLoop._validate_input`).
+    """
+    if isinstance(hint, type):
+        return _PYTHON_TO_JSON_TYPES.get(hint, "string")
+    origin = typing.get_origin(hint)
+    if origin is list or origin is tuple or origin is set:
+        return "array"
+    if origin is dict:
+        return "object"
+    return "string"
+
+
+def _format_tool_result_for_llm(
+    call: ToolCall, result: ToolResult[Any]
+) -> dict[str, Any]:
+    """Render a :class:`ToolResult` into an Anthropic-style tool_result block.
+
+    The ``content`` is a string for compatibility with the widest set
+    of providers; structured payloads can be re-serialised by the
+    driver if needed.
+    """
+    if result.status == "ok":
+        body = repr(result.value)
+        is_error = False
+    else:
+        body = result.error or f"tool failed (status={result.status})"
+        is_error = True
+    return {
+        "type": "tool_result",
+        "tool_use_id": call.id,
+        "content": body,
+        "is_error": is_error,
+    }
+
+
+def run_session(
+    loop: SessionLoop,
+    driver: LLMDriver | str,
+    *,
+    user_message: str,
+    ctx: RunContext | None = None,
+    max_rounds: int = 10,
+    system: str | None = None,
+    extra_messages: list[dict[str, Any]] | None = None,
+    on_response: Callable[[LLMResponse], None] | None = None,
+    **driver_kwargs: Any,
+) -> LLMResponse:
+    """Run a multi-round LLM ↔ tool loop until the model stops calling tools.
+
+    On each round:
+
+    1. Build the message list (system prompt + extras + history).
+    2. Call ``driver.complete(messages, tools=...)``.
+    3. If ``stop_reason != "tool_use"`` → return the response.
+    4. Otherwise, dispatch every tool_call through :meth:`SessionLoop.step`,
+       append the assistant turn + ``tool_result`` blocks to history,
+       and continue.
+
+    The ``ctx`` is mutated in place: each tool dispatch pushes a record
+    onto ``ctx.history`` (uniform with the existing
+    :meth:`SessionLoop.step` contract). ``max_rounds`` caps the loop —
+    exhaustion returns the last response with ``stop_reason="max_rounds"``.
+
+    :param loop: The :class:`SessionLoop` whose tools the driver may call.
+    :param driver: An :class:`LLMDriver` instance OR the registered name
+        of one (string lookup via :func:`get_driver`).
+    :param user_message: The initial user turn.
+    :param ctx: Mutable :class:`RunContext`. A fresh one is created if
+        ``None``.
+    :param max_rounds: Hard cap on round-trips; protects against
+        runaway tool-use loops. ``1`` disables tool-loop iteration
+        (returns after the first response unconditionally).
+    :param system: Optional system prompt override; defaults to
+        :meth:`SessionLoop.render_system_prompt`.
+    :param extra_messages: Pre-pended message turns (e.g. few-shot
+        examples). Inserted after ``user_message`` is *not* yet wrapped
+        — these go BEFORE the user turn.
+    :param on_response: Optional callback fired on every LLM response;
+        useful for streaming usage telemetry to a ZIQ outcome bus
+        (W2 wiring point).
+    :param driver_kwargs: Forwarded to ``driver.complete`` on every call.
+    """
+    if ctx is None:
+        ctx = RunContext()
+    resolved = _resolve_driver(driver)
+    if max_rounds < 1:
+        raise ValueError(f"max_rounds must be >= 1, got {max_rounds!r}")
+
+    rendered_system = system if system is not None else loop.render_system_prompt()
+    tool_specs = _tool_specs_for_llm(loop) if loop.tools else None
+
+    messages: list[dict[str, Any]] = []
+    if extra_messages:
+        messages.extend(extra_messages)
+    messages.append({"role": "user", "content": user_message})
+
+    last_response: LLMResponse = LLMResponse(stop_reason="error")
+    for _round in range(max_rounds):
+        call_kwargs = dict(driver_kwargs)
+        if rendered_system:
+            call_kwargs.setdefault("system", rendered_system)
+        response = resolved.complete(messages, tools=tool_specs, **call_kwargs)
+        last_response = response
+        if on_response is not None:
+            on_response(response)
+
+        if response.stop_reason != "tool_use" or not response.tool_calls:
+            return response
+
+        # Append assistant turn (text + tool_use blocks) so the next
+        # round sees what the model just emitted.
+        assistant_blocks: list[dict[str, Any]] = []
+        if response.text:
+            assistant_blocks.append({"type": "text", "text": response.text})
+        for call in response.tool_calls:
+            assistant_blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": call.id,
+                    "name": call.name,
+                    "input": call.arguments,
+                }
+            )
+        messages.append({"role": "assistant", "content": assistant_blocks})
+
+        # Dispatch every tool call and gather user-side tool_result blocks.
+        result_blocks: list[dict[str, Any]] = []
+        for call in response.tool_calls:
+            result = loop.step(call.name, call.arguments, ctx)
+            result_blocks.append(_format_tool_result_for_llm(call, result))
+        messages.append({"role": "user", "content": result_blocks})
+
+    # max_rounds exhausted — return last response with overridden stop_reason.
+    return LLMResponse(
+        text=last_response.text,
+        tool_calls=last_response.tool_calls,
+        usage=last_response.usage,
+        stop_reason="max_rounds",
+        raw=last_response.raw,
+    )

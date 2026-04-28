@@ -104,10 +104,38 @@ MEMORY_LIST_COMMAND = {
 
 # SYSTEM_INFORMATION_CLASS constants (only the ones we use).
 _SYSTEM_PERFORMANCE_INFORMATION = 2
+_SYSTEM_POOL_TAG_INFORMATION = 0x16  # 22 — NUCLEAR driver-leak diagnostic
 _SYSTEM_MEMORY_LIST_INFORMATION = 0x50
+_SYSTEM_COMBINE_PHYSICAL_MEMORY_INFORMATION = 0x82  # NUCLEAR page-combining flush
 
-# NTSTATUS success.
+# NTSTATUS values we care about.
 _STATUS_SUCCESS = 0
+_STATUS_INFO_LENGTH_MISMATCH = 0xC0000004 - 0x100000000
+_STATUS_INVALID_INFO_CLASS = 0xC0000003 - 0x100000000
+
+# NUCLEAR: page-combining flags for SystemCombinePhysicalMemoryInformation.
+# Source: Geoff Chappell — MEMORY_COMBINE_INFORMATION reverse-engineering
+# https://geoffchappell.com/studies/windows/km/ntoskrnl/api/ex/sysinfo/memory_combine.htm
+MMPHYS_COMBINE_DRY_MIGRATION = 0x4
+
+# NUCLEAR: services known safe to stop+start mid-session for DLL/font
+# cache eviction. Pulled from Opus 4.7 deep-research report 2026-04-28
+# (Memoria 0.4.0 task af4fe4) — every entry has been confirmed restartable
+# without triggering BSOD or losing the user's session. The list is
+# deliberately short: the cost of a wrong entry is system instability,
+# the cost of an extra entry not on the list is ~50 MB of unreleased
+# DLL/font cache, so we err on conservative.
+SERVICE_CYCLE_SAFELIST: tuple[str, ...] = (
+    "Themes",          # UxTheme cache — UI re-styles in <300ms
+    "FontCache",       # font working set
+    "FontCache3.0.0.0",
+    "DPS",             # Diagnostic Policy Service
+    # Intentionally NOT included: csrss, dwm, winlogon, LSM, RpcSs,
+    # DcomLaunch, Power, EventLog — restart = bluescreen or auto-reboot.
+    # SysMain (SuperFetch) handled separately by cycle_superfetch().
+    # WSearch only when idle — handled separately because indexing
+    # interruption costs more than the cache it frees.
+)
 
 
 # ── Errors ─────────────────────────────────────────────────────────────
@@ -583,6 +611,269 @@ def empty_all_working_sets_via_nt() -> None:
     in within seconds, so this is best paired with the standby purge
     that follows it (otherwise you just churn the standby list)."""
     _trigger_memory_command(MEMORY_EMPTY_WORKING_SETS)
+
+
+# ── NUCLEAR tier helpers (Memoria 0.4.0) ───────────────────────────────
+
+
+@dataclass(frozen=True)
+class PoolTagEntry:
+    """One row from ``NtQuerySystemInformation(SystemPoolTagInformation)``.
+
+    ``tag`` is the 4-byte ASCII allocation tag (e.g. ``"Stdq"`` for
+    ``netio.sys`` networking allocations). ``nonpaged_used_bytes`` is the
+    most actionable column for driver-leak hunting; the paged columns
+    are reported for completeness. Tag → likely-driver mapping lives in
+    a separate static lookup so this primitive stays string-agnostic."""
+
+    tag: str
+    paged_allocs: int
+    paged_frees: int
+    paged_used_bytes: int
+    nonpaged_allocs: int
+    nonpaged_frees: int
+    nonpaged_used_bytes: int
+
+
+class _SYSTEM_POOLTAG(ctypes.Structure):
+    _fields_ = [
+        ("Tag", ctypes.c_ubyte * 4),
+        ("PagedAllocs", ctypes.wintypes.ULONG),
+        ("PagedFrees", ctypes.wintypes.ULONG),
+        ("PagedUsed", ctypes.c_size_t),
+        ("NonPagedAllocs", ctypes.wintypes.ULONG),
+        ("NonPagedFrees", ctypes.wintypes.ULONG),
+        ("NonPagedUsed", ctypes.c_size_t),
+    ]
+
+
+def query_pool_tags() -> list[PoolTagEntry]:
+    """Read every kernel pool allocation tag via the same syscall
+    ``poolmon.exe`` uses internally. Returns empty list on any failure
+    (non-Windows, no SeDebugPrivilege, hardened build).
+
+    Used by NUCLEAR tier's pre-flight driver-leak diagnostic to detect
+    "RAM consumed but no big app open" cases that no flush can fix —
+    the only honest cure is to update the buggy driver or reboot. By
+    surfacing the leak signature ("`Stdq` tag grew 8.2 GB since boot"),
+    the user understands why Memoria can't reclaim it; otherwise NUCLEAR
+    looks like it failed when actually the OS is leaking.
+
+    Privilege: typically requires ``SeDebugPrivilege``. We fall back
+    silently to an empty list when denied — caller treats that as
+    "diagnostic unavailable", never "no leaks present"."""
+    if not _IS_WINDOWS:
+        return []
+    try:
+        ntdll = ctypes.windll.ntdll  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return []
+    # Header is one ULONG count followed by SYSTEM_POOLTAG[Count].
+    buf_size = 256 * 1024
+    return_len = ctypes.wintypes.ULONG(0)
+    for _ in range(8):
+        buf = (ctypes.c_ubyte * buf_size)()
+        status = ntdll.NtQuerySystemInformation(
+            _SYSTEM_POOL_TAG_INFORMATION,
+            buf, buf_size, ctypes.byref(return_len),
+        )
+        if status == _STATUS_SUCCESS:
+            break
+        if status & 0xFFFFFFFF == _STATUS_INFO_LENGTH_MISMATCH & 0xFFFFFFFF:
+            buf_size = max(int(return_len.value) + 64 * 1024, buf_size * 2)
+            continue
+        logger.debug(
+            "NtQuerySystemInformation(SystemPoolTagInformation) "
+            "returned 0x%08x; pool-tag diagnostic unavailable",
+            status & 0xFFFFFFFF,
+        )
+        return []
+    else:
+        return []
+    base = ctypes.addressof(buf)
+    count = ctypes.cast(base, ctypes.POINTER(ctypes.wintypes.ULONG))[0]
+    pool_tag_size = ctypes.sizeof(_SYSTEM_POOLTAG)
+    array_base = base + ctypes.sizeof(ctypes.wintypes.ULONG)
+    out: list[PoolTagEntry] = []
+    for i in range(count):
+        try:
+            entry = _SYSTEM_POOLTAG.from_address(array_base + i * pool_tag_size)
+        except (ValueError, OSError):
+            break
+        tag_bytes = bytes(entry.Tag).rstrip(b"\x00")
+        try:
+            tag_str = tag_bytes.decode("ascii", errors="replace").strip()
+        except Exception:
+            tag_str = ""
+        if not tag_str:
+            continue
+        out.append(PoolTagEntry(
+            tag=tag_str,
+            paged_allocs=int(entry.PagedAllocs),
+            paged_frees=int(entry.PagedFrees),
+            paged_used_bytes=int(entry.PagedUsed),
+            nonpaged_allocs=int(entry.NonPagedAllocs),
+            nonpaged_frees=int(entry.NonPagedFrees),
+            nonpaged_used_bytes=int(entry.NonPagedUsed),
+        ))
+    out.sort(key=lambda e: -(e.nonpaged_used_bytes + e.paged_used_bytes))
+    return out
+
+
+class _MEMORY_COMBINE_INFORMATION_EX(ctypes.Structure):
+    """Layout per Geoff Chappell's reverse-engineering reference. Field
+    sizes match Windows 10+ 64-bit kernel; older Win10 builds may not
+    accept this class at all (we feature-detect via NTSTATUS)."""
+
+    _fields_ = [
+        ("Handle", ctypes.c_void_p),
+        ("PagesCombined", ctypes.c_size_t),
+        ("Flags", ctypes.wintypes.ULONG),
+    ]
+
+
+def purge_combined_memory_list() -> int:
+    """Trigger one page-combining defrag pass. Returns the number of
+    pages combined (best-effort) or 0 when the API is unavailable on
+    this build.
+
+    Wraps ``NtSetSystemInformation(SystemCombinePhysicalMemoryInformation,
+    &info, sizeof)`` with ``Flags=MMPHYS_COMBINE_DRY_MIGRATION``. Class
+    ``0x82`` per Geoff Chappell. **Some Win10 24H2 builds disable this
+    class** — we feature-detect by NTSTATUS and treat as "unavailable"
+    (caller must not crash on zero return)."""
+    _require_windows()
+    if not is_admin():
+        raise PrivilegeError(
+            "purge_combined_memory_list requires admin token"
+        )
+    if not _enable_privilege(SE_PROFILE_SINGLE_PROCESS_NAME):
+        raise PrivilegeError(
+            "purge_combined_memory_list requires "
+            "SeProfileSingleProcessPrivilege"
+        )
+    ntdll = ctypes.windll.ntdll  # type: ignore[attr-defined]
+    info = _MEMORY_COMBINE_INFORMATION_EX()
+    info.Handle = None
+    info.PagesCombined = 0
+    info.Flags = MMPHYS_COMBINE_DRY_MIGRATION
+    status = ntdll.NtSetSystemInformation(
+        _SYSTEM_COMBINE_PHYSICAL_MEMORY_INFORMATION,
+        ctypes.byref(info), ctypes.sizeof(info),
+    )
+    if status != _STATUS_SUCCESS:
+        # STATUS_INVALID_INFO_CLASS / STATUS_NOT_IMPLEMENTED: build
+        # disabled the class. Don't raise — log and return 0 so the
+        # NUCLEAR sequence skips this stage cleanly.
+        logger.info(
+            "page-combining flush unavailable (NTSTATUS 0x%08x); "
+            "skipping — not all Win10/11 builds expose class 0x82",
+            status & 0xFFFFFFFF,
+        )
+        return 0
+    return int(info.PagesCombined)
+
+
+def cycle_service(
+    name: str,
+    *,
+    timeout_seconds: float = 10.0,
+    settle_seconds: float = 0.3,
+) -> tuple[bool, str]:
+    """Stop a Windows service then restart it. Used by NUCLEAR to evict
+    DLL/font cache held in svchost session pool. Returns
+    ``(ok, message)``. ``ok=False`` on any failure including missing
+    privilege; never raises so the NUCLEAR sequence never aborts on
+    one bad service.
+
+    Uses ``sc.exe`` rather than the ``win32service`` Python binding so
+    Memoria has zero pywin32 runtime dependency on a fresh install.
+    Both invocations are short-lived subprocesses; total wall-clock
+    typically 800ms - 2s."""
+    if not _IS_WINDOWS:
+        return False, "non-windows"
+    if not is_admin():
+        return False, "needs_admin"
+    if not name or any(c in name for c in (" ", '"', "'", "\\", "/")):
+        # Hard reject malformed names — never let an attacker-controlled
+        # service name reach sc.exe.
+        return False, "invalid_name"
+    if name not in SERVICE_CYCLE_SAFELIST and name != "SysMain":
+        return False, f"refused: {name!r} not on safelist"
+    import subprocess
+    import time as _time
+    try:
+        subprocess.run(
+            ["sc", "stop", name],
+            capture_output=True, text=True,
+            timeout=timeout_seconds,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return False, "stop timeout"
+    except OSError as exc:
+        return False, f"stop spawn failed: {exc}"
+    # sc returns non-zero when service was already stopped (1062). That's
+    # fine — proceed to start so we end in the desired "running" state.
+    _time.sleep(max(0.0, settle_seconds))
+    try:
+        start = subprocess.run(
+            ["sc", "start", name],
+            capture_output=True, text=True,
+            timeout=timeout_seconds,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return False, "start timeout"
+    except OSError as exc:
+        return False, f"start spawn failed: {exc}"
+    if start.returncode != 0:
+        return False, f"start exit={start.returncode}: {start.stderr[:200].strip()}"
+    return True, "cycled"
+
+
+def cycle_superfetch(*, timeout_seconds: float = 10.0) -> tuple[bool, str]:
+    """Cycle the SuperFetch / SysMain service to evict its prefetched
+    standby pages. Same wall-clock and risk profile as
+    :func:`cycle_service` but separated so callers can opt in/out
+    independently — SuperFetch shed has the largest single reclaim
+    (1-3 GB typical) but the next app launch may be slower for a few
+    minutes until SysMain re-warms its prefetch heuristics."""
+    return cycle_service(
+        "SysMain",
+        timeout_seconds=timeout_seconds,
+        settle_seconds=2.0,
+    )
+
+
+def shutdown_wsl(*, timeout_seconds: float = 30.0) -> tuple[bool, str]:
+    """Run ``wsl --shutdown`` to release the Hyper-V vmmem balloon that
+    Docker Desktop / WSL2 keep holding after containers stop. Returns
+    ``(ok, message)``. Opt-in only at the engine layer because it
+    interrupts any running dev container — but for users who just
+    closed Docker and want their RAM back, it is the only user-mode
+    cure for the leaked vmmem allocation."""
+    if not _IS_WINDOWS:
+        return False, "non-windows"
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["wsl", "--shutdown"],
+            capture_output=True, text=True,
+            timeout=timeout_seconds,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except FileNotFoundError:
+        return False, "wsl not installed"
+    except subprocess.TimeoutExpired:
+        return False, "timeout"
+    except OSError as exc:
+        return False, f"spawn failed: {exc}"
+    if result.returncode != 0:
+        return False, (
+            f"exit={result.returncode}: {result.stderr[:200].strip()}"
+        )
+    return True, "wsl shutdown"
 
 
 __all__ = [
