@@ -143,13 +143,31 @@ def test_smart_mode_fresh_prior_falls_through_to_canonical_gate(
 def test_smart_mode_clears_threshold_short_circuits(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Lower the autonomy threshold so the fresh-prior smart decision
+    """Lower the autonomy threshold so a trained-prior smart decision
     auto-proceeds — confirms the layer wires through cleanly when the
-    posterior crosses."""
-    # Threshold ~0 ⇒ even a ftrl_proceed_prob of 0.5 (Jeffreys) clears
-    # for smart, so should_ask=False on first call.
+    posterior crosses.
+
+    Concinno 4.5.0 added a ``smart`` cold-start safety override (R+B+G
+    W2 verdict #2): a bucket with **no** FTRL observations always
+    returns ``should_ask=True`` regardless of threshold so a 50/50
+    Jeffreys coin-flip cannot authorise an irreversible action on the
+    very first call. To pin the threshold-clears-posterior wiring
+    independent of that safety override, this test seeds a
+    non-cold-start FTRL state (alpha=beta=2.0, equivalent to Jeffreys
+    plus one observed proceed and one observed ask) for the bucket the
+    integration layer reads — ``tunable:release_authorization`` — and
+    persists it before invoking the gate. The test therefore exercises
+    "threshold knob lowers the ask-bar on a trained bucket", not
+    "first-call routing on a fresh prior".
+    """
     monkeypatch.setenv(am._THRESHOLD_ENV, "0.001")
-    am.save_config(am.ApprovalConfig(mode=am.ApprovalMode.SMART))
+    bucket = am._bucket_key(am.BLAST_RADIUS_HIGH, "release_authorization")
+    am.save_config(
+        am.ApprovalConfig(
+            mode=am.ApprovalMode.SMART,
+            ftrl={bucket: am.ApprovalState(alpha=2.0, beta=2.0)},
+        )
+    )
     allowed, reason = ra.check_authorization(
         "twine_upload",
         "concinno",
@@ -164,9 +182,23 @@ def test_smart_mode_clears_threshold_short_circuits(
 def test_smart_mode_short_circuit_records_proceed(
     fake_home: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When smart mode auto-proceeds, the FTRL posterior must move."""
+    """When smart mode auto-proceeds, the FTRL posterior must move.
+
+    Mirrors :func:`test_smart_mode_clears_threshold_short_circuits`'s
+    cold-start workaround — seed a trained prior (alpha=beta=2.0) so
+    the threshold-clearance path is exercised rather than the 4.5.0
+    cold-start safety override. After the auto-proceed records one
+    additional ``proceed=True``, the posterior advances from
+    ``alpha=2.0`` to ``alpha=3.0`` (Beta-Bernoulli increment).
+    """
     monkeypatch.setenv(am._THRESHOLD_ENV, "0.001")
-    am.save_config(am.ApprovalConfig(mode=am.ApprovalMode.SMART))
+    bucket = am._bucket_key(am.BLAST_RADIUS_HIGH, "release_authorization")
+    am.save_config(
+        am.ApprovalConfig(
+            mode=am.ApprovalMode.SMART,
+            ftrl={bucket: am.ApprovalState(alpha=2.0, beta=2.0)},
+        )
+    )
     ra.check_authorization(
         "twine_upload",
         "concinno",
@@ -174,9 +206,8 @@ def test_smart_mode_short_circuit_records_proceed(
         transcript_text="",
         config=_enabled_cfg(),
     )
-    bucket = am._bucket_key(am.BLAST_RADIUS_HIGH, "release_authorization")
     cfg = am.load_config()
-    assert cfg.ftrl[bucket].alpha == pytest.approx(2.0)
+    assert cfg.ftrl[bucket].alpha == pytest.approx(3.0)
 
 
 # ── Layering precedence ─────────────────────────────────────────────
