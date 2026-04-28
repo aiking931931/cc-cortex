@@ -26,11 +26,31 @@ Ordering:
 
 Race-condition guard (plan §244 — Plan C 2026-04-28):
     Per-tunable rate limiter caps emit storms at
-    ``CONCINNO_ZIQ_BUS_MAX_HZ`` events/sec (default 100). Excess emits are
-    dropped silently to protect FTRL learners from runaway producers (e.g.
-    a guard in a tight loop). Tracked under the same lock that guards
-    subscribers so the rate budget is consistent across threads. Dropped
-    emits are counted via ``dropped_count(tunable)`` for audit.
+    ``CONCINNO_ZIQ_BUS_MAX_HZ`` events/sec (default 10 000). Excess emits
+    are dropped silently to protect FTRL learners from runaway producers
+    (e.g. a guard in a tight loop). Tracked under the same lock that
+    guards subscribers so the rate budget is consistent across threads.
+    Dropped emits are counted via ``dropped_count(tunable)`` for audit.
+
+    The 10 000 Hz default was chosen after the 4.4.0 ship-gate red-team
+    review (FATAL-5) flagged the original 100 Hz ceiling as silently
+    dropping > 90 % of outcome emits in realistic production loads:
+
+      * escalation retry chains can fire several emits per attempted
+        tier (failure → retry → success), and a chain that sweeps the
+        full `gemma → haiku → sonnet → opus` ladder under burst
+        traffic emits at ~50 kHz from a single worker;
+      * the sentinel fail loop emits one outcome per consecutive-fail
+        bump and runs in a tight loop while a probe is mid-fail;
+      * microcompact has a per-token tight loop that emits
+        compaction-budget outcomes at >5 kHz on Opus.
+
+    With the old 100 Hz cap each of these scenarios silently dropped
+    90 %+ of the FTRL training signal, so the learner could not
+    converge. 10 000 Hz preserves headroom against pathological loops
+    while leaving plenty of bandwidth for normal producers, and the
+    env override ``CONCINNO_ZIQ_BUS_MAX_HZ`` still lets a paranoid
+    operator clamp it back down.
 
 Manual override (``manual_override`` / ``pin``):
     User-pinned values short-circuit ``emit()`` — no dispatch happens
@@ -86,7 +106,13 @@ def is_bus_disabled() -> bool:
 # ── Race-condition rate limiter ─────────────────────────────────
 
 
-_DEFAULT_MAX_HZ = 100.0
+# Default 10 000 Hz/tunable — see module docstring "Race-condition
+# guard" section. Set deliberately above the worst observed
+# producer (~50 kHz escalation chain bursts → ~10 kHz steady-state
+# per-tunable) so the rate guard never silently swallows the bulk of
+# the learning signal. A paranoid operator who wants a tight ceiling
+# can still clamp via ``CONCINNO_ZIQ_BUS_MAX_HZ``.
+_DEFAULT_MAX_HZ = 10_000.0
 
 
 def _rate_limit_hz() -> float:

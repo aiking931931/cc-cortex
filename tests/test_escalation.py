@@ -696,3 +696,250 @@ def test_gemma_http_client_lazy_built(
         result = esc.escalate(messages, force_tier="gemma")
         assert result.final.text == "lazy built"
         ctor.assert_called_once()
+
+
+# ══════════════════════════════════════════════════════════════
+#  CircuitBreakerGuard integration (4.4.0 ship-fix FATAL-3)
+# ══════════════════════════════════════════════════════════════
+#
+# These tests prove the opt-in Hystrix-grade guard:
+#   * stays out of the way when no guard passed and the FEATURE_META
+#     gate is OFF (default 4.0.0 baseline) — escalator behaviour is
+#     bit-identical to the legacy file-backed breaker;
+#   * trips the new guard on observed failures (mirrored from the
+#     legacy breaker so both layers stay in sync);
+#   * denies further attempts to that tier while the guard is OPEN —
+#     the escalator falls through to the next tier exactly as if the
+#     legacy breaker had tripped;
+#   * shares state across LLMEscalator instances when the same guard
+#     is passed in (the share_state_with contract for cross-tier /
+#     cross-escalator state convergence);
+#   * does not affect retry semantics on its own.
+
+
+def _make_cb_guard(**kw: Any) -> Any:
+    """Tiny helper — builds a CircuitBreakerGuard with defaults that
+    keep the rate-limit window out of the way (we only want to
+    exercise the breaker state machine in these tests)."""
+    from concinno.security.circuit_breaker_guard import CircuitBreakerGuard
+
+    kw.setdefault("max_calls", 0)  # disable rate limit
+    kw.setdefault("failure_threshold", 2)
+    kw.setdefault("cooldown_s", 60.0)
+    return CircuitBreakerGuard(**kw)
+
+
+def test_cb_guard_opt_in_does_not_change_happy_path(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """Guard wired in but nothing fails → escalator behaves as before."""
+    guard = _make_cb_guard()
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(_mk_httpx_response("ok")),
+        anthropic_client=_mk_anth_client(),
+        circuit_breaker_guard=guard,
+    )
+    result = esc.escalate(messages)
+    assert result.final.tier == "gemma"
+    assert result.final.text == "ok"
+    # Guard saw one success report → consecutive_failures stays 0.
+    snap = guard.snapshot("escalation.tier.gemma")
+    assert snap.consecutive_failures == 0
+
+
+def test_cb_guard_records_failure_when_tier_raises(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """A raised exception from a tier mirrors into the guard."""
+    guard = _make_cb_guard(failure_threshold=10)  # don't trip yet
+    http = MagicMock()
+    http.post.side_effect = httpx.ConnectError("down")
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=http,
+        anthropic_client=_mk_anth_client(_mk_anth_response("haiku saved")),
+        circuit_breaker_guard=guard,
+        max_retries_per_tier=0,
+    )
+    result = esc.escalate(messages)
+    assert result.final.tier == "haiku"  # gemma fell through
+    snap = guard.snapshot("escalation.tier.gemma")
+    assert snap.consecutive_failures == 1
+
+
+def test_cb_guard_open_state_skips_tier(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """Once the guard trips OPEN for a tier, escalator skips that tier."""
+    guard = _make_cb_guard(failure_threshold=2, cooldown_s=3600.0)
+    http = MagicMock()
+    http.post.side_effect = httpx.ConnectError("down")
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=http,
+        anthropic_client=_mk_anth_client(_mk_anth_response("haiku")),
+        circuit_breaker_guard=guard,
+        max_retries_per_tier=0,
+        circuit_threshold=99,  # legacy breaker stays closed
+    )
+    # Two failures trip the guard for gemma.
+    esc.escalate(messages)
+    esc.escalate(messages)
+    snap = guard.snapshot("escalation.tier.gemma")
+    from concinno.security.circuit_breaker_guard import CircuitState
+    assert snap.state == CircuitState.OPEN
+    # Third call: gemma denied by guard pre-call probe → we never call
+    # the http client this time.
+    http.post.reset_mock()
+    result = esc.escalate(messages)
+    assert result.final.tier == "haiku"
+    http.post.assert_not_called()
+
+
+def test_cb_guard_share_state_across_escalators(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """Two escalators sharing one guard converge on the same state."""
+    guard = _make_cb_guard(failure_threshold=2, cooldown_s=3600.0)
+
+    def _new(name: str) -> LLMEscalator:
+        return LLMEscalator(
+            cache_dir=str(tmp_path / name),
+            http_client=_mk_http_client(),
+            anthropic_client=_mk_anth_client(),
+            circuit_breaker_guard=guard,
+            max_retries_per_tier=0,
+            circuit_threshold=99,
+        )
+
+    esc_a = _new("a")
+    esc_b = _new("b")
+    # Failure on esc_a should be visible to esc_b through the guard.
+    http_fail = MagicMock()
+    http_fail.post.side_effect = httpx.ConnectError("down")
+    esc_a._http_client = http_fail
+    esc_a.escalate(messages)
+    esc_a.escalate(messages)
+    snap = guard.snapshot("escalation.tier.gemma")
+    from concinno.security.circuit_breaker_guard import CircuitState
+    assert snap.state == CircuitState.OPEN
+    # esc_b sees the same OPEN gemma → falls through to haiku without
+    # touching its own http client.
+    http_b_calls = MagicMock()
+    esc_b._http_client = http_b_calls
+    result = esc_b.escalate(messages)
+    assert result.final.tier == "haiku"
+    http_b_calls.post.assert_not_called()
+
+
+def test_cb_guard_with_shared_circuit_breaker_factory(
+    tmp_path: Any, messages: list[dict[str, str]]
+) -> None:
+    """The classmethod factory wires the guard the same way as the kwarg."""
+    guard = _make_cb_guard()
+    esc = LLMEscalator.with_shared_circuit_breaker(
+        guard,
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=_mk_anth_client(),
+    )
+    esc.escalate(messages)
+    snap = guard.snapshot("escalation.tier.gemma")
+    assert snap.consecutive_failures == 0
+    assert esc._cb_guard is guard
+
+
+def test_cb_guard_default_off_when_feature_meta_disabled(
+    tmp_path: Any,
+    messages: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No guard passed + FEATURE_META off (default) → no guard built.
+
+    The conftest autouse fixture ``_restore_default_on_for_legacy_tests``
+    force-flips every ``DEFAULT_OFF_4_0_0`` feature to enabled=True for
+    legacy tests; we override the gate predicate locally so this test
+    can verify the *actual* default-off behaviour the 4.0.0 SEMVER
+    baseline ships with.
+    """
+    monkeypatch.setattr(
+        LLMEscalator, "_gate_enabled", staticmethod(lambda: False)
+    )
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=_mk_anth_client(),
+    )
+    # circuit_breaker_guard gate forced False → no guard auto-constructed.
+    assert esc._cb_guard is None
+
+
+def test_cb_guard_auto_built_when_feature_meta_enabled(
+    tmp_path: Any,
+    messages: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FEATURE_META enabled → escalator builds its own guard."""
+    # Patch the gate predicate so we don't have to mutate the real
+    # cc_config.json. The static method lives on LLMEscalator itself.
+    monkeypatch.setattr(LLMEscalator, "_gate_enabled", staticmethod(lambda: True))
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=_mk_anth_client(),
+        circuit_threshold=7,
+        circuit_cooldown_s=42.0,
+    )
+    assert esc._cb_guard is not None
+    # Auto-built guard inherits the escalator's failure_threshold and
+    # cooldown so behaviour stays consistent across the two breaker
+    # layers. cooldown is stored on the guard's _initial_cooldown_s
+    # constant; the per-resource _BreakerState only adopts it after the
+    # first trip (until then the dataclass DEFAULT_COOLDOWN_S is the
+    # snapshot value).
+    assert esc._cb_guard._initial_cooldown_s == 42.0
+    assert esc._cb_guard._failure_threshold == 7
+    # The auto-built guard uses our threshold — observe failures flip
+    # the state to OPEN exactly at the configured threshold.
+    from concinno.security.circuit_breaker_guard import CircuitState
+    for _ in range(7):
+        esc._cb_guard.evaluate({"resource": "probe", "outcome": "failure"})
+    snap = esc._cb_guard.snapshot("probe")
+    assert snap.state == CircuitState.OPEN
+    # Once tripped the per-resource cooldown adopts the escalator's
+    # configured value (42 s, not the 30 s dataclass default).
+    assert snap.cooldown_s == 42.0
+
+
+def test_cb_guard_record_helper_silently_swallows_errors(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_cb_guard_record`` must never raise — it's a best-effort mirror."""
+    guard = _make_cb_guard()
+    esc = LLMEscalator(
+        cache_dir=str(tmp_path),
+        http_client=_mk_http_client(),
+        anthropic_client=_mk_anth_client(),
+        circuit_breaker_guard=guard,
+    )
+    # Force the guard to raise — _cb_guard_record must not propagate.
+    with patch.object(
+        guard, "evaluate", side_effect=RuntimeError("guard exploded")
+    ):
+        esc._cb_guard_record("gemma", "failure")  # no raise expected
+
+    # And when the guard is None the helper is a clean no-op. Pin the
+    # gate to its 4.0.0 default-off baseline so the conftest legacy
+    # auto-flip does not auto-build a guard for us.
+    monkeypatch.setattr(
+        LLMEscalator, "_gate_enabled", staticmethod(lambda: False)
+    )
+    esc2 = LLMEscalator(
+        cache_dir=str(tmp_path / "no_guard"),
+        http_client=_mk_http_client(),
+        anthropic_client=_mk_anth_client(),
+    )
+    assert esc2._cb_guard is None
+    esc2._cb_guard_record("gemma", "failure")  # no-op, no raise

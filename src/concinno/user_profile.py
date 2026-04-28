@@ -24,12 +24,18 @@ Why bounded:
     USER.md is meant to live inside the system prompt of every session
     via FieldRead. Even one rogue session that 100×s the file would
     poison every subsequent prompt. We hard-cap to ``DEFAULT_CHAR_BUDGET
-    = 1375`` (per the Hermes USER.md spec we cleanroom-aligned to) and
-    expose a ZIQ-autotunable knob in ``[1000, 2000]`` so the FTRL
-    learner can tighten / loosen based on observed prompt-cache hit
-    rate. The cap is enforced on write — :func:`update_user_profile`
-    truncates and surfaces a one-line warning rather than silently
-    dropping content.
+    = 1375``. This default is **chosen empirically** by Concinno to
+    balance "enough room for role + language + 5-7 directives" against
+    "small enough that prompt-cache hit rate stays high"; it is **not**
+    derived from any published external specification. The value is
+    ZIQ-autotunable in ``[1000, 2000]`` so the FTRL learner can tighten
+    or loosen it based on observed prompt-cache hit rate. The cap is
+    enforced on write — :func:`update_user_profile` truncates and
+    surfaces a one-line warning rather than silently dropping content.
+
+    See ``feedback_user_transcribed_sota_numbers_unverified.md`` for
+    the sediment record on why we no longer claim a third-party "spec
+    aligned" provenance for this constant.
 
 Why frozen snapshots:
 

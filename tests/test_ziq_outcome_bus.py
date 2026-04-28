@@ -112,12 +112,11 @@ def test_unpin_restores_dispatch() -> None:
 # ── 6. concurrent emit thread-safe ─────────────────────────────
 
 
-def test_concurrent_emit_is_thread_safe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Disable rate-limiter (default 100 Hz/tunable) so 500 events all land.
-    # We're testing thread-safety of the dispatch path, not the rate guard.
-    monkeypatch.setenv("CONCINNO_ZIQ_BUS_MAX_HZ", "100000")
+def test_concurrent_emit_is_thread_safe() -> None:
+    # 4.4.0: default rate budget is 10 000 Hz/tunable, so the
+    # 500 emits/sec this test produces fit comfortably without
+    # tweaking the env. We're testing thread-safety of the dispatch
+    # path, not the rate guard.
     ZIQOutcomeBus._reset_for_testing()
     bus = get_bus()
     seen: list[Outcome] = []

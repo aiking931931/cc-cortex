@@ -59,11 +59,13 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 __all__ = [
+    "DEFAULT_COST_OVERSHOOT_PATH",
     "DEFAULT_HAIKU_MODEL",
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_TRIGGERS_INDEX_PATH",
     "MAX_HAIKU_COST_USD",
     "MIN_PROMPT_CHARS",
+    "OVERSHOOT_MULTIPLIER_HARD_BLOCK",
     "ProactiveRouterResult",
     "SkillCandidate",
     "build_router_context",
@@ -71,6 +73,8 @@ __all__ = [
     "estimate_haiku_cost_usd",
     "load_triggers_index",
     "propose_skills",
+    "read_cost_overshoot_state",
+    "record_cost_overshoot",
 ]
 
 # ── tunables ───────────────────────────────────────────────
@@ -85,6 +89,23 @@ DEFAULT_MAX_TOKENS = 256
 # 256 tokens ≈ $0.000256. We pad to $0.001 for input tokens + safety.
 # Exceeding this disables the judge call for this prompt only.
 MAX_HAIKU_COST_USD = 0.001
+
+# Safety net multiplier — actual judge spend > ceiling × this triggers
+# a *persistent* overshoot record so future prompts can be hard-denied
+# without re-discovering the runaway model. 2× covers transient noise
+# (token-count rounding) but flags genuine pricing surprises.
+OVERSHOOT_MULTIPLIER_HARD_BLOCK = 2.0
+
+# Persistent record of cost-cap overshoots. Future prompt-submits read
+# this; if the recorded overshoot count exceeds the configurable
+# threshold, the router refuses to call the judge entirely. File lives
+# under ``$HOME/.concinno`` so a stranger pip-install starts fresh and
+# upgrades preserve operator state (per Concinno hard-rule #7).
+def _default_cost_overshoot_path() -> Path:
+    return Path.home() / ".concinno" / "skill_proactive_router_overshoot.json"
+
+
+DEFAULT_COST_OVERSHOOT_PATH = _default_cost_overshoot_path()
 
 # Skip routing for prompts shorter than this (e.g. "ok", "yes"). The
 # judge cannot disambiguate intent from a 2-char string and the index
@@ -270,6 +291,62 @@ def _index_match(
 
 
 # ── Haiku judge (lazy import, mockable) ────────────────────
+
+
+def read_cost_overshoot_state(
+    *,
+    path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Read the persistent cost-overshoot ledger.
+
+    Returns ``{"count": int, "last_overshoot_usd": float, "last_seen": float}``.
+    A missing / unreadable file degrades to a zeroed dict — never raises.
+    The pre-flight gate uses ``count`` to decide whether to hard-deny
+    further judge calls; the ledger is monotonically increasing until
+    operator manually resets via ``cc cortex skill-router reset``.
+    """
+    target = path or DEFAULT_COST_OVERSHOOT_PATH
+    blank = {"count": 0, "last_overshoot_usd": 0.0, "last_seen": 0.0}
+    if not target.is_file():
+        return blank
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return blank
+    if not isinstance(raw, dict):
+        return blank
+    return {
+        "count": int(raw.get("count", 0) or 0),
+        "last_overshoot_usd": float(raw.get("last_overshoot_usd", 0.0) or 0.0),
+        "last_seen": float(raw.get("last_seen", 0.0) or 0.0),
+    }
+
+
+def record_cost_overshoot(
+    actual_cost_usd: float,
+    *,
+    path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Append a cost-overshoot incident to the persistent ledger.
+
+    Increments ``count`` by 1, refreshes ``last_overshoot_usd`` and
+    ``last_seen``. Best-effort: a write failure is swallowed so a
+    read-only home dir cannot break the hot prompt path.
+
+    Returns the post-write ledger state (or the in-memory state when the
+    write failed, so callers can still report the incident).
+    """
+    target = path or DEFAULT_COST_OVERSHOOT_PATH
+    state = read_cost_overshoot_state(path=target)
+    state["count"] = int(state.get("count", 0)) + 1
+    state["last_overshoot_usd"] = float(actual_cost_usd)
+    state["last_seen"] = time.time()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return state
 
 
 def estimate_haiku_cost_usd(
@@ -464,6 +541,84 @@ def build_router_context(candidates: list[SkillCandidate]) -> str:
 # ── orchestrator ───────────────────────────────────────────
 
 
+def _short_circuit_reason(
+    *,
+    enabled: bool,
+    user_prompt: str,
+    cost_ceiling_usd: float,
+    result: ProactiveRouterResult,
+) -> Optional[str]:
+    """Return the ``skipped_reason`` string when the router should bail.
+
+    Pulled out of :func:`propose_skills` so the hot orchestrator stays
+    inside the structural ``func_length`` budget. Side-effects (the env
+    opt-out branch and the emergency-deny warning) are written to
+    ``result`` directly — return value is the skip reason or ``None``.
+    """
+    if not enabled:
+        return "disabled"
+    if os.environ.get("CONCINNO_SKILL_PROACTIVE_ROUTER_DISABLED") in {
+        "1", "true", "yes", "on",
+    }:
+        return "disabled via env"
+    if not user_prompt or len(user_prompt.strip()) < MIN_PROMPT_CHARS:
+        return "prompt too short"
+    if cost_ceiling_usd <= 0:
+        result.warnings.append(
+            "cost ceiling <= 0 hard-denies the entire router"
+        )
+        return "cost ceiling zero — emergency deny"
+    return None
+
+
+def _run_judge_stage(
+    *,
+    user_prompt: str,
+    candidates: list[SkillCandidate],
+    judge: Optional[Callable[[str, list[SkillCandidate]], dict[str, Any]]],
+    cost_ceiling_usd: float,
+    overshoot_state_path: Optional[Path],
+    result: ProactiveRouterResult,
+) -> list[SkillCandidate]:
+    """Invoke the judge once cheap stage produced candidates.
+
+    Mutates ``result`` in place (``judge_called``, ``judge_cost_usd``,
+    ``warnings``) and returns the merged candidate list. Persistent
+    overshoot ledger is incremented when actual spend > safety net.
+    """
+    j = judge or default_haiku_judge
+    try:
+        verdict_raw = j(user_prompt, candidates)
+    except Exception as exc:  # noqa: BLE001
+        verdict_raw = {}
+        result.warnings.append(f"judge raised: {exc}")
+    verdict = (
+        verdict_raw.get("verdict", [])
+        if isinstance(verdict_raw, dict) else []
+    )
+    in_tok = int((verdict_raw or {}).get("input_tokens", 0) or 0)
+    out_tok = int((verdict_raw or {}).get("output_tokens", 0) or 0)
+    actual_cost = estimate_haiku_cost_usd(
+        input_tokens=in_tok, output_tokens=out_tok,
+    )
+    result.judge_called = True
+    result.judge_cost_usd = actual_cost
+
+    safety_threshold = (
+        cost_ceiling_usd * OVERSHOOT_MULTIPLIER_HARD_BLOCK
+    )
+    if actual_cost > safety_threshold:
+        new_ledger = record_cost_overshoot(
+            actual_cost, path=overshoot_state_path,
+        )
+        result.warnings.append(
+            f"actual judge cost {actual_cost:.6f} > safety threshold "
+            f"{safety_threshold:.6f}; future budgets blocked "
+            f"(overshoot count={new_ledger['count']})"
+        )
+    return _merge_judge_verdict(candidates, verdict)
+
+
 def propose_skills(
     user_prompt: str,
     *,
@@ -473,6 +628,8 @@ def propose_skills(
     max_candidates: int = MAX_CANDIDATES,
     hot_path_budget_ms: int = DEFAULT_HOT_PATH_BUDGET_MS,
     enabled: bool = True,
+    overshoot_state_path: Optional[Path] = None,
+    max_persistent_overshoots: int = 3,
 ) -> ProactiveRouterResult:
     """Run the proactive Skill router for a single UserPromptSubmit.
 
@@ -482,23 +639,46 @@ def propose_skills(
     Pipeline:
 
     1. Honour ``enabled=False`` and the env opt-out.
-    2. Load the cheap inverted index (sub-agent A's file).
-    3. Run the index match — if zero candidates, skip the judge entirely
-       (no point spending Haiku tokens with nothing to re-rank).
-    4. If a judge is supplied (or default available) **and** the
-       cost ceiling allows the call, invoke it and merge verdicts.
-    5. Render the advisory; cost-guard the total spend.
+    2. Pre-flight cost cap: estimate Haiku spend; if >ceiling **the
+       judge stage is hard-denied** (renderer still produces cheap
+       index matches, but no Haiku call is made). ``cost_ceiling_usd<=0``
+       triggers an emergency hard-deny that also skips the cheap stage.
+    3. Persistent overshoot ledger: if ``read_cost_overshoot_state()``
+       reports ``count >= max_persistent_overshoots`` the judge is
+       hard-denied regardless of the per-prompt estimate (defence in
+       depth against a runaway pricing change).
+    4. Load the cheap inverted index and run the substring/token match.
+    5. Run the judge (real or injected) when permitted; merge verdicts.
+    6. Safety net: actual Haiku spend > ``cost_ceiling_usd *
+       OVERSHOOT_MULTIPLIER_HARD_BLOCK`` writes a row to the persistent
+       overshoot ledger so future prompts pre-flight-deny.
+    7. Render the advisory.
 
     Args:
         user_prompt: The user's submitted text.
         index_path: Override sub-agent A's index file location.
         judge: Inject a deterministic judge for tests; defaults to
             :func:`default_haiku_judge` (lazy real call).
-        cost_ceiling_usd: Per-prompt budget. Exceeded → judge skipped.
+        cost_ceiling_usd: Per-prompt budget. Pre-flight hard-deny when
+            estimated > ceiling. ``<= 0`` ⇒ emergency deny (cheap-stage
+            also skipped — operator killed the feature for the session).
         max_candidates: Cap on returned candidates.
         hot_path_budget_ms: Soft target for the *cheap* stage; over
-            budget is logged but not fatal (judge stage may still run).
+            budget is logged but not fatal.
         enabled: Master switch — easier than re-reading FEATURE_META.
+        overshoot_state_path: Override the persistent ledger path
+            (tests use a tmp dir; production uses
+            ``~/.concinno/skill_proactive_router_overshoot.json``).
+        max_persistent_overshoots: Persistent overshoot count at or
+            beyond which the judge is denied without further attempts.
+
+    Goodhart-fix history (2026-04-28 ship-fix sub-agent O):
+        Original code logged ``actual_cost > ceiling`` as a warning but
+        still merged the verdict — a "cap" that never denied. Now the
+        pre-flight estimate hard-denies the judge call (no API spend)
+        and the post-call safety net writes a persistent record so a
+        runaway pricing change cannot drain the budget across many
+        prompts before the operator notices.
     """
     t0 = time.monotonic()
     result = ProactiveRouterResult()
@@ -508,18 +688,14 @@ def propose_skills(
         return (time.monotonic() - t0) * 1000.0
 
     try:
-        if not enabled:
-            result.skipped_reason = "disabled"
-            result.elapsed_ms = _elapsed_ms()
-            return result
-        if os.environ.get("CONCINNO_SKILL_PROACTIVE_ROUTER_DISABLED") in {
-            "1", "true", "yes", "on",
-        }:
-            result.skipped_reason = "disabled via env"
-            result.elapsed_ms = _elapsed_ms()
-            return result
-        if not user_prompt or len(user_prompt.strip()) < MIN_PROMPT_CHARS:
-            result.skipped_reason = "prompt too short"
+        skip = _short_circuit_reason(
+            enabled=enabled,
+            user_prompt=user_prompt,
+            cost_ceiling_usd=cost_ceiling_usd,
+            result=result,
+        )
+        if skip is not None:
+            result.skipped_reason = skip
             result.elapsed_ms = _elapsed_ms()
             return result
 
@@ -537,53 +713,46 @@ def propose_skills(
             )
 
         if not candidates:
-            # No index hits = no reason to call the judge. The judge is
-            # a re-ranker, not a generator.
+            # Judge is a re-ranker, not a generator — skip without spend.
             result.elapsed_ms = _elapsed_ms()
             return result
 
-        # Estimate cost before deciding whether to call the judge.
-        # Pre-flight uses *typical* token counts (200 in / 80 out) so a
-        # production-tuned ceiling (e.g. $0.001 USD) does not falsely
-        # reject the average call. Worst-case overrun is captured by
-        # the post-call actual-cost check below.
+        # Pre-flight cost gate (hard deny — Goodhart-2 fix).
         estimated = estimate_haiku_cost_usd(
             input_tokens=200,
             output_tokens=80,
         )
         if estimated > cost_ceiling_usd:
             result.warnings.append(
-                f"judge skipped: pre-flight cost {estimated:.6f} > "
-                f"ceiling {cost_ceiling_usd:.6f}"
+                f"judge hard-denied: pre-flight estimate "
+                f"{estimated:.6f} > ceiling {cost_ceiling_usd:.6f}"
             )
-        else:
-            j = judge or default_haiku_judge
-            try:
-                verdict_raw = j(user_prompt, candidates)
-            except Exception as exc:  # noqa: BLE001
-                verdict_raw = {}
-                result.warnings.append(f"judge raised: {exc}")
-            verdict = (
-                verdict_raw.get("verdict", [])
-                if isinstance(verdict_raw, dict) else []
+            result.candidates = candidates
+            result.additional_context = build_router_context(candidates)
+            result.elapsed_ms = _elapsed_ms()
+            return result
+
+        # Persistent overshoot ledger gate.
+        ledger = read_cost_overshoot_state(path=overshoot_state_path)
+        if ledger.get("count", 0) >= max_persistent_overshoots:
+            result.warnings.append(
+                f"judge hard-denied: persistent overshoot count "
+                f"{ledger['count']} >= {max_persistent_overshoots}"
             )
-            in_tok = int((verdict_raw or {}).get("input_tokens", 0) or 0)
-            out_tok = int((verdict_raw or {}).get("output_tokens", 0) or 0)
-            actual_cost = estimate_haiku_cost_usd(
-                input_tokens=in_tok, output_tokens=out_tok,
-            )
-            result.judge_called = True
-            result.judge_cost_usd = actual_cost
-            if actual_cost > cost_ceiling_usd:
-                # Defence in depth: the call already happened, but we
-                # log so a runaway model is visible. We still merge the
-                # verdict — the budget is per-prompt advisory.
-                result.warnings.append(
-                    f"actual judge cost {actual_cost:.6f} > "
-                    f"ceiling {cost_ceiling_usd:.6f}"
-                )
-            candidates = _merge_judge_verdict(candidates, verdict)
-            candidates = candidates[:max_candidates]
+            result.candidates = candidates
+            result.additional_context = build_router_context(candidates)
+            result.elapsed_ms = _elapsed_ms()
+            return result
+
+        candidates = _run_judge_stage(
+            user_prompt=user_prompt,
+            candidates=candidates,
+            judge=judge,
+            cost_ceiling_usd=cost_ceiling_usd,
+            overshoot_state_path=overshoot_state_path,
+            result=result,
+        )
+        candidates = candidates[:max_candidates]
 
         result.candidates = candidates
         result.additional_context = build_router_context(candidates)

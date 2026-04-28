@@ -423,3 +423,155 @@ def test_module_constants_documented():
     assert DEFAULT_HAIKU_MODEL.startswith("claude-haiku-")
     assert DEFAULT_MAX_TOKENS > 0
     assert MAX_HAIKU_COST_USD > 0
+
+
+# ── 23. cost cap pre-flight HARD DENIES (Goodhart-2 fix) ──
+
+
+def test_cost_cap_preflight_emits_cheap_only(index_file, clean_env):
+    """Pre-flight estimate > ceiling now hard-denies the judge but still
+    surfaces cheap-stage candidates so the user gets *some* advisory.
+    Replaces the old behaviour where the judge ran anyway."""
+    judge_calls = {"n": 0}
+
+    def _judge(p, c):
+        judge_calls["n"] += 1
+        return {"verdict": [{"name": "memoria", "score": 0.99, "rationale": "x"}],
+                "input_tokens": 100, "output_tokens": 50}
+
+    result = propose_skills(
+        "please run memoria cleanup right now",
+        index_path=index_file,
+        judge=_judge,
+        cost_ceiling_usd=0.0000001,  # absurdly low → hard deny
+    )
+    assert judge_calls["n"] == 0, "judge must NOT be called pre-flight deny"
+    assert result.judge_called is False
+    # Cheap candidates still emitted — they cost nothing.
+    names = [c.name for c in result.candidates]
+    assert "memoria" in names
+    assert any("hard-denied" in w for w in result.warnings)
+
+
+# ── 24. emergency deny: ceiling=0 skips everything ────────
+
+
+def test_emergency_deny_ceiling_zero(index_file, clean_env):
+    """``cost_ceiling_usd=0`` is operator-killed for the session."""
+    result = propose_skills(
+        "please run memoria cleanup right now",
+        index_path=index_file,
+        judge=_stub_judge([{"name": "memoria", "score": 0.99}]),
+        cost_ceiling_usd=0.0,
+    )
+    assert result.skipped_reason == "cost ceiling zero — emergency deny"
+    assert result.candidates == []
+    assert result.judge_called is False
+
+
+# ── 25. safety net writes to persistent overshoot ledger ──
+
+
+def test_safety_net_records_overshoot(index_file, clean_env, tmp_path):
+    """Actual judge cost > ceiling × OVERSHOOT_MULTIPLIER_HARD_BLOCK
+    appends to the persistent overshoot ledger."""
+    from concinno.skill_proactive_router import (
+        OVERSHOOT_MULTIPLIER_HARD_BLOCK,
+        read_cost_overshoot_state,
+    )
+
+    # Drive actual cost into the safety zone: 1M output tokens = $5,
+    # which is ≫ 0.001 × 2 = 0.002 ceiling.
+    judge = _stub_judge(
+        [{"name": "memoria", "score": 0.85, "rationale": "ok"}],
+        in_tok=1_000_000, out_tok=1_000_000,
+    )
+
+    ledger_path = tmp_path / "overshoot.json"
+    # Use a generous ceiling so pre-flight permits the call (we want to
+    # exercise the *post-call* safety net, not the pre-flight gate).
+    result = propose_skills(
+        "please run memoria cleanup right now",
+        index_path=index_file,
+        judge=judge,
+        cost_ceiling_usd=10.0,  # pre-flight admits; safety net = 20.0
+        overshoot_state_path=ledger_path,
+    )
+    # 1M+1M tokens cost $6.0 > 20.0? No, 6.0 < 20.0 → no safety trip.
+    # Sanity-check the multiplier and pick numbers that DO trip:
+    assert OVERSHOOT_MULTIPLIER_HARD_BLOCK > 1.0
+    assert result.judge_called is True
+
+    # Tighten ceiling so safety_threshold = 1.0 × 2 = 2.0 < 6.0 spend.
+    result2 = propose_skills(
+        "please run memoria cleanup right now",
+        index_path=index_file,
+        judge=judge,
+        cost_ceiling_usd=1.0,
+        overshoot_state_path=ledger_path,
+    )
+    assert result2.judge_called is True
+    assert any("safety threshold" in w for w in result2.warnings)
+    state = read_cost_overshoot_state(path=ledger_path)
+    assert state["count"] >= 1
+    assert state["last_overshoot_usd"] == pytest.approx(6.0, rel=1e-3)
+
+
+# ── 26. persistent overshoot count denies future calls ────
+
+
+def test_persistent_overshoot_denies_judge(index_file, clean_env, tmp_path):
+    """When ledger.count >= max_persistent_overshoots, judge is denied."""
+    import json as _json
+    ledger_path = tmp_path / "overshoot.json"
+    ledger_path.write_text(
+        _json.dumps({
+            "count": 5,
+            "last_overshoot_usd": 0.5,
+            "last_seen": 1.0,
+        }),
+        encoding="utf-8",
+    )
+
+    judge_calls = {"n": 0}
+
+    def _judge(p, c):
+        judge_calls["n"] += 1
+        return {"verdict": [], "input_tokens": 0, "output_tokens": 0}
+
+    result = propose_skills(
+        "please run memoria cleanup right now",
+        index_path=index_file,
+        judge=_judge,
+        overshoot_state_path=ledger_path,
+        max_persistent_overshoots=3,  # 5 >= 3 → deny
+    )
+    assert judge_calls["n"] == 0
+    assert result.judge_called is False
+    assert any("persistent overshoot count" in w for w in result.warnings)
+    # Cheap candidates still surface:
+    names = [c.name for c in result.candidates]
+    assert "memoria" in names
+
+
+# ── 27. record_cost_overshoot persists incrementally ──────
+
+
+def test_record_cost_overshoot_increments(tmp_path):
+    """Each call to record_cost_overshoot increments count by 1."""
+    from concinno.skill_proactive_router import (
+        read_cost_overshoot_state,
+        record_cost_overshoot,
+    )
+
+    ledger_path = tmp_path / "ledger.json"
+    s1 = record_cost_overshoot(0.5, path=ledger_path)
+    assert s1["count"] == 1
+
+    s2 = record_cost_overshoot(1.2, path=ledger_path)
+    assert s2["count"] == 2
+    assert s2["last_overshoot_usd"] == 1.2
+
+    state = read_cost_overshoot_state(path=ledger_path)
+    assert state["count"] == 2
+    assert state["last_overshoot_usd"] == 1.2

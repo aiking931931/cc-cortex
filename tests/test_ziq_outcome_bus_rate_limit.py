@@ -29,7 +29,10 @@ def test_default_rate_limit_admits_below_threshold() -> None:
     bus = get_bus()
     seen: list[Outcome] = []
     bus.subscribe("rate.test", seen.append)
-    # Default = 100 Hz. Five emits should pass.
+    # Default = 10 000 Hz (raised from 100 Hz in 4.4.0 to keep the
+    # FTRL learning signal from being silently dropped under realistic
+    # producer bursts — see module docstring). Five emits trivially
+    # pass.
     for _ in range(5):
         bus.emit(Outcome(tunable="rate.test", value=1, reward=1.0))
     assert len(seen) == 5
@@ -76,7 +79,7 @@ def test_invalid_max_hz_falls_back_to_default(
     bus = get_bus()
     seen: list[Outcome] = []
     bus.subscribe("rate.test", seen.append)
-    # Bad env → fallback to default (100), so 50 emits all admitted.
+    # Bad env → fallback to default (10 000), so 50 emits all admitted.
     for _ in range(50):
         bus.emit(Outcome(tunable="rate.test", value=1, reward=1.0))
     assert len(seen) == 50
@@ -135,3 +138,56 @@ def test_dropped_emits_do_not_dispatch_to_subscribers(
     for _ in range(5):
         bus.emit(Outcome(tunable="rate.test", value=1, reward=1.0))
     assert call_count["n"] == 1
+
+
+def test_default_rate_limit_is_high_enough_for_realistic_workload() -> None:
+    """4.4.0 ship-gate FATAL-5 regression — realistic burst stays admitted.
+
+    The pre-4.4.0 default of 100 Hz/tunable silently dropped > 90 % of
+    outcome emits in production traces of the escalation retry chain
+    (~50 kHz steady-state) and the sentinel fail loop (~5 kHz). With
+    the new 10 000 Hz/tunable default, 5 producer threads emitting
+    1 000 outcomes apiece into a single tunable (5 000 events in
+    < 1 s, well under 10 kHz) all land. If this test ever drops back
+    to a single-digit-percent admit rate the default has regressed.
+    """
+    import threading
+
+    bus = get_bus()
+    seen: list[Outcome] = []
+    seen_lock = threading.Lock()
+
+    def collector(o: Outcome) -> None:
+        with seen_lock:
+            seen.append(o)
+
+    bus.subscribe("realistic.workload", collector)
+
+    threads_n = 5
+    per_thread = 1000
+
+    def producer() -> None:
+        for i in range(per_thread):
+            bus.emit(
+                Outcome(
+                    tunable="realistic.workload",
+                    value=i,
+                    reward=float(i % 2),
+                )
+            )
+
+    threads = [threading.Thread(target=producer) for _ in range(threads_n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # All 5 000 emits should land — proves the 10 000 Hz default sits
+    # comfortably above realistic burst rates and that no signal is
+    # silently dropped.
+    expected = threads_n * per_thread
+    assert len(seen) == expected, (
+        f"realistic-workload regression: only {len(seen)}/{expected} "
+        f"emits admitted (dropped={bus.dropped_count('realistic.workload')})"
+    )
+    assert bus.dropped_count("realistic.workload") == 0

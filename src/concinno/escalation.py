@@ -35,6 +35,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence, cast
 
 from concinno.core.state_store import StateStore
+
+# Hystrix-grade rate-limit + circuit-breaker (4.4.0). Imported eagerly
+# because the import chain is stdlib-only — no extra dependency cost
+# for callers who don't opt in via the FEATURE_META gate.
+from concinno.security.circuit_breaker_guard import CircuitBreakerGuard
 from concinno.ziq_outcome_bus import Outcome
 from concinno.ziq_outcome_bus import get_bus as _get_ziq_bus
 
@@ -163,6 +168,7 @@ class LLMEscalator:
         per_tier_timeout_s: float = 60.0,
         circuit_threshold: int = 5,
         circuit_cooldown_s: float = 120.0,
+        circuit_breaker_guard: CircuitBreakerGuard | None = None,
     ) -> None:
         for t in chain:
             if t not in _VALID_TIERS:
@@ -182,6 +188,51 @@ class LLMEscalator:
             t: {"calls": 0, "successes": 0, "failures": 0} for t in _VALID_TIERS
         }
 
+        # 4.4.0 — opt-in Hystrix-grade rate-limit + half-open probe
+        # gating on top of the legacy file-backed breaker. When the
+        # FEATURE_META gate ``circuit_breaker_guard.enabled`` is True
+        # (default OFF per 4.0.0 default-off-gates SEMVER baseline) and
+        # the caller did not pass an explicit guard, build one whose
+        # cooldown / failure-threshold mirror the legacy parameters so
+        # behaviour stays consistent across the two breaker layers. A
+        # caller that wants several escalators to converge on a single
+        # circuit state for the same logical resource pool can pass
+        # ``circuit_breaker_guard=shared_guard`` (where ``shared_guard``
+        # was constructed once and is shared across instances — its
+        # internal ``_BreakerStateRegistry`` is what gets shared by
+        # reference, mirroring ``CircuitBreakerGuard.share_state_with``).
+        self._cb_guard: CircuitBreakerGuard | None = circuit_breaker_guard
+        if self._cb_guard is None and self._gate_enabled():
+            # Auto-construct a guard whose cooldown / threshold come
+            # from the escalator's own constructor args so behaviour
+            # is consistent with the legacy breaker layer.
+            self._cb_guard = CircuitBreakerGuard(
+                failure_threshold=self._circuit_threshold,
+                cooldown_s=self._circuit_cooldown_s,
+                # Disable the rate-limit window — the legacy breaker
+                # does not enforce one and we don't want the upgrade
+                # to introduce a new failure mode.
+                max_calls=0,
+            )
+
+    @staticmethod
+    def _gate_enabled() -> bool:
+        """Return True when FEATURE_META gates ``circuit_breaker_guard`` on.
+
+        Resolved through :class:`concinno.core.config.Config` so the
+        full 6-source chain (FEATURE_META default → cc_config.json →
+        ``~/.concinno`` overrides → env) is honoured. Failures fall
+        back to the documented OFF default — never raise — because the
+        escalator must keep working when the config plumbing is absent
+        (e.g. unit tests in a stripped environment).
+        """
+        try:
+            from concinno.core.config import get_config
+
+            return bool(get_config().feature("circuit_breaker_guard"))
+        except Exception:
+            return False
+
     # ── Circuit breaker ────────────────────────────────────
 
     def _load_breakers(self) -> dict[str, dict[str, Any]]:
@@ -192,6 +243,54 @@ class LLMEscalator:
 
     def _save_breakers(self, data: dict[str, dict[str, Any]]) -> None:
         self._store.write_flat(_NS, _BREAKER_FILE, data)
+
+    def _cb_guard_record(
+        self,
+        tier: str,
+        outcome: Literal["success", "failure", "timeout", "unknown"],
+    ) -> None:
+        """Mirror a tier outcome into the opt-in CircuitBreakerGuard.
+
+        Best-effort — never raises. Keeps the guard state machine
+        synchronised with the legacy file-backed breaker so a tier that
+        legacy-trips also Hystrix-trips and vice-versa, without callers
+        having to plumb both layers themselves.
+        """
+        if self._cb_guard is None:
+            return
+        try:
+            self._cb_guard.evaluate(
+                {
+                    "resource": f"escalation.tier.{tier}",
+                    "outcome": outcome,
+                }
+            )
+        except Exception:
+            pass
+
+    @classmethod
+    def with_shared_circuit_breaker(
+        cls,
+        guard: CircuitBreakerGuard,
+        **kwargs: Any,
+    ) -> "LLMEscalator":
+        """Build an escalator that shares ``guard`` with siblings.
+
+        Convenience factory for the cross-instance share-state pattern:
+        construct a single :class:`CircuitBreakerGuard` once, then hand
+        it to every escalator that should converge on the same per-
+        resource state. Mirrors :meth:`CircuitBreakerGuard.share_state_with`
+        — both spellings end up sharing the same ``_BreakerStateRegistry``
+        by reference.
+
+        Example::
+
+            shared = CircuitBreakerGuard(failure_threshold=3)
+            esc_a = LLMEscalator.with_shared_circuit_breaker(shared)
+            esc_b = LLMEscalator.with_shared_circuit_breaker(shared)
+            # esc_a's failures count toward esc_b's breaker state.
+        """
+        return cls(circuit_breaker_guard=guard, **kwargs)
 
     def _breaker_state(self, tier: str) -> str:
         data = self._load_breakers()
@@ -348,11 +447,32 @@ class LLMEscalator:
                 failures.append((tier, "ANTHROPIC_API_KEY not set"))
                 continue
 
-            # Check circuit breaker
+            # Check circuit breaker (legacy file-backed layer).
             cb_state = self._breaker_state(tier)
             if cb_state == _CB_OPEN:
                 failures.append((tier, "circuit_open"))
                 continue
+
+            # Check the opt-in Hystrix-grade guard (4.4.0). Pre-call
+            # probe — passes the resource without an outcome so the
+            # guard only consults state (admit / deny) and does not
+            # mutate the failure counter. We inspect ``findings``
+            # rather than ``decision`` because the operator-configured
+            # fail mode (silent / warn / warn+log / hard_deny) controls
+            # how the **rest of the platform** reacts; for the
+            # escalator's own routing we always want to fall through to
+            # the next tier on any ``circuit_open`` finding regardless
+            # of fail mode (silent should not silently waste an
+            # upstream call we already know will fail).
+            if self._cb_guard is not None:
+                resource = f"escalation.tier.{tier}"
+                cb_result = self._cb_guard.evaluate({"resource": resource})
+                if any(
+                    f.type in ("circuit_open", "rate_limit_exceeded")
+                    for f in cb_result.findings
+                ):
+                    failures.append((tier, "circuit_open_guard"))
+                    continue
 
             try:
                 result = self._call_tier(
@@ -365,6 +485,10 @@ class LLMEscalator:
                 self._run_stats[tier]["calls"] += 1
                 self._run_stats[tier]["failures"] += 1
                 self._breaker_record_failure(tier)
+                # Mirror the failure into the opt-in guard so its
+                # state machine also trips (preserves the contract
+                # that both layers see the same observation stream).
+                self._cb_guard_record(tier, "failure")
                 failed = TierResult(
                     tier=tier,
                     text="",
@@ -399,6 +523,7 @@ class LLMEscalator:
             self._run_stats[tier]["calls"] += 1
             self._run_stats[tier]["successes"] += 1
             self._breaker_record_success(tier)
+            self._cb_guard_record(tier, "success")
             attempts.append(result)
             # ZIQ pilot: emit success outcome. Reward decays with the
             # number of retries actually consumed — a setting that

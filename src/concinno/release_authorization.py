@@ -283,6 +283,93 @@ def _compile_match_regex(token: str) -> re.Pattern[str]:
     return re.compile(rf"(?<!\S){flexible}(?!\S)", re.IGNORECASE)
 
 
+def _record_authorization_outcome(proceed: bool) -> None:
+    """Feed the publish-gate decision back to :mod:`concinno.approval_mode`.
+
+    Called after every ``check_authorization`` outcome so the FTRL
+    posterior on the ``release_authorization`` tunable bucket reflects
+    real operator behaviour (proceed = the gate passed; ``proceed=False``
+    means the operator was prompted but no auth string materialised).
+    Best-effort — any failure is silent so the publish gate never
+    breaks because the learning bus is unhappy.
+    """
+    try:
+        from concinno import approval_mode as _am
+
+        _am.record_outcome(
+            _am.BLAST_RADIUS_HIGH,
+            proceed=proceed,
+            tunable="release_authorization",
+        )
+    except Exception:  # pragma: no cover - record is advisory
+        return
+
+
+def _approval_mode_layer(
+    operation: str,
+    package: str,
+    version: str,
+) -> Optional[tuple[bool, str]]:
+    """Consult :mod:`concinno.approval_mode` for routing override.
+
+    Layered ABOVE the publish gate (and BELOW
+    :mod:`concinno.destruction_guard` — which keeps R0-R4 enforcement
+    untouched regardless of approval_mode). When approval_mode is in
+    ``off`` mode, the operator has globally disabled AskUser prompting
+    so we autonomously proceed; when ``smart`` mode + the SPS×FTRL
+    posterior crosses the autonomy threshold, we also proceed and
+    feed back a ``proceed=True`` outcome to the FTRL learner. ``manual``
+    mode (and the ``smart`` ask branch) returns ``None`` so the caller
+    falls through to the canonical STRING_MATCH / ASKUSER_ANSWER path.
+
+    Best-effort: any import error or runtime exception in approval_mode
+    is swallowed and we return ``None`` (= no override) so the publish
+    gate keeps its strict default behavior under all failure modes.
+
+    Returns:
+        ``(allowed, reason)`` to short-circuit, or ``None`` to defer
+        to the legacy gate.
+    """
+    try:
+        from concinno import approval_mode as _am
+    except Exception:  # pragma: no cover - module always present
+        return None
+    try:
+        cfg = _am.load_config()
+        if cfg.mode is _am.ApprovalMode.OFF:
+            try:
+                _am.record_outcome(
+                    _am.BLAST_RADIUS_HIGH,
+                    proceed=True,
+                    tunable="release_authorization",
+                    config=cfg,
+                )
+            except Exception:  # pragma: no cover - record is advisory
+                pass
+            return True, ""
+        if cfg.mode is _am.ApprovalMode.SMART:
+            decision = _am.decide(
+                _am.BLAST_RADIUS_HIGH,
+                tunable="release_authorization",
+                config=cfg,
+            )
+            if not decision.should_ask:
+                try:
+                    _am.record_outcome(
+                        _am.BLAST_RADIUS_HIGH,
+                        proceed=True,
+                        tunable="release_authorization",
+                        config=cfg,
+                    )
+                except Exception:  # pragma: no cover - record is advisory
+                    pass
+                return True, ""
+        # MANUAL or SMART-asks → defer to the canonical gate below.
+        return None
+    except Exception:  # pragma: no cover - layer is advisory
+        return None
+
+
 def check_authorization(
     operation: str,
     package: str,
@@ -292,6 +379,23 @@ def check_authorization(
     config: Optional[AuthorizationConfig] = None,
 ) -> tuple[bool, str]:
     """Check whether the user has authorized this publish operation.
+
+    Routing layers (in order; first to short-circuit wins):
+
+    1. ``release_auth.disabled=True`` — operator's permanent publish
+       opt-out; bypasses everything below and returns allowed.
+    2. :mod:`concinno.approval_mode` — when the operator has switched
+       to ``off`` (never ask) or ``smart`` mode with a posterior that
+       has cleared the autonomy threshold, the publish gate auto-
+       proceeds. ``manual`` mode (and ``smart`` mode that decides to
+       ask) falls through to layer 3.
+    3. STRING_MATCH / ASKUSER_ANSWER — the canonical ``go publish
+       <pkg> <ver>`` token check.
+
+    :mod:`concinno.destruction_guard` (R0-R4 data-destruction) is
+    enforced separately and is NOT short-circuited by any of the
+    above — see ``rules/L1/release_coord.md`` for the layering
+    contract.
 
     Args:
         operation: Operation name from ``detect_publish_operation``
@@ -317,6 +421,15 @@ def check_authorization(
     if cfg.disabled:
         return True, ""
 
+    # Approval-mode layer (off / smart) may auto-authorize — runs
+    # AFTER the disabled short-circuit so the publish-specific opt-out
+    # keeps top priority, and BEFORE the canonical token check so the
+    # operator's "never ask me" preference is honoured even when no
+    # auth string was typed.
+    am_override = _approval_mode_layer(operation, package, version)
+    if am_override is not None:
+        return am_override
+
     required = format_required_string(package, version)
     matcher = _compile_match_regex(required)
 
@@ -336,6 +449,7 @@ def check_authorization(
 
     if cfg.mode == AuthorizationMode.STRING_MATCH:
         if transcript_text and matcher.search(transcript_text):
+            _record_authorization_outcome(proceed=True)
             return True, ""
         _notify_waiting("STRING_MATCH")
         return False, (
@@ -355,9 +469,11 @@ def check_authorization(
         # hybrid flows where the agent was going to ask but user
         # preempted by typing.
         if transcript_text and matcher.search(transcript_text):
+            _record_authorization_outcome(proceed=True)
             return True, ""
         for ans in answers:
             if ans and matcher.search(ans):
+                _record_authorization_outcome(proceed=True)
                 return True, ""
         _notify_waiting("ASKUSER_ANSWER")
         return False, (

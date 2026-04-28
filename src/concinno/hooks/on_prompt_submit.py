@@ -403,6 +403,15 @@ def handle_prompt_submit(
     except Exception:
         pass  # never block prompt submission on this
 
+    # 12. proactive Skill router — surface "/<skill> matches your
+    #     request" advisories when the user's prompt semantically maps
+    #     to a registered Skill. FATAL-1 fix wave (sub-agent O): the
+    #     module shipped without a production caller — this wiring
+    #     activates it and lets the ZIQ FTRL loop earn its reward.
+    skill_ctx = _skill_proactive_router_inject(user_prompt)
+    if skill_ctx:
+        contexts.append(skill_ctx)
+
     return {"contexts": contexts}
 
 
@@ -437,6 +446,31 @@ def _handoff_resume_inject(user_prompt: str) -> str | None:
         else:
             handoff_path = base / "交接.md"
         return build_resume_inject(proj, handoff_path)
+    except Exception:
+        return None
+
+
+def _skill_proactive_router_inject(user_prompt: str) -> str | None:
+    """Best-effort proactive Skill router inject (FATAL-1 fix sub-agent O).
+
+    Wires :func:`concinno.skill_proactive_router.propose_skills` into the
+    UserPromptSubmit hook chain so a registered Skill that semantically
+    matches the user's request surfaces as an advisory line. Failure-
+    safe: any exception swallows silently — the router itself never
+    raises but the import or feature lookup might.
+
+    Gated by ``feature_config['skill_proactive_router']['enabled']``.
+    """
+    try:
+        from concinno.core.config import get_config
+        from concinno.skill_proactive_router import propose_skills
+
+        cfg = get_config()
+        if not cfg.feature("skill_proactive_router", "enabled"):
+            return None
+        result = propose_skills(user_prompt)
+        text = (result.additional_context or "").strip()
+        return text or None
     except Exception:
         return None
 

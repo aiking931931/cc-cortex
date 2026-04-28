@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-04-28 — Week 2: Hermes Port wave-1 + ZIQ wires + Power user pivot
+
+Plan v3 (jolly-sauteeing-journal.md, approved 2026-04-28) Week 2
+release. Same-day double-ship after Week 1 4.3.0 ✅ LIVE earlier on
+2026-04-28. Plan v3 strategic-niche pivot: "OSS infra被當底層"
+narrative deprecated (two memory systems coexist conflict + no
+migration incentive); replaced with "Power user CC 加強包 + 個人垂直
+全棧" — Concinno is the power-user enhancement on Claude Code, Sancio
+breaks CC L1-L8 ceiling, Cigito distills ZIQ into weights (parallel
+track), 數位人格 is demo product, Perpetuo is commercial IP (USPTO
+sequential locked).
+
+Hermes Agent (Nous Research, 121K★ MIT) reframed as ecosystem peer
+rather than zero-sum competitor; 7 cleanroom-port targets identified
+across Week 2-4, wave-1 (HP1+HP3+HP6) landed in this release.
+
+### Added
+
+- ziq_outcome_bus.py + ziq_emit_helpers.py: pub-sub bus with @emit
+  decorator + 6 reusable reward-shaping helpers + race-guard rate
+  limiter (CONCINNO_ZIQ_BUS_MAX_HZ default 10000 Hz/tunable for
+  individual-power-user workloads). 12/18 tunable consumers wired
+  this release across escalation / knowledge / fewshot / reflexion /
+  tot / microcompact / parallel_dispatch / sentinel / consecutive_
+  fail_gate / delivery.gate / action_phase / field_read modules.
+  Remaining 2 categorical wires (gaia.meta_arm / judge.arm) defer
+  to 4.5.0.
+- FieldRead v2: build_field_context_v2_string() + breadcrumbs +
+  per-complexity COMPRESS_BREAKEVEN_BY_COMPLEXITY table (Simple=
+  1500 / Complicated=2500 / Complex=3500 / Chaotic=4000). PromptEngine
+  switched to v2 at line 399.
+- l2_index.py + CLI: L2 SKILL.md frontmatter walker + reverse-index
+  generator to _AI_BRAIN/_triggers.json. CLI concinno l2-index
+  build/query.
+- skill_tier1_mount.py + hooks/on_session_start.py:96: 10-skill
+  curated tier1 with 500ms hard wall-clock budget + 30s debounce
+  marker + override file ~/.concinno/tier1_skills.json + env opt-out.
+- skill_proactive_router.py + hooks/on_prompt_submit.py:411
+  _skill_proactive_router_inject: UserPromptSubmit hook chain with
+  two-stage matcher (inverted-index -> optional Haiku judge re-rank).
+  Cost cap pre-flight deny (MAX_HAIKU_COST_USD = 0.001) + actual-
+  cost safety net.
+- security/circuit_breaker_guard.py: PolicyGate subclass with Hystrix
+  three-state machine + sliding-deque rate limit + exponential
+  backoff. Wired into escalation.py:42 retry loop.
+- Hermes Port wave-1:
+  - HP1 skills/frontmatter_validator.py: agentskills.io standard
+    alignment (Anthropic 2025-12-18 Apache-2.0 spec). CLI concinno
+    skills validate-frontmatter [--fix].
+  - HP3 user_profile.py: ~/.concinno/USER.md user profile with
+    frozen snapshot ~/.concinno/USER.history.jsonl (HISTORY_MAX=3).
+    Char budget default 1375 (Concinno empirical, ZIQ-autotunable
+    in [1000, 2000]). render_profile_for_field_read() injection at
+    field_read.py:1028-1046 section 0.
+  - HP6 approval_mode.py + CLI: three modes (manual / smart / off,
+    default smart). SPS x FTRL Beta-Bernoulli posterior routing.
+    Wired into release_authorization.py:308 _approval_mode_layer +
+    :287 _record_user_decision. destruction_guard R0-R4 +
+    release_authorization opt-out (disabled=True) untouched, strict
+    layering above.
+- concinno-skills-memory 0.1.0 first publish (separate sub-pkg,
+  AGPL-3.0, zero runtime concinno dep): progressive_disclosure
+  3-layer + ZIQ noise_filter Protocol. Wired via ziq_memory_adapter
+  .py lazy-import.
+
+### Changed
+
+- ZIQ rate-guard default 100 Hz -> 10000 Hz per red-team FATAL-5
+  finding (production silent-drop 90%+ at 100 Hz given escalation /
+  sentinel / microcompact tight-loop emit rates).
+- field_read.compress_breakeven_tokens registered in single source
+  of truth feature_config.FEATURE_META.
+- Outcome.value type extended to int|float|bool|str for categorical
+  tunables.
+
+### Fixed
+
+- Pre-existing test regressions in tests/test_ziq_outcome_bus.py
+  (race-guard fixture isolation + Outcome.value extended-type
+  contract). Test no longer needs monkeypatch.setenv.
+
+### Verification
+
+- pytest (concinno inner): 8587+ green (218/218 targeted on ship-fix
+  scope, full sweep verified)
+- pytest (sancio-runtime): 1027/1027
+- pytest (concinno-skills-memory): 69/69
+- ruff: clean across 3 repos
+- mypy --strict: clean on new modules
+- Red/Blue Opus 4.7-1M CBUA verdict: SHIP-WITH-FIX (Path A). 5
+  FATAL + 2 GOODHART + 1 HIGH-3 fixed in same release; 4 carryover
+  acknowledged into 4.5.0 backlog.
+
 ## [4.3.0] - 2026-04-28 — Week 1 of 4-week ship cadence (Plan A/B/C foundation)
 
 Plan v1 4-week ship cadence (4.3.0 → 4.4.0 → 4.5.0 → 4.6.0) — Week 1

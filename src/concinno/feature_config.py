@@ -473,6 +473,37 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "skill_proactive_router": {
+        "category": "cognitive",
+        "description": (
+            "Proactive Skill router — surface '/skill matches your "
+            "request' advisories when the user's prompt semantically "
+            "maps to a registered Skill. Cheap inverted index + "
+            "optional Haiku judge with hard cost cap."
+        ),
+        "description_zh": (
+            "主動 Skill 路由 — 用戶提示語意命中已註冊 Skill 時建議"
+            "「/skill 符合你的請求」。Cheap inverted index + 選擇性"
+            " Haiku judge，有硬性成本上限。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabled — no Skill suggestions; the agent may "
+                    "miss applicable Skills the user didn't name"
+                ),
+                "risk_off_zh": (
+                    "關閉 — 無 Skill 建議；代理可能漏掉用戶沒指名的"
+                    "適用 Skill"
+                ),
+            },
+        },
+    },
     "insight_engine": {
         "category": "cognitive",
         "description": "Proactive knowledge injection when user prompt matches blind-spot rules",
