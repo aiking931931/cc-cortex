@@ -29,6 +29,7 @@ import sys
 
 from concinno.constants import WRITE_TOOLS_EXT as _WRITE_TOOLS
 from concinno.hooks.io_utils import cache_path, get_project_dir
+from concinno.hooks.relay_helpers import with_feature_prefix
 
 _MILESTONE_INTERVAL = 5
 
@@ -154,12 +155,17 @@ def _throttle(lines: list[str], session_id: str = "") -> list[str]:
         level = _classify(line)
         if level == "CRITICAL":
             _emit_stderr(_stderr_summary(line) + token_suffix)
-            output.append(f"[SHOW USER VERBATIM] {line}{token_suffix}")
-            output.append(
-                "⚠ 蝴蝶效應鐵律：完成當前子任務後，"
-                "立即回頭修復上述問題（含 pre-existing）。"
-                "不修不能開始下一個任務。"
+            wrapped = with_feature_prefix(
+                "post_tool_critical",
+                f"{line}{token_suffix}",
             )
+            if wrapped:
+                output.append(wrapped)
+                output.append(
+                    "⚠ 蝴蝶效應鐵律：完成當前子任務後，"
+                    "立即回頭修復上述問題（含 pre-existing）。"
+                    "不修不能開始下一個任務。"
+                )
         elif level == "MILESTONE":
             count = _extract_streak_count(line)
             is_named = count in (25, 50, 100)
@@ -167,7 +173,9 @@ def _throttle(lines: list[str], session_id: str = "") -> list[str]:
             if is_named or is_interval:
                 display = f"{line}{token_suffix}"
                 _emit_stderr(display)
-                output.append(f"[SHOW USER VERBATIM] {display}")
+                wrapped = with_feature_prefix("streak_ux", display)
+                if wrapped:
+                    output.append(wrapped)
         else:
             output.append(line)
     return output
@@ -521,7 +529,9 @@ def _append_token_fragments(
     Other modes: display + handoff guidance at high thresholds.
     """
     threshold = result["threshold"]
-    fragments.append(f"[SHOW USER VERBATIM] {token_msg}")
+    wrapped = with_feature_prefix("token_monitor", token_msg)
+    if wrapped:
+        fragments.append(wrapped)
     # Full mode: display context usage but never inject
     # handoff guidance — user delegated autonomous execution.
     if mode in ("full", "competition"):
@@ -642,10 +652,12 @@ def _check_context_compressed(hook_data: dict, tool_name: str) -> bool:
         "Stop all Edit/Write. Write handoff NOW."
     )
     _emit_stderr(msg)
-    _emit_output(
-        [f"[SHOW USER VERBATIM] {msg}"],
-        session_id=hook_data.get("session_id", ""),
-    )
+    wrapped = with_feature_prefix("context_compression", msg)
+    if wrapped:
+        _emit_output(
+            [wrapped],
+            session_id=hook_data.get("session_id", ""),
+        )
     return True
 
 

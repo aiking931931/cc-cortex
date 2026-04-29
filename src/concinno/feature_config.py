@@ -3547,6 +3547,64 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         "recommended": False,
         "severity": "minor",
     },
+    # ── 4.6.0 — verbatim_relay self-branding for hook warnings ───────
+    #
+    # Why: prior to 4.6.0, hook warnings injected as ``[SHOW USER
+    # VERBATIM] ⚠ ...`` carried no source attribution. Users seeing
+    # those strings in the Claude Code transcript reasonably assumed
+    # they were CC platform errors / hallucinations. Per AI King
+    # 2026-04-29 directive, every Concinno hook warning must self-
+    # brand with ``[Concinno: <feature>]`` so the source is
+    # unambiguous and panic-free.
+    #
+    # ``cosmetic=True`` because this is a UX preference (display
+    # shape), not a quality / safety knob. Per L0 鐵律 #6 ZIQ-vs-
+    # manual priority, ZIQ FTRL must NOT autotune cosmetic params.
+    # See ``concinno.hooks.relay_helpers`` for the runtime helper
+    # and ``feedback_concinno_hook_warnings_must_self_brand.md``
+    # for the corrective sediment.
+    "verbatim_relay": {
+        "category": "context",
+        "severity_if_off": "none",
+        "consequences_if_off": (
+            "Hook warning 失去 [Concinno: <feature>] self-brand，"
+            "用戶可能把 [SHOW USER VERBATIM] 誤認為 CC 平台異常"
+        ),
+        "consequences_if_off_en": (
+            "Hook warnings lose the [Concinno: <feature>] self-brand; "
+            "users may mistake [SHOW USER VERBATIM] for CC platform "
+            "anomalies / hallucinations."
+        ),
+        "description": (
+            "Self-brand hook warnings with [Concinno: <feature>] "
+            "prefix so users can distinguish Concinno-controlled "
+            "warnings from genuine Claude Code platform anomalies."
+        ),
+        "description_zh": (
+            "Hook 警告加上 [Concinno: <feature>] 自我標識前綴，"
+            "讓用戶能區分「Concinno 受控警告」vs「CC 平台異常」"
+        ),
+        "ziq_autotunable": False,  # cosmetic UX, no outcome metric
+        "cosmetic": True,
+        "params": {
+            "mode": {
+                "type": "str",
+                "default": "prefix",
+                "options": ["off", "silent", "prefix", "verbose"],
+                "recommended": "prefix",
+                "risk_off": (
+                    "off mode drops warning entirely — caller must "
+                    "skip emit; use only when paired with an "
+                    "alternate observability channel"
+                ),
+                "risk_off_zh": (
+                    "off mode 整段丟掉，呼叫方需 skip emit；"
+                    "只在另有觀測渠道時用"
+                ),
+            },
+        },
+        "recommended": True,
+    },
 }
 
 

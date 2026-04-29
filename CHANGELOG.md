@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(verbatim_relay): Self-branding for hook warnings — every
+  `[SHOW USER VERBATIM]` injected by Concinno hooks now carries a
+  `[Concinno: <feature>]` prefix so users can distinguish Concinno-
+  controlled warnings from genuine Claude Code platform anomalies
+  / hallucinations. New helper `concinno.hooks.relay_helpers.
+  with_feature_prefix(feature_name, raw_msg, *, mode=None)` with
+  four modes — `off` / `silent` / `prefix` (default) / `verbose`
+  (legacy 4.5.0) — wired into `on_post_tool.py` (4 call sites) +
+  `step_back.py` (4 templates). 6-source resolver chain: rule
+  default → FEATURE_META → cc_config → `~/.concinno/` → env
+  `CONCINNO_VERBATIM_RELAY_MODE` → user override. Cosmetic UX
+  feature: `cosmetic=True` + `ziq_autotunable=False` per L0 鐵律
+  #6 (ZIQ-vs-manual priority — UX preferences are not autotuned).
+  22 new unit tests + 80/80 regression pass + ruff/mypy --strict
+  clean. Fixes user-reported confusion (2026-04-29) where hook
+  warnings were mistaken for harness errors. See
+  `feedback_concinno_hook_warnings_must_self_brand.md` (MEMORY)
+  and `~/.claude/rules/switches.md` row #31.
+
 - feat(setup): 5-profile recommender CLI (`concinno setup --profile=<name>`)
   for the W4 (4.6.0) ``claude-code-setup`` recommendation tree (Plan v3
   line 130-134). New `concinno.setup.recommender` module ships five
