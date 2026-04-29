@@ -789,10 +789,136 @@
   const cmdFilter = $("#commands-filter");
   if (cmdFilter) cmdFilter.addEventListener("input", renderCommands);
 
+  // ── Marketplace (4.6.0) ─────────────────────────────────
+  let marketplaceCache = { installed: [], available: [], cache_age_sec: 0,
+    pypi_reachable: true, release_auth_disabled: false };
+
+  async function loadMarketplace() {
+    try {
+      marketplaceCache = await fetchJSON("/api/skills/marketplace");
+      renderMarketplaceMeta();
+      renderMarketplaceList();
+    } catch (err) { setStatus(`Error: ${err.message}`, "err"); }
+  }
+
+  function renderMarketplaceMeta() {
+    const host = $("#marketplace-meta");
+    if (!host) return;
+    const reach = marketplaceCache.pypi_reachable
+      ? '<span class="badge effect-immediate">PyPI: reachable</span>'
+      : '<span class="badge effect-process">PyPI: unreachable (cache only)</span>';
+    const age = marketplaceCache.cache_age_sec || 0;
+    const auth = marketplaceCache.release_auth_disabled
+      ? '<span class="badge ziq">release_auth: disabled (no twice-click)</span>'
+      : '<span class="badge effect-session">release_auth: enforced</span>';
+    host.innerHTML = `<div class="root-row">${reach} ${auth}
+      <code translate="no">cache age ${Math.floor(age/60)}m ${age%60}s</code></div>`;
+  }
+
+  function renderMarketplaceList() {
+    const filter = ($("#marketplace-filter").value || "").toLowerCase().trim();
+    const kindFilter = $("#marketplace-kind").value;
+    function filterRows(rows) {
+      return rows.filter((r) => {
+        if (kindFilter !== "all" && r.kind !== kindFilter) return false;
+        if (!filter) return true;
+        return `${r.name} ${r.summary}`.toLowerCase().includes(filter);
+      });
+    }
+    const installed = filterRows(marketplaceCache.installed || []);
+    const available = filterRows(marketplaceCache.available || []);
+    const installedHost = $("#marketplace-installed");
+    const availableHost = $("#marketplace-available");
+    installedHost.innerHTML = "";
+    availableHost.innerHTML = "";
+    for (const r of installed) installedHost.appendChild(renderMarketplaceCard(r, true));
+    for (const r of available) availableHost.appendChild(renderMarketplaceCard(r, false));
+    setStatus(`marketplace: ${installed.length} installed / ${available.length} available`);
+  }
+
+  function renderMarketplaceCard(row, installed) {
+    const card = document.createElement("div");
+    card.className = "feature";
+    const kindBadge = row.kind === "skill-pkg"
+      ? '<span class="badge ziq">skill-pkg</span>'
+      : (row.kind === "hook-pkg"
+        ? '<span class="badge cat">hook-pkg</span>'
+        : '<span class="badge">unknown</span>');
+    const stateBadge = row.install_state === "outdated"
+      ? '<span class="badge effect-session">outdated</span>'
+      : (row.install_state === "broken"
+        ? '<span class="badge effect-process">broken</span>'
+        : "");
+    const wired = (row.wired_consumers || []).map((w) =>
+      `<code translate="no">${escapeHtml(w)}</code>`).join(", ") || "(none)";
+    const versions = installed
+      ? `${escapeHtml(row.version_installed || "?")} → ${escapeHtml(row.version_latest || "?")}`
+      : escapeHtml(row.version_latest || "(unknown)");
+    const action = installed
+      ? `<button type="button" class="lang-switch" data-mp-uninstall="${escapeHtml(row.name)}">Uninstall</button>`
+      : `<button type="button" class="lang-switch" data-mp-install="${escapeHtml(row.name)}" data-mp-version="${escapeHtml(row.version_latest || "")}">Install</button>`;
+    card.innerHTML = `
+      <header class="fhead">
+        <code translate="no">${escapeHtml(row.name)}</code>
+        ${kindBadge}${stateBadge}
+        <span class="badge">${versions}</span>
+        ${action}
+      </header>
+      <p class="desc">${escapeHtml(row.summary || "(no summary)")}</p>
+      <p class="desc"><small>wired: ${wired}</small></p>`;
+    return card;
+  }
+
+  async function confirmAndAct(name, version, op) {
+    if (!marketplaceCache.release_auth_disabled) {
+      const cmd = op === "install"
+        ? `pip install ${name}${version ? `==${version}` : ""}`
+        : `pip uninstall -y ${name}`;
+      const ok1 = window.confirm(`About to run: ${cmd}\n\nClick OK to confirm.`);
+      if (!ok1) return;
+      const ok2 = window.confirm(`Confirm again: ${cmd}\n\nThis will run a privileged subprocess. Proceed?`);
+      if (!ok2) return;
+    }
+    setStatus(`${op} ${name}…`);
+    try {
+      const body = { package: name, confirm_token: "ui-confirmed" };
+      if (op === "install" && version) body.version = version;
+      const url = `/api/skills/marketplace/${op}`;
+      const r = await fetchJSON(url, { method: "POST", body: JSON.stringify(body) });
+      if (r.ok) {
+        setStatus(`${op} ${name} ok`, "ok");
+        loadMarketplace();
+      } else {
+        setStatus(`${op} ${name} FAILED: ${(r.stderr || "").slice(0, 200)}`, "err");
+      }
+    } catch (err) { setStatus(`Error: ${err.message}`, "err"); }
+  }
+
+  document.addEventListener("click", async (e) => {
+    const tgt = e.target;
+    if (!(tgt instanceof HTMLElement)) return;
+    if (tgt.dataset.mpInstall) {
+      await confirmAndAct(tgt.dataset.mpInstall, tgt.dataset.mpVersion || null, "install");
+    } else if (tgt.dataset.mpUninstall) {
+      await confirmAndAct(tgt.dataset.mpUninstall, null, "uninstall");
+    } else if (tgt.id === "marketplace-refresh") {
+      try {
+        await fetchJSON("/api/skills/marketplace/refresh");
+        loadMarketplace();
+      } catch (err) { setStatus(`Error: ${err.message}`, "err"); }
+    }
+  });
+
+  const mpFilter = $("#marketplace-filter");
+  if (mpFilter) mpFilter.addEventListener("input", renderMarketplaceList);
+  const mpKind = $("#marketplace-kind");
+  if (mpKind) mpKind.addEventListener("change", renderMarketplaceList);
+
   function loadTab(tab) {
     switch (tab) {
       case "features": return loadFeatures();
       case "skills": return loadSkills();
+      case "marketplace": return loadMarketplace();
       case "commands": return loadCommands();
       case "harness": return loadHarness();
       case "ziq": return Promise.all([loadFeatures(false), loadZIQ()]);

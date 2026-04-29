@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(gui): Skill Marketplace tab + bug 4b fix (W4 4.6.0) — new
+  `concinno.marketplace` package (~860 LoC across `discovery.py` +
+  `pypi_client.py` + `installer.py` + `validator.py`) surfaces every
+  installed `concinno-skills-*` distribution via
+  `importlib.metadata.distributions()`, including hook-only sub-pkgs
+  that ship no `SKILL.md`. New REST surface
+  `/api/skills/marketplace` GET / install / uninstall / refresh with
+  bearer-token middleware on every route, twice-click confirm gate
+  honoring `release_authorization.disabled`, 180s pip subprocess
+  timeout, atomic file-lock at `~/.concinno/marketplace.lock`, and
+  strict package-name + version regex (refuses shell metacharacters).
+  PyPI JSON cached at `~/.concinno/marketplace_cache.json` (1-hour
+  TTL, graceful offline fallback to a hardcoded first-party list).
+  New frontend tab (vanilla JS, additive) renders installed +
+  available rows, kind / version badges, wired-consumers list, and
+  refresh / install / uninstall buttons. Bug 4b fix: extends
+  `gui.server._skills_roots()` to also enumerate SKILL.md dirs
+  shipped inside installed `concinno-skills-*` packages, so the
+  existing Skills tab catches any `<pkg>/skills/<slug>/SKILL.md`
+  layout. 40 new tests (4 unit suites + GUI E2E) + ruff + mypy
+  --strict clean. Fixes W3 carryover task 4b in
+  `_AI_BRAIN/06_Handoffs/concinno/交接_Concinno.md`.
+
 - feat(verbatim_relay): Self-branding for hook warnings — every
   `[SHOW USER VERBATIM]` injected by Concinno hooks now carries a
   `[Concinno: <feature>]` prefix so users can distinguish Concinno-

@@ -12,6 +12,7 @@
   <nav class="tabs">
     <button type="button" data-tab="features" class="active">Features</button>
     <button type="button" data-tab="skills">Skills</button>
+    <button type="button" data-tab="marketplace">Marketplace</button>
     <button type="button" data-tab="commands">Slash Commands</button>
     <button type="button" data-tab="harness">Host Permissions</button>
     <button type="button" data-tab="ziq">ZIQ Posterior</button>
@@ -61,6 +62,33 @@
     <div id="skills-roots" class="roots-panel"></div>
     <div id="skills-scope-chips" class="active-facets"></div>
     <div id="skills-list" class="list"></div>
+  </section>
+
+  <section id="tab-marketplace" class="tab">
+    <p class="hint">
+      Browse + install + uninstall first-party
+      <code>concinno-skills-*</code> sub-packages from PyPI. The
+      <strong>installed</strong> list also surfaces hook-only sub-pkgs
+      that don't ship a <code>SKILL.md</code> (so a fresh
+      <code>pip install concinno-skills-session-search</code> shows up
+      here even when the Skills tab can't see it). Twice-click confirm
+      gates pip subprocess unless
+      <code>release_authorization.disabled=true</code>.
+    </p>
+    <div class="toolbar">
+      <input id="marketplace-filter" type="search" placeholder="Filter by name, summary…">
+      <select id="marketplace-kind" title="Filter by kind">
+        <option value="all">Kind: all</option>
+        <option value="skill-pkg">Kind: skill-pkg</option>
+        <option value="hook-pkg">Kind: hook-pkg</option>
+      </select>
+      <button type="button" id="marketplace-refresh" class="lang-switch">Refresh PyPI cache</button>
+    </div>
+    <div id="marketplace-meta" class="roots-panel"></div>
+    <h3>Installed</h3>
+    <div id="marketplace-installed" class="list"></div>
+    <h3>Available</h3>
+    <div id="marketplace-available" class="list"></div>
   </section>
 
   <section id="tab-commands" class="tab">

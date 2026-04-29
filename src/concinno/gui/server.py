@@ -463,11 +463,31 @@ def _config_digest() -> dict[str, Any]:
 # enforcement hook can read it directly.
 
 def _skills_roots() -> list[Path]:
-    """Directories that may contain Claude Code skill packages."""
+    """Directories that may contain Claude Code skill packages.
+
+    4.6.0 (bug 4b fix): also enumerates SKILL.md directories shipped
+    inside installed ``concinno-skills-*`` distributions via
+    :func:`concinno.marketplace.discovery.list_extra_skill_dirs`. The
+    legacy filesystem roots (``~/.claude/skills/`` + cwd) keep their
+    precedence; PyPI-installed dirs are appended as a low-priority
+    fallback (the existing collision dedup in ``_discover_skills``
+    already handles the precedence logic).
+    """
     roots = [Path.home() / ".claude" / "skills"]
     cwd_skills = Path.cwd() / ".claude" / "skills"
     if cwd_skills.is_dir():
         roots.append(cwd_skills)
+    # bug 4b: surface SKILL.md dirs shipped by installed
+    # concinno-skills-* sub-packages even when they don't register the
+    # ``concinno.skills`` entry-point. Best-effort — never raises.
+    try:
+        from concinno.marketplace.discovery import list_extra_skill_dirs
+        for extra in list_extra_skill_dirs():
+            if extra not in roots:
+                roots.append(extra)
+    except Exception:
+        # Marketplace discovery failure must not break skill enumeration.
+        pass
     return roots
 
 
@@ -643,6 +663,187 @@ def _ingest_skill(
     }
 
 
+# ── Marketplace (4.6.0) ──────────────────────────────────
+#
+# Surface every ``concinno-skills-*`` distribution via
+# :mod:`concinno.marketplace`. Bug 4b carryover: hook-only sub-pkgs
+# (no SKILL.md) were invisible to the Skills tab; the marketplace tab
+# is the operator's view + browse / install / uninstall surface.
+
+# Refresh endpoint rate-limit: per-token 30s minimum interval. Stored
+# in process state so it resets on GUI restart (intentional — never
+# survives reboot, never persists to disk).
+_MARKETPLACE_REFRESH_MIN_INTERVAL_SEC = 30
+_marketplace_last_refresh_at: dict[str, float] = {}
+
+
+def _resolve_release_auth_disabled() -> bool:
+    """True iff the operator has opted out of release authorisation.
+
+    Mirrors the gate semantics from ``rules/L1/release_coord.md``: when
+    ``disabled=True`` the marketplace twice-click confirm is bypassed
+    (the operator already opted out of all publish gates so a UI re-ask
+    is friction without value). When ``disabled=False`` the confirm is
+    enforced.
+    """
+    try:
+        from concinno.release_authorization import describe_current_config
+    except Exception:
+        return False
+    try:
+        snapshot = str(describe_current_config())
+    except Exception:
+        return False
+    return "disabled=True" in snapshot or "disabled=true" in snapshot.lower()
+
+
+def _validate_marketplace_install_body(
+    body: dict[str, Any],
+) -> tuple[str, str | None, str | None]:
+    """Pull + validate (package, version, confirm_token) from the body.
+
+    Raises HTTPException 400 on any malformed field. Returned
+    confirm_token may be None when ``release_auth_disabled`` is True
+    (the caller decides whether to enforce it).
+    """
+    from concinno.marketplace.discovery import is_valid_dist_name
+
+    package = body.get("package")
+    version = body.get("version")
+    confirm_token = body.get("confirm_token")
+    if not isinstance(package, str) or not package:
+        raise HTTPException(400, "`package` required (str)")
+    if not is_valid_dist_name(package):
+        raise HTTPException(
+            400,
+            "`package` must match concinno-skills-<slug>",
+        )
+    if version is not None and not isinstance(version, str):
+        raise HTTPException(400, "`version` must be a string or null")
+    return package, version, confirm_token if isinstance(confirm_token, str) else None
+
+
+def _enforce_marketplace_confirm_gate(
+    confirm_token: str | None,
+) -> None:
+    """Twice-click confirm gate (skipped when release_auth disabled)."""
+    if _resolve_release_auth_disabled():
+        return
+    if not confirm_token:
+        raise HTTPException(
+            409,
+            "confirmation required: re-issue with confirm_token "
+            "(release_authorization is enforced)",
+        )
+
+
+def _register_marketplace_routes(app: "FastAPI") -> None:
+    """Mount ``/api/skills/marketplace`` GET / install / uninstall /
+    refresh routes.
+
+    Routes:
+
+    * ``GET  /api/skills/marketplace``         — list rows
+    * ``POST /api/skills/marketplace/install`` — pip install
+    * ``POST /api/skills/marketplace/uninstall`` — pip uninstall
+    * ``GET  /api/skills/marketplace/refresh`` — invalidate cache
+    """
+    import time as _time
+
+    from concinno.marketplace import (
+        InstallError,
+        install_pkg,
+        list_available_pypi,
+        list_installed_concinno_skills,
+        uninstall_pkg,
+        validate_dist_frontmatter,
+    )
+    from concinno.marketplace.discovery import merge_installed_and_available
+
+    @app.get("/api/skills/marketplace")
+    def list_marketplace() -> JSONResponse:
+        installed = list_installed_concinno_skills()
+        available, pypi_ok, cache_age = list_available_pypi()
+        merged_installed, remaining_available = merge_installed_and_available(
+            installed, available,
+        )
+        return JSONResponse(
+            {
+                "installed": [r.to_dict() for r in merged_installed],
+                "available": [r.to_dict() for r in remaining_available],
+                "cache_age_sec": int(cache_age),
+                "pypi_reachable": bool(pypi_ok),
+                "release_auth_disabled": _resolve_release_auth_disabled(),
+            }
+        )
+
+    @app.post("/api/skills/marketplace/install")
+    def install_marketplace(body: dict[str, Any]) -> JSONResponse:
+        package, version, confirm_token = _validate_marketplace_install_body(body)
+        _enforce_marketplace_confirm_gate(confirm_token)
+        try:
+            result = install_pkg(package, version)
+        except InstallError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        validated = None
+        if result.ok:
+            try:
+                reports = validate_dist_frontmatter(package)
+                validated = [r.to_dict() for r in reports]
+            except Exception:
+                validated = None
+        return JSONResponse(
+            {
+                "ok": result.ok,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "return_code": result.return_code,
+                "validated": validated,
+                "newly_installed_dist_name": package if result.ok else None,
+            }
+        )
+
+    @app.post("/api/skills/marketplace/uninstall")
+    def uninstall_marketplace(body: dict[str, Any]) -> JSONResponse:
+        package, _version, confirm_token = _validate_marketplace_install_body(
+            {**body, "version": None}
+        )
+        _enforce_marketplace_confirm_gate(confirm_token)
+        try:
+            result = uninstall_pkg(package)
+        except InstallError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(
+            {
+                "ok": result.ok,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "return_code": result.return_code,
+                "removed_skill_md_dirs": [],
+            }
+        )
+
+    @app.get("/api/skills/marketplace/refresh")
+    def refresh_marketplace(request: Request) -> JSONResponse:
+        token = request.headers.get("authorization", "anon")
+        now = _time.time()
+        last = _marketplace_last_refresh_at.get(token, 0.0)
+        if now - last < _MARKETPLACE_REFRESH_MIN_INTERVAL_SEC:
+            wait = int(
+                _MARKETPLACE_REFRESH_MIN_INTERVAL_SEC - (now - last)
+            )
+            raise HTTPException(429, f"rate-limited, retry in {wait}s")
+        _marketplace_last_refresh_at[token] = now
+        from concinno.marketplace.pypi_client import PyPIClient
+        PyPIClient().invalidate_cache()
+        return JSONResponse(
+            {
+                "refreshed": True,
+                "fetched_at": int(now),
+            }
+        )
+
+
 def _register_commands_routes(app: "FastAPI") -> None:
     @app.get("/api/commands")
     def list_commands() -> JSONResponse:
@@ -802,6 +1003,7 @@ def create_app(*, token: str | None = None,
     _register_harness_routes(app)
     _register_ziq_routes(app)
     _register_skills_routes(app)
+    _register_marketplace_routes(app)
     _register_commands_routes(app)
     _register_state_routes(app)
     if STATIC_DIR.is_dir():
