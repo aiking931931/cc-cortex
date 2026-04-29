@@ -3605,6 +3605,51 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         },
         "recommended": True,
     },
+    "wiredo_subagent_verify": {
+        "category": "behavioral",
+        "enabled": False,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "description": (
+            "D-axis sub-agent functional verification — schedules a "
+            "distinct Opus verifier sub-agent for every WIREDO "
+            "self-fill so the actor cannot grade its own homework. "
+            "Per user directive 2026-04-29."
+        ),
+        "description_zh": (
+            "D 維度子代理功能驗證 — 每個 WIREDO 自填都派一個獨立 "
+            "Opus 驗證子代理，actor 不可自評。2026-04-29 用戶指令。"
+        ),
+        "params": {
+            "retry_cap": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 5,
+                "recommended": 3,
+            },
+            "dispatch_radius_threshold": {
+                "type": "str",
+                "default": "high",
+                "options": ["simple", "medium", "high", "chaotic"],
+                "recommended": "high",
+            },
+            "timeout_ms_by_radius": {
+                "type": "int",
+                "default": 300000,
+                "min": 60000,
+                "max": 1800000,
+                "recommended": 300000,
+            },
+            "auto_demote_state": {
+                "type": "str",
+                "default": "CRITICAL",
+                "options": ["CRITICAL", "HIGH", "NORMAL", "SILENT"],
+                "recommended": "CRITICAL",
+            },
+        },
+        "recommended": False,
+    },
 }
 
 

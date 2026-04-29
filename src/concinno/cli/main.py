@@ -419,6 +419,19 @@ def cmd_status(_args: argparse.Namespace) -> None:
     else:
         print("  Config: not found (run `concinno init`)")
 
+    # WIREDO sub-agent verify — pending count surfaced for ops
+    # visibility (Concinno 4.6.0). Best-effort — a missing or
+    # disabled feature must not break ``concinno status``.
+    try:
+        from concinno.guards.wiredo_subagent_verify_guard import (
+            WiredoSubagentVerifyGuard,
+        )
+
+        pending_count = len(WiredoSubagentVerifyGuard().pending_tasks())
+        print(f"  wiredo_pending_verifications: {pending_count}")
+    except Exception:
+        pass
+
 
 def cmd_doctor(_args: argparse.Namespace) -> None:
     """Health check for concinno installation."""

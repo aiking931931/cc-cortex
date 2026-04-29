@@ -332,7 +332,17 @@ def before_spawn_redteam(
     # 2026-04-27: green role accepted (RBG dispatch guard PM verdict role).
     if role == "green":
         role = "greenteam"
-    valid_roles = {"redteam", "blueteam", "greenteam", "commander", "other"}
+    # 2026-04-29: verifier role accepted (WIREDO sub-agent verify guard
+    # — distinct D-axis verifier per user directive, see
+    # ``concinno.guards.wiredo_subagent_verify_guard``).
+    valid_roles = {
+        "redteam",
+        "blueteam",
+        "greenteam",
+        "verifier",
+        "commander",
+        "other",
+    }
     if role not in valid_roles:
         raise ValueError(
             f"role must be one of {sorted(valid_roles)}, got {role!r}",

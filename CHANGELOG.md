@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(guards): WiredoSubagentVerifyGuard — D-axis sub-agent functional
+  verification (W4 4.6.0, user directive 2026-04-29). New module
+  `concinno.guards.wiredo_subagent_verify_guard` (~600 LoC) schedules a
+  distinct Opus verifier sub-agent for every WIREDO self-fill so the
+  actor cannot grade its own homework — the same failure mode as the
+  45/100 self-redteam vs 88-92 Opus-redteam evidence. Public API:
+  `PendingVerification` + `VerifyOutcome` dataclasses,
+  `WiredoSubagentVerifyGuard` class (`register_pending` /
+  `dispatch_verifier` / `record_outcome` / `pending_tasks` / `release`),
+  `SelfVerifyError` exception, and `VERIFIER_PROMPT_TEMPLATE` for the
+  verifier brief. Anti-self-verify is **structural** —
+  `verifier_agent_id == original_agent_id` raises `SelfVerifyError`
+  before any dispatcher call (no env-var escape hatch). Re-uses
+  `redblue_green_dispatch_guard.AgentDispatcher` Protocol and `Radius`
+  enum so callers (Sancio runtime in production, `unittest.mock.Mock`
+  in tests) plug in transparently. Persisted via
+  `concinno.core.state_store.StateStore` so process death between
+  register and dispatch does not orphan a record. Wire-ins land 7
+  callsites: (1) `wiredo_guards.py:WiredoEnforcementGuard.on_post_tool`
+  registers a pending verification when the actor's WIREDO table check
+  passes, (2) `hooks/on_subagent_stop.py` surfaces pending tasks for
+  the just-finished sub-agent in the manifest, (3)
+  `cli/main.py::cmd_status` exposes `wiredo_pending_verifications`
+  count for ops visibility, (4) `feature_config.FEATURE_META` adds the
+  `wiredo_subagent_verify` entry with `enabled=False` (4.0.0 SEMVER
+  opt-in default), `ziq_autotunable=True`, params `retry_cap=3` /
+  `dispatch_radius_threshold="high"` / `timeout_ms_by_radius=300000` /
+  `auto_demote_state="CRITICAL"`, (5) `switches.md` row #32 + L1 +
+  public/L1 `wiredo.md` `**switch**:` headers (deferred — outside
+  per-package commit scope, see release notes), (6) ZIQ FTRL arm
+  registration on import (`wiredo_verify.retry_cap` choices 1-5 +
+  `wiredo_verify.dispatch_radius_threshold` choices simple/medium/high/
+  chaotic), (7) per-task scratch directory
+  `~/.concinno/verify_workspace/<task_id>/` so a misbehaving verifier
+  cannot write into the actor's scope (F3 mitigation). Outcome JSONL
+  appends to `~/.concinno/ziq_state/wiredo_verify_outcomes.jsonl` AND
+  the shared 軌 B Habituation namespace
+  `~/.concinno/ziq_state/hook_ignore_rate.jsonl` per the Hermes 4-cap
+  §E reconciliation — sub-agent reliability tracking and hook-fire
+  ignore-rate share one ZIQ Bayesian engine, not two. Also extends
+  `redteam_spawn_guard.before_spawn_redteam` valid_roles to accept
+  `"verifier"` so the spawn ledger covers WIREDO verifier dispatches.
+  17 new tests + 1 opt-in live-Opus sanity (`CONCINNO_RUN_LIVE_OPUS=1`)
+  cover the directive contract: anti-self-verify pre-dispatch raise,
+  pass / fail / timeout / user-overrule outcomes, retry cap (default 3
+  + ZIQ-tunable), feature kill-switch, simple-radius short-circuit,
+  prompt template render, persistence across guard instances, ZIQ arm
+  registration idempotency. ruff + mypy --strict clean on the new
+  module + test file. Honours user directive 2026-04-29: "WIREDO is
+  self-verify; after self-verify, a STRONGEST sub-agent MUST be
+  dispatched to truly WIREDO-verify before completion. If a sub-agent
+  did the task, the parent agent OR another distinct sub-agent must
+  verify."
+
 - feat(gui): Skill Marketplace tab + bug 4b fix (W4 4.6.0) — new
   `concinno.marketplace` package (~860 LoC across `discovery.py` +
   `pypi_client.py` + `installer.py` + `validator.py`) surfaces every
