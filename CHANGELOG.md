@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-04-29
+
+### Known limitations (4.6.0 ship — fix in 4.6.1 / 4.7.0)
+
+- **WIREDO sub-agent verify dispatch** (`WiredoSubagentVerifyGuard`) ships
+  with the **registry + anti-self-verify gate + state persistence** but
+  **automatic verifier dispatch** requires Sancio M2 runtime async
+  support; queued tasks remain pending until 4.6.1 when auto-dispatch on
+  `on_subagent_stop` lands. CLI surface `concinno status` exposes pending
+  count; manual dispatch via `concinno wiredo-verify dispatch <task_id>`
+  (4.6.1).
+- **GUI Marketplace install confirm** uses bearer-token + 180 s
+  subprocess timeout + twice-click confirm + strict package-name regex as
+  primary defense. `cache_etag` nonce echo (per design doc §1.5) deferred
+  to 4.7.0 hardening.
+
 ### Added
 
 - feat(habituation): 軌 B Habituation 三件套 — dedup + auto-demote + FTRL

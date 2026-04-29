@@ -126,3 +126,24 @@ def test_feature_meta_has_expected_categories():
     categories = {m["category"] for m in FEATURE_META.values()}
     expected = {"hard_gate", "hard_quality", "ux", "context"}
     assert expected.issubset(categories), f"Missing categories: {expected - categories}"
+
+
+# ── marketplace_discovery (4.6.0 HP3) ────────────────────
+
+
+def test_marketplace_discovery_meta_present():
+    """4.6.0 HP3 GUI Marketplace tab promises a runtime-toggleable
+    discovery feature; F5 ship-fix wave registers the FEATURE_META row
+    so ``concinno features get marketplace_discovery`` and
+    ``cfg.feature('marketplace_discovery', 'enabled')`` work without a
+    KeyError. Regression guard so no future refactor drops the row.
+    """
+    assert "marketplace_discovery" in FEATURE_META
+    meta = FEATURE_META["marketplace_discovery"]
+    assert meta["enabled"] is True
+    assert meta["category"] == "ux"
+    assert meta["ziq_autotunable"] is False
+    assert meta["cosmetic"] is False
+    params = meta.get("params", {})
+    assert "refresh_interval_hours" in params
+    assert params["refresh_interval_hours"]["default"] == 1

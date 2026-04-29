@@ -144,3 +144,74 @@ def test_empty_feature_name_is_safe(isolated_state: Path) -> None:
     assert current_tier("") == "CRITICAL"
     assert record_ignore("") == "CRITICAL"
     assert record_accept("") == "CRITICAL"
+
+
+# ── F3 ship-fix wave: production wiring of record_ignore ─────────
+
+
+def test_correction_feeds_record_ignore_via_on_prompt_submit(
+    isolated_state: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end F3 wiring: user correction fans the pending queue
+    of :mod:`concinno.ziq_hook_ignore_rate` into per-feature
+    ``record_ignore`` calls so the auto-demote tier ladder actually
+    moves in production.
+
+    Without this wiring the tier ladder is dead code per FATAL-3 in
+    ``2026-04-29-4-6-0-ship-redteam-attack.md`` §2.3.
+    """
+    from concinno.hooks.on_prompt_submit import (
+        _feed_correction_into_auto_demote,
+    )
+    from concinno.ziq_hook_ignore_rate import record_emit
+
+    # Isolate FTRL state to a tmp file as well so two separate state
+    # files do not pollute each other's assertions.
+    ftrl_state = tmp_path / "ziq_hook_ignore_rate.json"
+    monkeypatch.setenv(
+        "CONCINNO_ZIQ_HOOK_IGNORE_RATE_PATH", str(ftrl_state),
+    )
+
+    # Simulate three hook fires in the same session.
+    record_emit("post_tool_critical", session_id="S-fix3")
+    record_emit("post_tool_critical", session_id="S-fix3")
+    record_emit("streak_ux", session_id="S-fix3")
+
+    # Default tier == CRITICAL before the correction signal.
+    assert current_tier("post_tool_critical") == "CRITICAL"
+    assert current_tier("streak_ux") == "CRITICAL"
+
+    # Three back-to-back corrections should step both features down.
+    for _ in range(3):
+        _feed_correction_into_auto_demote(session_id="S-fix3")
+
+    # Both features visited the tier ladder — we expect at least one
+    # demotion (the wiring fires record_ignore per pending feature
+    # de-duped to once per turn).
+    assert current_tier("post_tool_critical") == "HIGH"
+    assert current_tier("streak_ux") == "HIGH"
+
+
+def test_correction_wire_skips_other_sessions(
+    isolated_state: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A correction in session A must not demote pendings from session B."""
+    from concinno.hooks.on_prompt_submit import (
+        _feed_correction_into_auto_demote,
+    )
+    from concinno.ziq_hook_ignore_rate import record_emit
+
+    ftrl_state = tmp_path / "ziq_hook_ignore_rate.json"
+    monkeypatch.setenv(
+        "CONCINNO_ZIQ_HOOK_IGNORE_RATE_PATH", str(ftrl_state),
+    )
+
+    record_emit("foreign_feature", session_id="S-other")
+    for _ in range(5):
+        _feed_correction_into_auto_demote(session_id="S-mine")
+
+    assert current_tier("foreign_feature") == "CRITICAL"

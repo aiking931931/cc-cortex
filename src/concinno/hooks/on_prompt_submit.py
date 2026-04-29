@@ -451,11 +451,73 @@ def handle_prompt_submit(
         record_user_accept_signal(
             user_corrected=corrected, session_id=session_id,
         )
+
+        # 15b. 軌 B 件 2 — when the user explicitly corrected, every
+        #      hook that fired in the previous turn earned an "ignored"
+        #      verdict (LLM saw the warning, the user still had to step
+        #      in). Step the per-feature tier counter accordingly so
+        #      the auto-demote ladder reflects real LLM behaviour, not
+        #      just FTRL EMA. F3 ship-fix wave (sub-agent ship-fix-wave):
+        #      this is the missing production caller for
+        #      ``concinno.hooks.auto_demote.record_ignore`` — without it
+        #      the tier ladder is dead code per FATAL-3 attack.
+        if corrected:
+            _feed_correction_into_auto_demote(session_id=session_id)
     except Exception:
         pass
 
     _memory_lifecycle_user_prompt_submit(user_prompt, session_id)
     return {"contexts": contexts}
+
+
+def _feed_correction_into_auto_demote(*, session_id: str = "") -> None:
+    """Feed user-correction verdict into the auto-demote tier ladder.
+
+    F3 ship-fix wave production wiring for
+    :func:`concinno.hooks.auto_demote.record_ignore`. Reads the pending
+    queue maintained by :mod:`concinno.ziq_hook_ignore_rate` (件 3 FTRL)
+    and calls :func:`record_ignore` once per pending feature emitted in
+    the **current** session. We do NOT promote on accept — auto-demote
+    semantics intentionally reset the consecutive-ignore counter via
+    :func:`record_accept` only on explicit non-correction signal, but
+    the cheap silence ≠ accept (silence may also be "user moved on
+    without realising the warning was wrong"). Per the F7 fix lineage,
+    only an explicit correction is treated as ignored — silence is
+    handled by the FTRL EMA decay, not the tier counter.
+
+    De-dups by feature name so a hook that fired five times in one turn
+    only counts as one ignore against the tier ladder (otherwise a
+    high-frequency hook would race to ``SILENT_LOG`` after a single
+    correction). Best-effort: any failure swallows so this never breaks
+    prompt submission.
+    """
+    try:
+        from concinno.hooks.auto_demote import (
+            is_disabled as _ad_disabled,
+        )
+        from concinno.hooks.auto_demote import (
+            record_ignore as _ad_record_ignore,
+        )
+        from concinno.ziq_hook_ignore_rate import pending_emits
+
+        if _ad_disabled():
+            return
+        seen: set[str] = set()
+        for entry in pending_emits():
+            if not isinstance(entry, dict):
+                continue
+            feature = entry.get("feature")
+            entry_session = entry.get("session_id", "")
+            if not isinstance(feature, str) or not feature:
+                continue
+            if session_id and entry_session and entry_session != session_id:
+                continue
+            if feature in seen:
+                continue
+            seen.add(feature)
+            _ad_record_ignore(feature)
+    except Exception:
+        return
 
 
 def _memory_lifecycle_user_prompt_submit(

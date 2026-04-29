@@ -3798,6 +3798,47 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         },
         "recommended": True,
     },
+    # 4.6.0 — GUI Marketplace tab discovery layer (HP3). Pulls the curated
+    # ``concinno-skills-*`` package list from PyPI, caches the result for
+    # ``refresh_interval_hours`` and surfaces it in the Concinno GUI's
+    # Marketplace tab. The fetch is offline-tolerant: a network failure
+    # falls back to the last-known cache, so disabling the feature only
+    # hides the UI tab — it never blocks the agent loop.
+    "marketplace_discovery": {
+        "category": "ux",
+        "enabled": True,
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "GUI Marketplace tab 不顯示 PyPI 套件清單，"
+            "用戶仍可手動 pip install concinno-skills-*"
+        ),
+        "consequences_if_off_en": (
+            "GUI Marketplace tab will not list PyPI packages; users can "
+            "still manually pip install concinno-skills-* sub-packages."
+        ),
+        "description": (
+            "PyPI-backed marketplace discovery for the Concinno GUI's "
+            "Marketplace tab. Refreshes the curated concinno-skills-* "
+            "list every refresh_interval_hours and caches the result so "
+            "an offline session still renders the last-known list."
+        ),
+        "description_zh": (
+            "GUI Marketplace 分頁的 PyPI 探索層。每 refresh_interval_hours "
+            "重抓 concinno-skills-* 套件清單並快取，離線時仍顯示上一次抓到的清單。"
+        ),
+        "params": {
+            "refresh_interval_hours": {
+                "type": "int",
+                "default": 1,
+                "min": 0,
+                "max": 24,
+                "recommended": 1,
+            },
+        },
+        "recommended": True,
+    },
 }
 
 
