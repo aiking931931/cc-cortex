@@ -465,8 +465,20 @@ def main(hook_data: dict | None = None) -> None:
 
 
 def _session_search_lifecycle_stop(hook_data: dict) -> None:
-    """Optional concinno-skills-session-search wiring; absence is silent."""
+    """Optional concinno-skills-session-search wiring; absence is silent.
+
+    4.6.0 hybrid-capture: we resolve the CC transcript file path from
+    ``session_id + cwd`` and pass it as ``transcript_path`` to the
+    sub-pkg. The sub-pkg's ``on_stop`` enqueues a tiny pointer record
+    instead of reading the (potentially multi-MB) transcript inline,
+    keeping this hook hot-path-fast. The deferred read+index lands
+    later via ``on_session_end`` drain or the explicit
+    ``concinno-session-search drain`` CLI.
+    """
     try:
+        from concinno_skills_session_search import (
+            transcript_resolver as _resolver,
+        )
         from concinno_skills_session_search.lifecycle import (
             LifecycleContext as _SearchCtx,
         )
@@ -474,15 +486,17 @@ def _session_search_lifecycle_stop(hook_data: dict) -> None:
             on_stop as _search_on_stop,
         )
 
-        # Hook payload includes the transcript path / id but not the
-        # full transcript text. Pass session_id only; transcript-text
-        # capture is the consumer's responsibility (e.g. the Concinno
-        # session capture daemon writes the transcript file and the
-        # caller indexes it via the CLI ``--reindex`` path). Keeping
-        # this wire as id-only avoids reading megabytes inside a hot
-        # hook path.
+        session_id = hook_data.get("session_id", "")
+        cwd = hook_data.get("cwd") or None
+        # ``resolve`` returns a Path or None. None gracefully falls
+        # back to the legacy id-only noop inside the sub-pkg.
+        resolved = _resolver.resolve(session_id, cwd=cwd) if session_id else None
+        transcript_path = str(resolved) if resolved is not None else None
         _search_on_stop(
-            _SearchCtx(session_id=hook_data.get("session_id", ""))
+            _SearchCtx(
+                session_id=session_id,
+                transcript_path=transcript_path,
+            )
         )
     except (ImportError, Exception):
         pass
