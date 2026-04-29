@@ -20,6 +20,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from concinno.hooks.relay_helpers import with_feature_prefix
+
 logger = logging.getLogger("concinno.hooks.wait_inject")
 
 
@@ -94,4 +96,10 @@ def build_context() -> Optional[str]:
             "polls in background but you decide when to act on alerts."
         )
 
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    # 4.6.0 verbatim_relay: brand the polling_watcher fan-in so the
+    # user can distinguish it from genuine CC platform output. Helper
+    # handles silent / off / verbose modes internally; ``""`` means
+    # the caller must skip emit (off mode).
+    wrapped = with_feature_prefix("polling_watcher", body)
+    return wrapped or None

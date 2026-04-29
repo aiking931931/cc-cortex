@@ -49,6 +49,8 @@ import json
 import os
 import re
 
+from concinno.hooks.relay_helpers import with_feature_prefix
+
 # ── 1. Thinking Directives — Layered ──────────────────────
 
 # ── Prompt engineering constraints ────────────────────────
@@ -215,7 +217,12 @@ def _build_summaries(
         count = it.get("count", 0)
         text = it.get("correction_text", "")[:80]
         lines.append(f"  - [{count}x|{key}] {text}")
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    # 4.6.0 verbatim_relay: brand the cognitive correction summary so
+    # the user recognises the warning as Concinno output rather than a
+    # CC platform anomaly. Helper resolves mode (prefix / silent / off
+    # / verbose) internally; empty return = caller drops the chunk.
+    return with_feature_prefix("cognitive_inject", body)
 
 
 def _load_skill_index(workspace: str) -> list[dict]:
