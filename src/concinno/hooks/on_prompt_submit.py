@@ -432,6 +432,28 @@ def handle_prompt_submit(
     except Exception:
         pass
 
+    # 15. 軌 B 件 3 — feed the user-accept signal into the FTRL learner.
+    #     Per F7 fix in the 2026-04-29 4-channel commander verdict, we
+    #     use the next-turn user-correction state (corrected = 0.0
+    #     reward, silent = 1.0) — NOT behaviour-shifted, to avoid the
+    #     Goodhart inflation a "behaviour shifted" framing would create.
+    #     Best-effort: the FTRL learner is opt-in (env-disabled) and the
+    #     prompt-submit hot path must never crash on a learner failure.
+    try:
+        from concinno.knowledge import is_correction
+        from concinno.ziq_hook_ignore_rate import record_user_accept_signal
+
+        result = is_correction(user_prompt or "", return_confidence=True)
+        if isinstance(result, tuple) and len(result) == 2:
+            corrected = bool(result[0])
+        else:
+            corrected = bool(result)
+        record_user_accept_signal(
+            user_corrected=corrected, session_id=session_id,
+        )
+    except Exception:
+        pass
+
     _memory_lifecycle_user_prompt_submit(user_prompt, session_id)
     return {"contexts": contexts}
 

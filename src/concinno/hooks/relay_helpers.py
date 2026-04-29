@@ -177,6 +177,97 @@ def with_feature_prefix(
     return f"{_VERBATIM_TOKEN} [Concinno: {feature_name}] {body}"
 
 
+def emit_with_habituation(
+    feature_name: str,
+    raw_msg: str,
+    *,
+    session_id: str = "",
+    mode: RelayMode | None = None,
+) -> str:
+    """軌 B-aware wrapper: dedup + auto-demote + brand prefix in one call.
+
+    Composes the four 4.6.0 layers in the canonical order so that callers
+    do not have to wire them by hand:
+
+    1. **件 1 dedup** (``concinno.hooks.dedup_layer.should_dedup``) —
+       returns ``""`` when the same ``(feature, msg)`` already fired in
+       this session (caller MUST treat empty string as "skip emit").
+    2. **件 2 auto-demote** (``concinno.hooks.auto_demote.current_tier``)
+       — when the tier has been demoted to ``SILENT_LOG``, the helper
+       also returns ``""``. ``CRITICAL`` / ``HIGH`` / ``NORMAL`` all
+       still emit in this version (tier-aware shortening is a 4.7.0
+       refinement once we have FTRL training data).
+    3. **件 3 FTRL accept-rate** (``concinno.ziq_hook_ignore_rate.
+       record_emit``) — every successful emit registers a pending
+       verdict so the next ``record_user_accept_signal`` can update
+       per-feature accept-rate.
+    4. **軌 A verbatim_relay prefix** (``with_feature_prefix``) — same
+       as the legacy 4.5.0 helper.
+
+    Best-effort: any internal failure (state file unreadable, FTRL
+    bus dead) silently degrades to the legacy
+    :func:`with_feature_prefix` shape so a downstream warning is never
+    swallowed by 軌 B infrastructure failure.
+
+    Args:
+        feature_name: Source feature key.
+        raw_msg: Hook warning body.
+        session_id: Claude Code session id (empty string falls back to
+            TTL-bounded global window per :mod:`dedup_layer`).
+        mode: Forced relay mode (passes through to
+            :func:`with_feature_prefix`). ``None`` resolves via
+            :func:`get_relay_mode`.
+
+    Returns:
+        The wrapped string ready to drop into ``additionalContext``,
+        or ``""`` when the caller MUST skip emit (dedup hit OR
+        ``SILENT_LOG`` tier OR mode==``"off"``).
+    """
+    # Step 1 & 2 — soft imports so the relay layer cannot break when
+    # 軌 B state is missing or hook layout shifts in a partial install.
+    try:
+        from concinno.hooks.dedup_layer import mark_emitted, should_dedup
+    except Exception:
+        should_dedup = None  # type: ignore[assignment]
+        mark_emitted = None  # type: ignore[assignment]
+    try:
+        from concinno.hooks.auto_demote import current_tier
+    except Exception:
+        current_tier = None  # type: ignore[assignment]
+
+    if should_dedup is not None:
+        try:
+            if should_dedup(feature_name, raw_msg, session_id=session_id):
+                return ""
+        except Exception:
+            pass
+
+    if current_tier is not None:
+        try:
+            if current_tier(feature_name) == "SILENT_LOG":
+                return ""
+        except Exception:
+            pass
+
+    wrapped = with_feature_prefix(feature_name, raw_msg, mode=mode)
+    if not wrapped:
+        return wrapped
+
+    # Step 3 — register pending FTRL verdict + dedup mark.
+    if mark_emitted is not None:
+        try:
+            mark_emitted(feature_name, raw_msg, session_id=session_id)
+        except Exception:
+            pass
+    try:
+        from concinno.ziq_hook_ignore_rate import record_emit
+
+        record_emit(feature_name, session_id=session_id)
+    except Exception:
+        pass
+    return wrapped
+
+
 def _strip_wrappers(msg: str, feature_name: str) -> str:
     """Remove existing ``[SHOW USER VERBATIM]`` and ``[Concinno: …]`` prefixes.
 

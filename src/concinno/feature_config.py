@@ -3650,6 +3650,154 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         },
         "recommended": False,
     },
+    # ── 4.6.0 — 軌 B Habituation 三件套 (per 2026-04-29 commander verdict)
+    #
+    # The 4-channel verdict §3 軌 B identified habituation (LLM ignores
+    # the same warning text after N repeats) as the real root cause that
+    # channel routing alone cannot solve. The fix is three layers, each
+    # with its own FEATURE_META entry below:
+    #
+    #   件 1 dedup        → exact (feature, msg) duplicates collapse per-session
+    #   件 2 auto-demote  → N=3 consecutive ignores step the tier down
+    #   件 3 FTRL ignore-rate → 5th ZIQ namespace per Hermes 4-cap §E.1
+    #
+    # All three are gated together by env CONCINNO_HABITUATION_DISABLED=1
+    # so an operator can opt out of the entire 軌 B if they prefer the
+    # legacy 4.5.0 behaviour. Per L0 鐵律 #6 ZIQ-vs-manual priority,
+    # 件 1 is cosmetic (a UX preference: how often a duplicate is shown);
+    # 件 2 + 件 3 are ZIQ-autotunable because their thresholds map to
+    # measurable LLM-attention outcomes.
+    "habituation_dedup": {
+        "category": "context",
+        "enabled": True,
+        "ziq_autotunable": False,  # cosmetic: hash-equality dedup
+        "cosmetic": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "同 hook 同訊息單 session 內可能 inject 多次，"
+            "LLM 對重複警告 habituate 後忽略後續 fire"
+        ),
+        "consequences_if_off_en": (
+            "Same hook + same message can inject repeatedly within "
+            "one session; LLM habituates and ignores later fires."
+        ),
+        "description": (
+            "Producer-side content-hash dedup keyed on "
+            "(session_id, feature, normalised_msg_hash). Same text "
+            "from the same hook in the same session injects exactly "
+            "once until the session boundary clears the cache."
+        ),
+        "description_zh": (
+            "Producer 側 content-hash 去重，key=(session_id, feature, "
+            "normalised hash)。同 session 同 hook 同訊息只 inject 一次，"
+            "session 邊界自動清空。"
+        ),
+        "params": {
+            "fallback_ttl_seconds": {
+                "type": "float",
+                "default": 300.0,
+                "min": 30.0,
+                "max": 3600.0,
+                "recommended": 300.0,
+            },
+        },
+        "recommended": True,
+    },
+    "habituation_auto_demote": {
+        "category": "behavioral",
+        "enabled": True,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "Hook tier 永遠不降級，CRITICAL 警告連續 ignore 後仍占用 "
+            "LLM 注意力預算，新訊號被擠出"
+        ),
+        "consequences_if_off_en": (
+            "Hook tier never demotes; CRITICAL warnings keep "
+            "consuming attention budget after chronic ignore, "
+            "crowding out novel signals."
+        ),
+        "description": (
+            "Per-hook tier auto-demote: N=3 consecutive ignored fires "
+            "step the tier down (CRITICAL → HIGH → NORMAL → SILENT_LOG). "
+            "record_accept resets the counter; explicit reset() restores "
+            "the tier."
+        ),
+        "description_zh": (
+            "Per-hook tier 自動降級：連續 N=3 次 LLM ignore → "
+            "tier 自動降一級（CRITICAL → HIGH → NORMAL → SILENT_LOG）。"
+            "record_accept 重置計數；reset() 還原 tier。"
+        ),
+        "params": {
+            "ignore_threshold": {
+                "type": "int",
+                "default": 3,
+                "min": 1,
+                "max": 10,
+                "recommended": 3,
+            },
+        },
+        "recommended": True,
+    },
+    "habituation_ignore_rate_ftrl": {
+        "category": "ziq",
+        "enabled": True,
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "Hook accept-rate 不學，auto-demote tier 仍可運作但無 "
+            "FTRL 自適應；4.7.0 軌 C tier 自動路由失去訓練資料"
+        ),
+        "consequences_if_off_en": (
+            "Hook accept-rate is not learned; auto-demote still works "
+            "rule-based but cannot self-tune. The 4.7.0 軌 C tier "
+            "auto-router would be unable to converge without this "
+            "training signal."
+        ),
+        "description": (
+            "5th ZIQ outcome namespace ziq.outcome.hook_ignore_rate "
+            "shared with verbatim_relay, dedup_layer, auto_demote, "
+            "WiredoSubagentVerifyGuard and §C reliability prior. "
+            "Per F7 fix, the outcome signal is the next-turn user-"
+            "correction state (corrected = 0.0, silent = 1.0) — NOT "
+            "behaviour-shifted, so Goodhart inflation cannot inflate "
+            "the reward by the model self-rewarding."
+        ),
+        "description_zh": (
+            "第 5 個 ZIQ outcome namespace ziq.outcome.hook_ignore_rate"
+            "，與 verbatim_relay / dedup_layer / auto_demote / "
+            "WiredoSubagentVerifyGuard / §C reliability prior 共用。"
+            "F7 fix：outcome = 下一輪 user-correction 訊號"
+            "（user 糾錯=0.0 / 靜默=1.0），非 behaviour-shifted，"
+            "防 Goodhart inflation。"
+        ),
+        "params": {
+            "alpha": {
+                "type": "float",
+                "default": 0.1,
+                "min": 0.01,
+                "max": 0.5,
+                "recommended": 0.1,
+            },
+            "decay": {
+                "type": "float",
+                "default": 0.99,
+                "min": 0.5,
+                "max": 0.999,
+                "recommended": 0.99,
+            },
+            "pending_ttl_seconds": {
+                "type": "float",
+                "default": 1800.0,
+                "min": 300.0,
+                "max": 7200.0,
+                "recommended": 1800.0,
+            },
+        },
+        "recommended": True,
+    },
 }
 
 

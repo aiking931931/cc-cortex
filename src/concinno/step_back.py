@@ -67,20 +67,42 @@ _HARD_DENY_IMMEDIATE_TEMPLATE = (
 )
 
 
-def _render_step_back(gate: str, reason: str) -> str:
-    """Render the visible step-back relay line through the brand layer."""
-    return with_feature_prefix(
-        gate,
-        f"⚠ {gate}: {reason} — paused, changing approach",
-    )
+def _render_step_back(gate: str, reason: str, session_id: str = "") -> str:
+    """Render the visible step-back relay line through the brand layer.
+
+    Step-back / hard-deny renders are *gate fires*, not habituated
+    noise: every fire is a real direction-change event. We therefore
+    bypass 軌 B 件 1 dedup (which would silently swallow the second
+    fire and break the two-tier behaviour) but still feed the FTRL
+    learner via :func:`record_emit` so the learner sees gate-fire
+    patterns alongside hook warnings.
+    """
+    msg = f"⚠ {gate}: {reason} — paused, changing approach"
+    out = with_feature_prefix(gate, msg)
+    _record_gate_emit(gate, session_id)
+    return out
 
 
-def _render_hard_deny(gate: str, reason: str) -> str:
-    """Render the visible hard-deny relay line through the brand layer."""
-    return with_feature_prefix(
-        gate,
-        f"⛔ Blocked: {reason} — awaiting your direction",
-    )
+def _render_hard_deny(gate: str, reason: str, session_id: str = "") -> str:
+    """Render the visible hard-deny relay line through the brand layer.
+
+    Same rationale as :func:`_render_step_back` — gate fires bypass
+    軌 B 件 1 dedup but still emit to the FTRL ignore-rate learner.
+    """
+    msg = f"⛔ Blocked: {reason} — awaiting your direction"
+    out = with_feature_prefix(gate, msg)
+    _record_gate_emit(gate, session_id)
+    return out
+
+
+def _record_gate_emit(gate: str, session_id: str) -> None:
+    """Best-effort FTRL pending-verdict registration for a gate fire."""
+    try:
+        from concinno.ziq_hook_ignore_rate import record_emit
+
+        record_emit(gate, session_id=session_id)
+    except Exception:
+        pass
 
 # Valid modes
 MODES = ("step_back_first", "hard_deny", "off")
@@ -209,7 +231,7 @@ def wrap_gate(
     if mode == "hard_deny":
         ctx = _HARD_DENY_IMMEDIATE_TEMPLATE.format(
             gate=gate_name, reason=msg,
-            verbatim=_render_hard_deny(gate_name, msg),
+            verbatim=_render_hard_deny(gate_name, msg, session_id),
         )
         _emit_hard_deny_stderr(gate_name, msg)
         original_reason = deny_result.get("reason", gate_name)
@@ -229,7 +251,7 @@ def wrap_gate(
         # Second consecutive same-gate trigger → hard deny
         deny_ctx = _HARD_DENY_TEMPLATE.format(
             gate=gate_name, reason=msg,
-            verbatim=_render_hard_deny(gate_name, msg),
+            verbatim=_render_hard_deny(gate_name, msg, session_id),
         )
         _emit_hard_deny_stderr(gate_name, msg)
         # Clear same-gate state after deny (reset for next cycle)
@@ -262,6 +284,7 @@ def wrap_gate(
             f"⚠ {gate_name}: {msg} "
             f"— {global_count} consecutive failures, consider /compact",
         )
+        _record_gate_emit(gate_name, session_id)
         compact_ctx = (
             f"⚠ [{gate_name}] {msg}\n"
             "Stop. Change direction and retry.\n"
@@ -282,7 +305,7 @@ def wrap_gate(
 
     step_ctx = _STEP_BACK_TEMPLATE.format(
         gate=gate_name, reason=msg,
-        verbatim=_render_step_back(gate_name, msg),
+        verbatim=_render_step_back(gate_name, msg, session_id),
     )
     _emit_step_back_stderr(gate_name, msg)
     original_reason = deny_result.get("reason", gate_name)

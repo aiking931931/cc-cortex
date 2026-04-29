@@ -9,6 +9,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat(habituation): 軌 B Habituation 三件套 — dedup + auto-demote + FTRL
+  ignore-rate (4.6.0, per 2026-04-29 4-channel commander verdict §3
+  軌 B). Three new modules + the `emit_with_habituation` composer wire
+  the four 4.6.0 layers in canonical order (dedup → auto-demote →
+  FTRL pending → verbatim_relay prefix):
+  - `concinno.hooks.dedup_layer` (~310 LoC) — content-hash + session-
+    level cooldown so the same `(feature, msg)` from one session injects
+    exactly once. Hashes the *normalised* body so the same payload under
+    different relay modes still collapses. Session-less path falls back
+    to a 5-minute TTL window. State at
+    `~/.concinno/state/hook_dedup_session.json` (env override
+    `CONCINNO_HOOK_DEDUP_STATE_PATH`).
+  - `concinno.hooks.auto_demote` (~270 LoC) — per-hook tier ladder
+    `CRITICAL → HIGH → NORMAL → SILENT_LOG`. N=3 consecutive
+    `record_ignore` calls step the tier down one rung;
+    `record_accept` resets the counter (no auto-promotion to avoid
+    yo-yo). Threshold tunable via FEATURE_META + env
+    `CONCINNO_HABITUATION_IGNORE_THRESHOLD`. State at
+    `~/.concinno/state/hook_demote_state.json`.
+  - `concinno.ziq_hook_ignore_rate` (~340 LoC) — 5th ZIQ outcome
+    namespace `ziq.outcome.hook_ignore_rate` (Hermes 4-cap §E.1
+    reconciliation). Per-hook FTRL EMA learns accept-rate from next-
+    turn user-correction signal (corrected = 0.0 / silent = 1.0 — per
+    F7 fix, NOT behaviour-shifted, to avoid Goodhart inflation). 30-min
+    pending TTL defaults a stale emit to "ignored". Mirrors per-feature
+    reward into the shared ZIQ outcome bus so any registered FTRL
+    consumer (auto-demote tuner, future tier auto-router) sees the
+    signal in real time.
+  - `concinno.hooks.relay_helpers.emit_with_habituation` (~75 LoC) —
+    one-call composer that runs dedup → tier → FTRL register →
+    verbatim_relay in canonical order, returning `""` whenever the
+    caller MUST skip emit (dedup hit OR `SILENT_LOG` tier OR
+    mode=`"off"`). Fully best-effort: any internal failure silently
+    degrades to the legacy `with_feature_prefix` shape so a downstream
+    warning is never swallowed by 軌 B infrastructure failure.
+
+  Wire-ins land 7 callsites in the same wave (anti-island per
+  MEMORY #4d):
+  1. `hooks/on_post_tool.py:_throttle` CRITICAL + MILESTONE branches
+     route through `emit_with_habituation`.
+  2. `hooks/on_post_tool.py:_append_token_fragments` token_monitor
+     emit threads `session_id` for per-session dedup scope.
+  3. `hooks/on_post_tool.py:_check_context_compressed` rewires the
+     context-compression warning path.
+  4. `step_back.py:_render_step_back` + `_render_hard_deny` +
+     compact-suggestion render still use `with_feature_prefix`
+     (gate fires bypass dedup — every fire is a real direction-change
+     event, not habituated noise) but feed FTRL via `record_emit` so
+     the learner sees gate-fire patterns too.
+  5. `hooks/on_prompt_submit.py:handle_prompt_submit` step 15 calls
+     `record_user_accept_signal` once per turn using the existing
+     `is_correction` detector — this is the FTRL outcome feed.
+  6. `hooks/on_session_start.py` clears the dedup cache for the new
+     session id so previous session state never leaks forward.
+  7. `feature_config.py` adds three FEATURE_META entries
+     (`habituation_dedup` cosmetic / `habituation_auto_demote`
+     ZIQ-tunable / `habituation_ignore_rate_ftrl` ZIQ-tunable) with
+     full param schema (`ignore_threshold` / `alpha` / `decay` /
+     `pending_ttl_seconds` / `fallback_ttl_seconds`).
+
+  Single env kill-switch `CONCINNO_HABITUATION_DISABLED=1` opts out
+  of all three layers together; per-layer overrides
+  `CONCINNO_HOOK_DEDUP_DISABLED` / `CONCINNO_HOOK_AUTO_DEMOTE_DISABLED`
+  / `CONCINNO_ZIQ_HOOK_IGNORE_RATE_DISABLED` allow surgical isolation
+  during testing.
+
+  Six-condition ZIQ gate (per `kb_ziq`): finite options ✓ /
+  structural prior ✓ (LLM behaviour-shift signal) / measurable
+  outcome ✓ (user-accept binary) / Markov ✓ (per-hook independent) /
+  stable env ✓ / sufficient sample ✓ (high-frequency hooks 100+
+  fires/session) — all 6 pass under the verdict §3 reframe.
+
+  Tests: `tests/test_dedup_layer.py` (12) +
+  `tests/test_auto_demote.py` (15) +
+  `tests/test_ziq_hook_ignore_rate.py` (14) +
+  `tests/test_emit_with_habituation.py` (5) = 46 new tests, plus the
+  two legacy `test_relay_helpers.py` smoke checks updated to accept
+  either `with_feature_prefix` or `emit_with_habituation` import. All
+  ship green; no regressions in adjacent suites (relay /
+  step_back / wiredo_subagent_verify_guard / feature_config).
 - feat(guards): WiredoSubagentVerifyGuard — D-axis sub-agent functional
   verification (W4 4.6.0, user directive 2026-04-29). New module
   `concinno.guards.wiredo_subagent_verify_guard` (~600 LoC) schedules a

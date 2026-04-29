@@ -29,7 +29,7 @@ import sys
 
 from concinno.constants import WRITE_TOOLS_EXT as _WRITE_TOOLS
 from concinno.hooks.io_utils import cache_path, get_project_dir
-from concinno.hooks.relay_helpers import with_feature_prefix
+from concinno.hooks.relay_helpers import emit_with_habituation
 
 _MILESTONE_INTERVAL = 5
 
@@ -155,9 +155,10 @@ def _throttle(lines: list[str], session_id: str = "") -> list[str]:
         level = _classify(line)
         if level == "CRITICAL":
             _emit_stderr(_stderr_summary(line) + token_suffix)
-            wrapped = with_feature_prefix(
+            wrapped = emit_with_habituation(
                 "post_tool_critical",
                 f"{line}{token_suffix}",
+                session_id=session_id,
             )
             if wrapped:
                 output.append(wrapped)
@@ -173,7 +174,9 @@ def _throttle(lines: list[str], session_id: str = "") -> list[str]:
             if is_named or is_interval:
                 display = f"{line}{token_suffix}"
                 _emit_stderr(display)
-                wrapped = with_feature_prefix("streak_ux", display)
+                wrapped = emit_with_habituation(
+                    "streak_ux", display, session_id=session_id,
+                )
                 if wrapped:
                     output.append(wrapped)
         else:
@@ -521,7 +524,12 @@ def _get_handoff_mode() -> str:
 
 
 def _append_token_fragments(
-    result: dict, token_msg: str, mode: str, fragments: list[str],
+    result: dict,
+    token_msg: str,
+    mode: str,
+    fragments: list[str],
+    *,
+    session_id: str = "",
 ) -> None:
     """Append token warning fragments based on handoff mode.
 
@@ -529,7 +537,9 @@ def _append_token_fragments(
     Other modes: display + handoff guidance at high thresholds.
     """
     threshold = result["threshold"]
-    wrapped = with_feature_prefix("token_monitor", token_msg)
+    wrapped = emit_with_habituation(
+        "token_monitor", token_msg, session_id=session_id,
+    )
     if wrapped:
         fragments.append(wrapped)
     # Full mode: display context usage but never inject
@@ -576,7 +586,10 @@ def _run_token_monitor(
         if not result:
             return
         token_msg = _format_token_warning(result, lang)
-        _append_token_fragments(result, token_msg, _get_handoff_mode(), fragments)
+        _append_token_fragments(
+            result, token_msg, _get_handoff_mode(), fragments,
+            session_id=session_id,
+        )
     except (ImportError, Exception):
         pass
 
@@ -652,12 +665,12 @@ def _check_context_compressed(hook_data: dict, tool_name: str) -> bool:
         "Stop all Edit/Write. Write handoff NOW."
     )
     _emit_stderr(msg)
-    wrapped = with_feature_prefix("context_compression", msg)
+    session_id = hook_data.get("session_id", "")
+    wrapped = emit_with_habituation(
+        "context_compression", msg, session_id=session_id,
+    )
     if wrapped:
-        _emit_output(
-            [wrapped],
-            session_id=hook_data.get("session_id", ""),
-        )
+        _emit_output([wrapped], session_id=session_id)
     return True
 
 

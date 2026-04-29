@@ -26,6 +26,19 @@ def main(hook_data: dict | None = None) -> None:
     except (ImportError, Exception):
         pass
 
+    # --- Module: 軌 B 件 1 dedup_layer — clear cache at session boundary
+    # New session id => the previous session's dedup state must not
+    # leak forward (otherwise the first identical warning would still
+    # be silently dropped). Best-effort; never blocks session start.
+    try:
+        from concinno.hooks.dedup_layer import clear_session
+
+        sid = (hook_data or {}).get("session_id", "")
+        if sid:
+            clear_session(sid)
+    except (ImportError, Exception):
+        pass
+
     # --- Module: token_audit_autopilot (begin per-session audit) ---
     # Default-OFF per 4.0.0 opt-in policy. Honours feature flag.
     try:

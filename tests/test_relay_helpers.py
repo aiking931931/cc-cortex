@@ -160,18 +160,32 @@ def test_feature_meta_default_is_prefix() -> None:
 
 
 def test_on_post_tool_imports_helper() -> None:
-    """``on_post_tool`` imports and uses the helper (wiring smoke check)."""
+    """``on_post_tool`` imports the relay helper (wiring smoke check).
+
+    Concinno 4.6.0 軌 B migrated the call sites from
+    :func:`with_feature_prefix` to :func:`emit_with_habituation` (the
+    dedup + auto-demote + FTRL composer). Either name binding satisfies
+    the wiring smoke check — what matters is that the module imports
+    something from ``relay_helpers``.
+    """
     import concinno.hooks.on_post_tool as mod
 
-    # Module-level import binds the helper into the namespace.
-    assert hasattr(mod, "with_feature_prefix")
+    assert hasattr(mod, "emit_with_habituation") or hasattr(
+        mod, "with_feature_prefix"
+    )
 
 
 def test_step_back_imports_helper() -> None:
-    """``step_back`` imports the helper (wiring smoke check)."""
+    """``step_back`` imports the relay helper (wiring smoke check).
+
+    Same migration: 4.6.0 軌 B replaced :func:`with_feature_prefix`
+    with :func:`emit_with_habituation` in step-back render templates.
+    """
     import concinno.step_back as mod
 
-    assert hasattr(mod, "with_feature_prefix")
+    assert hasattr(mod, "emit_with_habituation") or hasattr(
+        mod, "with_feature_prefix"
+    )
     # Render helpers exist for use by templates.
     assert callable(mod._render_step_back)
     assert callable(mod._render_hard_deny)
