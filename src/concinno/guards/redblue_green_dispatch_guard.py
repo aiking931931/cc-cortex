@@ -451,13 +451,23 @@ def _feature_enabled() -> bool:
 
 
 def _feature_param(name: str, default: Any) -> Any:
-    """Read a param from the feature meta entry, falling back to ``default``."""
+    """Read a param from the feature meta entry, falling back to ``default``.
+
+    Unwraps the metadata schema dict (``{type, default, min, max, recommended}``)
+    introduced by the FEATURE_META 5.0.0 default-on resurrection. Without this
+    unwrap, callsites like ``int(_feature_param("fatal_threshold", 3))`` raise
+    ``TypeError`` because the dict is not coercible to int. Mirrors the sister
+    helper at ``wiredo_subagent_verify_guard._feature_param``.
+    """
     try:
         from concinno.feature_config import FEATURE_META
 
         meta = FEATURE_META.get("redblue_green_review", {})
         params = meta.get("params", {}) or {}
-        return params.get(name, default)
+        value = params.get(name)
+        if isinstance(value, dict):
+            value = value.get("default", default)
+        return default if value is None else value
     except Exception:
         return default
 
