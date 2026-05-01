@@ -258,6 +258,13 @@ class SkillDisclosure:
     * :meth:`refresh_l1` — force a re-scan ignoring cache TTL.
     """
 
+    #: ZIQ persistence feature name — used as the
+    #: ``concinno.ziq_persist`` filename stem and is the ``feature``
+    #: column in every emitted jsonl row. Frozen across versions so
+    #: existing ``~/.concinno/ziq_state/skill_disclosure_ftrl.jsonl``
+    #: files stay readable on upgrade.
+    _ZIQ_PERSIST_FEATURE: str = "skill_disclosure"
+
     def __init__(
         self,
         *,
@@ -269,6 +276,7 @@ class SkillDisclosure:
         ftrl_decay: float = DEFAULT_FTRL_DECAY,
         sps_scorer: Optional[Callable[[str, SkillL1], float]] = None,
         clock: Callable[[], float] = time.monotonic,
+        persist: bool = True,
     ) -> None:
         self._skills_dir = skills_dir or default_skills_dir()
         self._top_k = max(1, int(top_k))
@@ -281,7 +289,23 @@ class SkillDisclosure:
         self._lock = threading.RLock()
         self._l1_cache: list[SkillL1] = []
         self._l1_cache_ts: float = 0.0
+        # Cold-start: hydrate FTRL weights from disk (5.1.0 P2 #4 —
+        # closes the audit C-axis "FTRL never converges across
+        # restart" finding). When persistence is disabled or the
+        # state file is absent, ``load_ftrl_state`` returns ``{}``
+        # which preserves the prior in-memory cold-start contract.
+        self._persist: bool = bool(persist)
         self._ftrl: dict[str, float] = {}
+        if self._persist:
+            try:
+                from concinno.ziq_persist import load_ftrl_state
+
+                self._ftrl.update(
+                    load_ftrl_state(self._ZIQ_PERSIST_FEATURE),
+                )
+            except Exception:
+                # Persistence layer must never break construction.
+                self._ftrl = {}
 
     # ── L1 ──────────────────────────────────────────────
 
@@ -465,6 +489,12 @@ class SkillDisclosure:
         The local in-process weight is updated immediately so a
         subsequent :meth:`route` call reflects the signal without
         round-tripping through the bus. The bus emit is best-effort.
+
+        Persistence (5.1.0 P2 #4): when ``self._persist`` is True,
+        the update is appended to the ZIQ jsonl trail so the weight
+        survives process restart — closing the audit C-axis "FTRL
+        in-memory → resets to 1.0" finding. The disk write happens
+        outside the routing lock so the hot path stays fast.
         """
         if not skill_name:
             return
@@ -474,6 +504,26 @@ class SkillDisclosure:
             updated = self._decay * current + self._alpha * (target - current)
             updated = max(0.0, min(2.0, updated))
             self._ftrl[skill_name] = updated
+        if self._persist:
+            try:
+                from concinno.ziq_persist import record_ftrl_update
+
+                record_ftrl_update(
+                    self._ZIQ_PERSIST_FEATURE,
+                    skill_name,
+                    weight_before=current,
+                    weight_after=updated,
+                    signal=target,
+                    posterior_components={
+                        "decay": self._decay,
+                        "alpha": self._alpha,
+                        "helpful": bool(helpful),
+                    },
+                )
+            except Exception:
+                # Persistence is best-effort — never let a disk
+                # error reach the caller.
+                pass
         try:
             from concinno.ziq_emit_helpers import emit_classification_outcome
 

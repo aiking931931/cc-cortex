@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-05-01
+
+### Added — FTRL state disk persistence (verdict P2 #4)
+
+The 8-axis 4.6.0 audit C-axis flagged that `SkillDisclosure._ftrl` weights
+were process-local in-memory dicts, so every restart reset learning to
+1.0 — violating the ZIQ "FTRL 因果在線學習永遠不變" promise. 5.1.0
+ships the canonical persistence primitive that closes that gap.
+
+- New `concinno.ziq_persist` (385 LoC) — append-only jsonl + periodic
+  snapshot compaction + atomic write (Windows-compat `os.replace`).
+  Public surface: `load_ftrl_state(feature)`,
+  `record_ftrl_update(feature, key, weight_before, weight_after, signal,
+  posterior_components)`, `compact_ftrl_state(feature, keep_last_n)`.
+  Path layout: `~/.concinno/ziq_state/<feature>_ftrl.jsonl` +
+  `<feature>_ftrl.snapshot.json`.
+- Kill switch: env `CONCINNO_ZIQ_PERSIST_DISABLED=1` disables write +
+  read paths globally; per-instance opt-out via `persist=False`
+  constructor kwarg on consumers that wire through.
+- Path override: env `CONCINNO_ZIQ_STATE_DIR=<path>` for tests / pinned
+  deployments.
+- Wired: `concinno.skills.disclosure.SkillDisclosure` cold-loads on
+  `__init__`, appends `record_ftrl_update` outside the lock on each
+  `observe_use`. New `persist=True` constructor kwarg defaults to
+  enabled; `False` matches 5.0.x behaviour.
+- Test isolation: `tests/conftest.py` `_isolate_state_dir` fixture
+  extended to pin `CONCINNO_ZIQ_STATE_DIR` to `tmp_path_factory` so
+  legacy tests don't pollute real `~/.concinno/`.
+
+### Why only `SkillDisclosure` migrated
+
+Source-mapping found the C-axis "FTRL in-memory" finding was true ONLY
+for `SkillDisclosure`. The other six FTRL consumers already persist via
+heterogeneous mechanisms — `_FTRLNamespace` (StateStore JSON),
+`ZIQAutoTuner` (jsonl autopersist), `ArchiveAdvisor` (JSON+flock),
+`ziq_hook_ignore_rate` (JSON), `ArmFTRL` (manual save/load), `FTRLv2`
+(GAIA bench-only). Migrating those to `ziq_persist` is unification
+cleanup, not a working-state fix; deferred to 5.2.0 candidate to avoid
+blast radius on already-shipping persisters with bespoke locking
+semantics.
+
+### Tests
+
+- `tests/test_ziq_persist.py` (474 LoC, 21 cases) — round-trip /
+  true-subprocess restart / corrupt-snapshot / corrupt-jsonl-line /
+  kill-switch / compaction trim / atomic-write `OSError` injection /
+  `SkillDisclosure` integration / `persist=False` opt-out.
+- 118 broader regression: `test_ziq_persist.py` + `tests/skills/` +
+  `test_feature_config.py` + `tests/observability/` all green.
+- `ruff` clean / `mypy` clean.
+
+### Non-breaking
+
+5.0.0 `SkillDisclosure` consumers continue to work unchanged. The
+`persist=True` default means new behaviour is opt-in via `enabled`
+flag (`skill_disclosure` is still default-off in `FEATURE_META`; this
+release adds the persistence-correctness fix that makes opting-in
+worthwhile, but does NOT promote the feature itself to default-on —
+that's a separate audit).
+
 ## [5.0.0] - 2026-04-29
 
 ### BREAKING CHANGES — Default-on resurrection

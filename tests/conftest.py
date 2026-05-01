@@ -276,6 +276,14 @@ def _isolate_state_dir(
     isolated = tmp_path_factory.mktemp("state_iso")
     monkeypatch.setenv("CONCINNO_STATE_DIR", str(isolated))
     monkeypatch.setenv("SANCIO_STATE_DIR", str(isolated))
+    # 5.1.0 P2 #4: ZIQ FTRL persistence module honours the same
+    # isolation contract — without this, every legacy SkillDisclosure
+    # test silently writes to ``~/.concinno/ziq_state/`` and reads
+    # weights left over from previous runs, producing flaky failures
+    # in ``test_ftrl_weight_decay_keeps_unobserved_skills_at_one``
+    # and similar invariant tests.
+    ziq_iso = tmp_path_factory.mktemp("ziq_state_iso")
+    monkeypatch.setenv("CONCINNO_ZIQ_STATE_DIR", str(ziq_iso))
     # Some callers read ``Path.home() / ".concinno"`` directly without
     # going through an env layer. Reset the ``state_client`` default
     # singleton so a previous test's resolved client (which may have
