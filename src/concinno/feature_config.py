@@ -164,8 +164,8 @@ D_CLASS_5_0_0: frozenset[str] = frozenset({
     "butterfly_guard", "sentinel_gate", "consecutive_fail_gate",
     "hijack_gate", "token_gate", "agent_cap", "clarity_gate",
     "prompt_guard", "delivery_gate", "read_first_gate",
-    # Skill emergence + audit (3)
-    "skill_emergence_guard", "token_audit_autopilot", "wiredo_subagent_verify",
+    # Skill audit (2)
+    "token_audit_autopilot", "wiredo_subagent_verify",
     # Operational guards (5)
     "bash_background_gate", "python_c_gate", "handoff_required_guard",
     "handoff_claim_guard", "ui_verify",
@@ -3389,57 +3389,6 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
         "recommended": True,
-        "severity": "minor",
-    },
-    "skill_emergence_guard": {
-        "category": "behavioral",
-        "enabled": True,  # 5.0.0 BREAKING — D-class promoted default-on per audit 2026-04-29
-        "ziq_autotunable": True,
-        "cosmetic": False,
-        "description": (
-            "Auto-propose Claude Code Skill drafts from observed tool-call "
-            "patterns — repeated workflows, error→success recoveries, and "
-            "user-correction signals. Drafts land in "
-            "~/.concinno/skill_drafts for the user to accept or reject; "
-            "the guard never installs a Skill directly."
-        ),
-        "description_zh": (
-            "從觀察到的工具呼叫模式自動提議 Claude Code Skill 草稿 —— "
-            "重複工作流、錯誤→成功修復、用戶糾正訊號。草稿寫到 "
-            "~/.concinno/skill_drafts 由使用者接受或拒絕；"
-            "本 guard 永遠不直接安裝 Skill。"
-        ),
-        "params": {
-            "max_auto_skills_per_day": {
-                "type": "int",
-                "default": 5,
-                "min": 1,
-                "max": 20,
-                "recommended": 5,
-            },
-            "min_pattern_occurrences": {
-                "type": "int",
-                "default": 3,
-                "min": 2,
-                "max": 10,
-                "recommended": 3,
-            },
-            "cooldown_hours": {
-                "type": "float",
-                "default": 2.0,
-                "min": 0.5,
-                "max": 24.0,
-                "recommended": 2.0,
-            },
-            "draft_retention_days": {
-                "type": "int",
-                "default": 30,
-                "min": 7,
-                "max": 90,
-                "recommended": 30,
-            },
-        },
-        "recommended": False,
         "severity": "minor",
     },
     # ── 4.5.0 W3 — Token Audit Autopilot ──

@@ -422,8 +422,8 @@ def handle_prompt_submit(
         contexts.append(disclosure_ctx)
 
     # 14. user-correction signal — persist for the post-tool hook so
-    #     SkillEmergenceGuard's trigger #3 (user_correction) can fire.
-    #     The two hooks run in different processes; the file at
+    #     downstream behavior signals can read it. The two hooks run in
+    #     different processes; the file at
     #     ``~/.concinno/state/user_correction_signal.json`` is the
     #     hand-off. Best-effort — never blocks prompt submission.
     try:

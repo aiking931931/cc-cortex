@@ -1784,10 +1784,6 @@ def main() -> None:
     from concinno.observability.token_audit.cli import register as _register_token_audit
     _register_token_audit(sub)
 
-    # 4.5.x carryover — W3 SkillEmergenceGuard accept/reject CLI
-    from .skill_emerge_cmd import register as _register_skill_emerge
-    _register_skill_emerge(sub)
-
     # 4.6.0 — W4 five-profile starter recommender
     from .setup_cmd import register as _register_setup
     _register_setup(sub)

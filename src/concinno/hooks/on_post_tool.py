@@ -747,50 +747,6 @@ def _build_emergence_shape(tool_name: str, tool_input: dict) -> str:
     return ""
 
 
-def _run_skill_emergence(
-    tool_name: str, tool_input: dict, hook_data: dict,
-) -> None:
-    """Feed one observation into SkillEmergenceGuard.
-
-    Default-OFF (4.0.0 SEMVER baseline); the guard's internal
-    ``_is_enabled`` check short-circuits when the feature is off so
-    this section costs nothing in the disabled common case.
-    """
-    try:
-        from concinno.skills.skill_emergence_guard import (
-            EmergenceSignal,
-            SkillEmergenceGuard,
-        )
-
-        shape = _build_emergence_shape(tool_name, tool_input)
-        tool_result_text = ""
-        raw_result = hook_data.get("tool_result", "")
-        if isinstance(raw_result, str):
-            tool_result_text = raw_result
-        elif isinstance(raw_result, dict):
-            tool_result_text = str(raw_result.get("stdout", ""))
-        success = "error" not in tool_result_text.lower()
-        # W3.x carryover #7 — read the per-turn correction signal that
-        # ``on_prompt_submit`` persisted to ``~/.concinno/state/``. The
-        # default-False fallback when the file is missing / corrupt /
-        # stale keeps the trigger opt-in (HP2 trigger #3 stays dormant
-        # until the prompt-submit hook actually fires).
-        try:
-            from concinno.skills.user_correction_signal import is_active
-            had_correction = is_active()
-        except Exception:
-            had_correction = False
-        emerge = SkillEmergenceGuard(stderr_emit=_emit_stderr)
-        emerge.observe(EmergenceSignal(
-            tool_name=tool_name,
-            canonical_shape=shape,
-            success=success,
-            had_user_correction=had_correction,
-        ))
-    except Exception:
-        pass  # never block the hook
-
-
 def _run_streak_ux(
     tool_name: str, tool_input: dict, guard_ctx: str,
     hook_data: dict, fragments: list[str],
@@ -877,10 +833,6 @@ def main(hook_data: dict | None = None) -> None:
 
     # 5.47 Optional concinno-skills-memory candidate capture (0.2.0+).
     _memory_lifecycle_post_tool_use(tool_name, hook_data)
-
-    # 5.46 SkillEmergenceGuard — observe tool-call patterns and propose
-    # Skill drafts (default-OFF; internal feature check short-circuits).
-    _run_skill_emergence(tool_name, tool_input, hook_data)
 
     # 5.5 ThinkingDepthGuard — record ALL tools, warn only on Edit
     try:
