@@ -137,9 +137,6 @@ def main(hook_data: dict | None = None) -> None:
     # --- Optional: concinno-skills-memory lifecycle (0.2.0+) ---
     _memory_lifecycle_session_start(hook_data)
 
-    # --- Optional: concinno-skills-session-search lifecycle (0.1.0+) ---
-    _session_search_lifecycle_session_start(hook_data)
-
 
 def _memory_lifecycle_session_start(hook_data: dict | None) -> None:
     """Optional concinno-skills-memory wiring; absence is silent."""
@@ -153,30 +150,6 @@ def _memory_lifecycle_session_start(hook_data: dict | None) -> None:
 
         _memory_on_session_start(
             _MemoryCtx(session_id=(hook_data or {}).get("session_id", ""))
-        )
-    except (ImportError, Exception):
-        pass
-
-
-def _session_search_lifecycle_session_start(hook_data: dict | None) -> None:
-    """Optional concinno-skills-session-search wiring; absence is silent.
-
-    SessionStart hook is read-only for cross-session search — the agent
-    queries the index on demand later. We still call ``on_session_start``
-    so the sub-pkg has a consistent five-hook protocol shape and any
-    future warm-up (priming, capability check) lands without another
-    wiring patch in concinno main.
-    """
-    try:
-        from concinno_skills_session_search.lifecycle import (
-            LifecycleContext as _SearchCtx,
-        )
-        from concinno_skills_session_search.lifecycle import (
-            on_session_start as _search_on_session_start,
-        )
-
-        _search_on_session_start(
-            _SearchCtx(session_id=(hook_data or {}).get("session_id", ""))
         )
     except (ImportError, Exception):
         pass

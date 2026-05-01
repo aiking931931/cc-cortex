@@ -107,12 +107,12 @@ def test_marketplace_surfaces_hook_only_pkg(client,
     """Bug 4b regression: hook-only sub-pkg shows up even with no SKILL.md."""
     _patch_distributions(monkeypatch, [
         _FakeDist(
-            name="concinno-skills-session-search",
+            name="concinno-skills-ziq",
             version="0.1.0",
             eps=[_FakeEntryPoint(
                 "concinno.hooks.on_stop",
-                "session_search",
-                "concinno_skills_session_search.lifecycle:on_stop",
+                "ziq",
+                "concinno_skills_ziq.lifecycle:on_stop",
             )],
         ),
     ])
@@ -121,9 +121,9 @@ def test_marketplace_surfaces_hook_only_pkg(client,
     assert r.status_code == 200
     body = r.json()
     names = [row["name"] for row in body["installed"]]
-    assert "concinno-skills-session-search" in names
+    assert "concinno-skills-ziq" in names
     row = next(x for x in body["installed"]
-               if x["name"] == "concinno-skills-session-search")
+               if x["name"] == "concinno-skills-ziq")
     assert row["kind"] == "hook-pkg"
     assert any(ep["group"] == "concinno.hooks.on_stop"
                for ep in row["hook_entry_points"])

@@ -30,7 +30,6 @@ logger = logging.getLogger("concinno.marketplace.discovery")
 HARDCODED_AVAILABLE: tuple[str, ...] = (
     "concinno-skills-memory",
     "concinno-skills-memoria",
-    "concinno-skills-session-search",
     "concinno-skills-ziq",
 )
 
@@ -95,11 +94,6 @@ def _hook_groups_for(dist_name: str) -> list[str]:
     suffix = dist_name[len(DIST_PREFIX):]
     table = {
         "memory": ["concinno.hooks.on_session_start", "concinno.hooks.on_stop"],
-        "session-search": [
-            "concinno.hooks.on_session_start",
-            "concinno.hooks.on_stop",
-            "concinno.hooks.on_session_end",
-        ],
         "memoria": [],
         "ziq": ["concinno.hooks.on_post_tool"],
     }

@@ -44,7 +44,6 @@ HTTP_TIMEOUT_SEC = 10
 KNOWN_FIRST_PARTY = (
     "concinno-skills-memory",
     "concinno-skills-memoria",
-    "concinno-skills-session-search",
     "concinno-skills-ziq",
 )
 

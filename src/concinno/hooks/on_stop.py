@@ -455,69 +455,6 @@ def main(hook_data: dict | None = None) -> None:
     _memory_lifecycle_stop(hook_data)
     _memory_lifecycle_session_end(hook_data)
 
-    # --- Optional: concinno-skills-session-search lifecycle (0.1.0+) ---
-    # ``on_stop`` indexes this session's transcript text (best-effort
-    # Haiku summary inside the sub-pkg). ``on_session_end`` rides the
-    # same Stop event because CC has no native ``SessionEnd`` hook —
-    # mirrors the concinno-skills-memory wiring above.
-    _session_search_lifecycle_stop(hook_data)
-    _session_search_lifecycle_session_end(hook_data)
-
-
-def _session_search_lifecycle_stop(hook_data: dict) -> None:
-    """Optional concinno-skills-session-search wiring; absence is silent.
-
-    4.6.0 hybrid-capture: we resolve the CC transcript file path from
-    ``session_id + cwd`` and pass it as ``transcript_path`` to the
-    sub-pkg. The sub-pkg's ``on_stop`` enqueues a tiny pointer record
-    instead of reading the (potentially multi-MB) transcript inline,
-    keeping this hook hot-path-fast. The deferred read+index lands
-    later via ``on_session_end`` drain or the explicit
-    ``concinno-session-search drain`` CLI.
-    """
-    try:
-        from concinno_skills_session_search import (
-            transcript_resolver as _resolver,
-        )
-        from concinno_skills_session_search.lifecycle import (
-            LifecycleContext as _SearchCtx,
-        )
-        from concinno_skills_session_search.lifecycle import (
-            on_stop as _search_on_stop,
-        )
-
-        session_id = hook_data.get("session_id", "")
-        cwd = hook_data.get("cwd") or None
-        # ``resolve`` returns a Path or None. None gracefully falls
-        # back to the legacy id-only noop inside the sub-pkg.
-        resolved = _resolver.resolve(session_id, cwd=cwd) if session_id else None
-        transcript_path = str(resolved) if resolved is not None else None
-        _search_on_stop(
-            _SearchCtx(
-                session_id=session_id,
-                transcript_path=transcript_path,
-            )
-        )
-    except (ImportError, Exception):
-        pass
-
-
-def _session_search_lifecycle_session_end(hook_data: dict) -> None:
-    """Optional concinno-skills-session-search retention prune; absence is silent."""
-    try:
-        from concinno_skills_session_search.lifecycle import (
-            LifecycleContext as _SearchCtx,
-        )
-        from concinno_skills_session_search.lifecycle import (
-            on_session_end as _search_on_session_end,
-        )
-
-        _search_on_session_end(
-            _SearchCtx(session_id=hook_data.get("session_id", ""))
-        )
-    except (ImportError, Exception):
-        pass
-
 
 def _memory_lifecycle_stop(hook_data: dict) -> None:
     """Optional concinno-skills-memory wiring; absence is silent."""

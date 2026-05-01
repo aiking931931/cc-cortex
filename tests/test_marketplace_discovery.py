@@ -51,7 +51,7 @@ class _FakeDist:
 
 def test_is_valid_dist_name_accepts_canonical() -> None:
     assert is_valid_dist_name("concinno-skills-memory")
-    assert is_valid_dist_name("concinno-skills-session-search")
+    assert is_valid_dist_name("concinno-skills-ziq")
 
 
 def test_is_valid_dist_name_rejects_garbage() -> None:
@@ -97,17 +97,17 @@ def test_list_installed_classifies_kind() -> None:
 def test_list_installed_surfaces_hook_entry_points() -> None:
     """The bug-4b regression test: hook-only sub-pkgs show their hooks."""
     dist = _FakeDist(
-        name="concinno-skills-session-search",
+        name="concinno-skills-ziq",
         eps=[
             _FakeEntryPoint(
                 "concinno.hooks.on_stop",
-                "session_search",
-                "concinno_skills_session_search.lifecycle:on_stop",
+                "ziq",
+                "concinno_skills_ziq.lifecycle:on_stop",
             ),
             _FakeEntryPoint(
                 "concinno.hooks.on_session_start",
-                "session_search",
-                "concinno_skills_session_search.lifecycle:on_session_start",
+                "ziq",
+                "concinno_skills_ziq.lifecycle:on_session_start",
             ),
         ],
     )
