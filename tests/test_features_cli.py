@@ -50,9 +50,11 @@ def test_profiles_registered() -> None:
     # 4.3.0 added lite/mainstream/paranoid + kept strict/permissive/dev
     # for backward compat. ``permissive`` is now an alias for ``lite``
     # but still appears in the registry so existing CLI/scripts work.
+    # 5.0.0 added 4-x-compat for the D-class default-on flip opt-out.
     assert set(FEATURE_TOGGLE_PROFILES) == {
         "strict", "permissive", "dev",
         "lite", "mainstream", "paranoid",
+        "4-x-compat",
     }
 
 
@@ -64,6 +66,7 @@ def test_list_profiles_descriptions() -> None:
     assert "lite" in profiles
     assert "mainstream" in profiles
     assert "paranoid" in profiles
+    assert "4-x-compat" in profiles
     # Descriptions are non-empty and reference DEFAULT_OFF_4_0_0 or count.
     for desc in profiles.values():
         assert len(desc) > 10

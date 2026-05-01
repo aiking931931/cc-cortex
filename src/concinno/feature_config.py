@@ -116,32 +116,59 @@ VALID_FAIL_MODES: frozenset[str] = frozenset({
 # enforcement, ZIQ infra, etc.) — these are observability /
 # coordination / rendering features that don't deny tool calls or
 # block agent flow.
+# 5.0.0 BREAKING — Default-off vaporware resurrection (audit 2026-04-29).
+# 24 of the 27 D-class features previously here were promoted to default-on
+# per the 8-axis evidence-driven audit (zero production trace despite being
+# major-wave work product). The remaining 3 entries are deliberate retains:
+#
+# - ``release_authorization``: sovereign user opt-out via
+#   ``~/.concinno/release_auth.json`` (publish-authorization permanent
+#   opt-out directive 2026-04-27 — >10 user corrections).
+# - ``dspy_prompt_optimization``: cost-bearing API op — must remain
+#   explicit opt-in until budget guard ships.
+# - ``premise_gate``: external module (no FEATURE_META entry) honoured
+#   via this fallback. Retained at user discretion; flip via
+#   ``cfg.feature('premise_gate', 'enabled', True)`` or env var.
+#
+# Senior-dev rationale: see ``feedback_default_off_features_become_vaporware.md``
+# (MEMORY #4s) and the CHANGELOG ``[5.0.0]`` entry.
 DEFAULT_OFF_4_0_0: frozenset[str] = frozenset({
-    # hard_gate (18)
-    "agent_cap", "bash_background_gate", "boundary_guard",
-    "butterfly_guard", "clarity_gate", "consecutive_fail_gate",
-    "delivery_gate", "handoff_required_guard", "hijack_gate",
-    "identity_guard", "prompt_guard",
-    "publish_scan", "publish_scan_guard", "python_c_gate",
-    "read_first_gate", "release_authorization", "sentinel_gate",
-    "token_gate", "ui_verify",
-    # soft_gate (2)
-    "handoff_claim_guard",
-    "semver_gate",
-    # external module (no FEATURE_META entry; honoured via
-    # meta_enabled_default fallback chain)
-    "premise_gate",
-    # opt-in dev tool: burns LLM credits during optimization runs
+    "release_authorization",
     "dspy_prompt_optimization",
-    # 4.4.0 — Plan B Week 2 stateful runtime guard, default OFF per
-    # 4.0.0 default-off-gates SEMVER baseline.
-    "circuit_breaker_guard",
-    # 4.6.0 — W4 RCE injection guard, default OFF per 4.0.0 SEMVER baseline.
-    "rce_injection_guard",
-    # 4.6.0 — W4 HTTP-client request-shape policy gate, default OFF.
-    "http_client_guard",
-    # 4.6.0 — W4 wave-1 SQL injection scanner, default OFF.
-    "sql_injection_guard",
+    "premise_gate",
+})
+
+# 5.0.0 — D-class promotions from default-off to default-on.
+#
+# These 27 features were the work product of major feature waves
+# (security guards, CBUA gates, skill emergence pipeline, operational
+# guards). All shipped default-off in 4.0.0 and accumulated zero
+# production trace by the 2026-04-29 8-axis audit. Promoted to
+# default-on in 5.0.0 (BREAKING).
+#
+# This frozenset exists so users who relied on 4.x default-off
+# behaviour can bulk-disable in one CLI call (``concinno features
+# disable-all-d-class`` → :data:`FEATURE_TOGGLE_PROFILES["4-x-compat"]`)
+# without typing 27 individual ``cfg.feature(..., 'enabled', False)``
+# overrides.
+#
+# The set is intentionally frozen — adding entries here implies
+# another semver-major bump because it changes the meaning of
+# "4-x-compat" mid-release.
+D_CLASS_5_0_0: frozenset[str] = frozenset({
+    # Security guards (9)
+    "http_client_guard", "rce_injection_guard", "sql_injection_guard",
+    "circuit_breaker_guard", "publish_scan", "publish_scan_guard",
+    "semver_gate", "identity_guard", "boundary_guard",
+    # CBUA gates (10)
+    "butterfly_guard", "sentinel_gate", "consecutive_fail_gate",
+    "hijack_gate", "token_gate", "agent_cap", "clarity_gate",
+    "prompt_guard", "delivery_gate", "read_first_gate",
+    # Skill emergence + audit (3)
+    "skill_emergence_guard", "token_audit_autopilot", "wiredo_subagent_verify",
+    # Operational guards (5)
+    "bash_background_gate", "python_c_gate", "handoff_required_guard",
+    "handoff_claim_guard", "ui_verify",
 })
 
 
@@ -1176,9 +1203,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     # ── RCE Injection Guard (4.6.0 W4) ──
     "rce_injection_guard": {
         "category": "security",
-        # Default OFF per 4.0.0 default-off-gates SEMVER baseline —
-        # also registered in DEFAULT_OFF_4_0_0 frozenset above.
-        "enabled": False,
+        # 5.0.0 BREAKING — D-class promoted default-on per 8-axis audit 2026-04-29.
+        # Removed from DEFAULT_OFF_4_0_0 frozenset.
+        "enabled": True,
         # Severity thresholds + literal-eval gating are tunable; ZIQ
         # learns from accept/warn/deny outcomes when the bus is on.
         "ziq_autotunable": True,
@@ -1249,9 +1276,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     # ── HTTP-Client Request-Shape Guard (4.6.0 W4) ──
     "http_client_guard": {
         "category": "security",
-        # Default OFF per 4.0.0 default-off-gates SEMVER baseline —
-        # also registered in DEFAULT_OFF_4_0_0 frozenset above.
-        "enabled": False,
+        # 5.0.0 BREAKING — D-class promoted default-on per 8-axis audit 2026-04-29.
+        # Removed from DEFAULT_OFF_4_0_0 frozenset.
+        "enabled": True,
         # Allowlist / denylist / severity thresholds are tunable but
         # the policy evaluation outcome (accept/warn/deny) emits to
         # the ZIQ bus so FTRL can learn per-domain reputation.
@@ -1341,9 +1368,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     # ── Circuit Breaker Guard (4.4.0 Plan B Week 2) ──
     "circuit_breaker_guard": {
         "category": "security",
-        # Default OFF per 4.0.0 default-off-gates SEMVER baseline —
-        # also registered in DEFAULT_OFF_4_0_0 frozenset above.
-        "enabled": False,
+        # 5.0.0 BREAKING — D-class promoted default-on per 8-axis audit 2026-04-29.
+        # Removed from DEFAULT_OFF_4_0_0 frozenset.
+        "enabled": True,
         # Rate / cooldown thresholds are tunable but the actionable
         # outcome (call admitted vs denied) emits to the ZIQ bus so
         # FTRL can learn per-resource cap settings.
@@ -1490,8 +1517,9 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     # ── SQL Injection Guard (4.6.0 W4 wave-1) ──
     "sql_injection_guard": {
         "category": "security",
-        # Default OFF per L0 6-DoD opt-in baseline (4.0.0 SEMVER).
-        "enabled": False,
+        # 5.0.0 BREAKING — D-class promoted default-on per 8-axis audit 2026-04-29.
+        # Removed from DEFAULT_OFF_4_0_0 frozenset.
+        "enabled": True,
         "ziq_autotunable": False,
         "cosmetic": False,
         "severity_if_off": "major",
@@ -3365,7 +3393,7 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     },
     "skill_emergence_guard": {
         "category": "behavioral",
-        "enabled": False,  # default OFF per 4.0.0 SEMVER-MAJOR opt-in policy
+        "enabled": True,  # 5.0.0 BREAKING — D-class promoted default-on per audit 2026-04-29
         "ziq_autotunable": True,
         "cosmetic": False,
         "description": (
@@ -3421,7 +3449,7 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     # Default-OFF per 4.0.0 opt-in policy.
     "token_audit_autopilot": {
         "category": "observability",
-        "enabled": False,
+        "enabled": True,  # 5.0.0 BREAKING — D-class promoted default-on per audit 2026-04-29
         "ziq_autotunable": True,
         "cosmetic": False,
         "severity_if_off": "none",
@@ -3607,7 +3635,7 @@ FEATURE_META: dict[str, dict[str, Any]] = {
     },
     "wiredo_subagent_verify": {
         "category": "behavioral",
-        "enabled": False,
+        "enabled": True,  # 5.0.0 BREAKING — D-class promoted default-on per audit 2026-04-29
         "ziq_autotunable": True,
         "cosmetic": False,
         "description": (
@@ -4657,6 +4685,24 @@ FEATURE_TOGGLE_PROFILES: dict[str, dict[str, Any]] = {
         },
         "fail_mode_default": "silent",
     },
+    "4-x-compat": {
+        "description": (
+            "5.0.0 BREAKING — restore 4.x default-off behaviour for the "
+            "27 D-class features promoted to default-on in 5.0.0. "
+            "Idempotent. Apply once via ``concinno features set-profile "
+            "4-x-compat`` (or the explicit ``concinno features "
+            "disable-all-d-class`` alias) to keep 4.x trust baseline. "
+            "Inherits ``lite`` fail-mode defaults so DestructionGuard "
+            "still hard-denies."
+        ),
+        "enable": frozenset(),
+        "disable": "D_CLASS_5_0_0",
+        "fail_mode_overrides": {
+            "destruction_guard": "hard_deny",
+            "butterfly_guard": "warn",
+        },
+        "fail_mode_default": "silent",
+    },
 }
 
 
@@ -4797,10 +4843,13 @@ def list_feature_toggle_profiles() -> dict[str, str]:
 def _resolve_profile_features(
     spec: "frozenset[str] | str",
 ) -> frozenset[str]:
-    """Expand the ``"DEFAULT_OFF_4_0_0"`` sentinel to the actual
-    frozenset; pass through real frozensets verbatim."""
+    """Expand the ``"DEFAULT_OFF_4_0_0"`` / ``"D_CLASS_5_0_0"``
+    sentinels to their actual frozensets; pass through real frozensets
+    verbatim."""
     if spec == "DEFAULT_OFF_4_0_0":
         return DEFAULT_OFF_4_0_0
+    if spec == "D_CLASS_5_0_0":
+        return D_CLASS_5_0_0
     if isinstance(spec, frozenset):
         return spec
     return frozenset()

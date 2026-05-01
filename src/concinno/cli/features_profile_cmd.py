@@ -27,7 +27,12 @@ import json
 import sys
 from typing import Any
 
-__all__ = ["cmd_features_set_profile", "register_set_profile"]
+__all__ = [
+    "cmd_features_disable_all_d_class",
+    "cmd_features_set_profile",
+    "register_disable_all_d_class",
+    "register_set_profile",
+]
 
 
 def _print_summary(result: dict[str, Any]) -> None:
@@ -116,6 +121,44 @@ def cmd_features_set_profile(args: argparse.Namespace) -> None:
 
     if result.get("error"):
         raise SystemExit(1)
+
+
+def cmd_features_disable_all_d_class(args: argparse.Namespace) -> None:
+    """Implementation of ``concinno features disable-all-d-class``.
+
+    Thin alias for ``concinno features set-profile 4-x-compat``. The
+    explicit name exists per the 5.0.0 SEMVER-MAJOR migration plan
+    (verdict doc 2026-04-29 P1 #1 step 7) so users searching for
+    "how do I get my old 4.x default-off behaviour back" land on the
+    obvious command rather than having to learn the profile vocabulary.
+    Idempotent — re-running yields ``unchanged`` for the full D-class
+    set.
+    """
+    args.profile_name = "4-x-compat"
+    cmd_features_set_profile(args)
+
+
+def register_disable_all_d_class(
+    features_sub: argparse._SubParsersAction,
+) -> None:
+    """Attach ``disable-all-d-class`` to ``concinno features``.
+
+    Wired from :func:`concinno.cli.main._register_features` so the
+    command lives at ``concinno features disable-all-d-class``.
+    """
+    p = features_sub.add_parser(
+        "disable-all-d-class",
+        help=(
+            "Restore 4.x default-off behaviour for the 27 D-class "
+            "features promoted to default-on in 5.0.0. Alias for "
+            "``concinno features set-profile 4-x-compat``."
+        ),
+    )
+    p.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Emit machine-readable JSON instead of a human summary.",
+    )
+    p.set_defaults(func=cmd_features_disable_all_d_class)
 
 
 def register_set_profile(features_sub: argparse._SubParsersAction) -> None:

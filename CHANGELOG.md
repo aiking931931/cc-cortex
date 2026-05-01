@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-04-29
+
+### BREAKING CHANGES — Default-on resurrection
+
+The 4.0.0 SEMVER "default-off opt-in baseline" became vaporware cover for 5+ months.
+The 8-axis evidence-driven audit (2026-04-29) found 27 SOTA capabilities shipped
+default-off with **zero production trace** despite being the work product of major
+feature waves. 5.0.0 promotes them to default-on per
+`feedback_default_off_features_become_vaporware.md` (MEMORY #4s).
+
+#### Promoted to default-on (D class — 27 features)
+
+**Security guards (9)**: `http_client_guard`, `rce_injection_guard`,
+`sql_injection_guard`, `circuit_breaker_guard`, `publish_scan`,
+`publish_scan_guard`, `semver_gate`, `identity_guard`, `boundary_guard`.
+
+**CBUA gates (10)**: `butterfly_guard`, `sentinel_gate`, `consecutive_fail_gate`,
+`hijack_gate`, `token_gate`, `agent_cap`, `clarity_gate`, `prompt_guard`,
+`delivery_gate`, `read_first_gate`.
+
+**Skill emergence + audit (3)**: `skill_emergence_guard`, `token_audit_autopilot`,
+`wiredo_subagent_verify`.
+
+**Operational guards (5)**: `bash_background_gate`, `python_c_gate`,
+`handoff_required_guard`, `handoff_claim_guard`, `ui_verify`.
+
+#### Retained default-off
+
+- `release_authorization` (B class — sovereign user opt-out via
+  `~/.concinno/release_auth.json`, per publish-authorization permanent
+  opt-out directive 2026-04-27)
+- `dspy_prompt_optimization` (cost-bearing API op — must remain explicit
+  opt-in until budget guard ships)
+- `premise_gate` (external module without FEATURE_META entry — retained
+  at user discretion via `cfg.feature('premise_gate', 'enabled', True)`
+  or `CONCINNO_PREMISE_GATE=1` env)
+
+#### Migration
+
+Users relying on 4.x default-off behaviour can opt out per feature via:
+
+1. `cfg.feature('<name>', 'enabled')=False` (in-process)
+2. `~/.concinno/feature_overrides.json` (persistent)
+3. env `CONCINNO_<NAME>_ENABLED=0` (per-session)
+
+See `docs/migration/4-to-5.md` for the full mapping and rationale.
+
+#### Why this matters
+
+Default-off + zero-trace = vaporware. ZIQ FTRL learning, skill emergence
+collection, security gate effectiveness measurement all require default-on
+production traffic. The opt-out path is preserved; the default is fixed.
+
+### Internal
+
+- `DEFAULT_OFF_4_0_0` frozenset shrunk from 27 entries to 3 (the retained
+  list above). Promoted entries' `enabled` keys updated where direct
+  meta values existed (`rce_injection_guard`, `http_client_guard`,
+  `sql_injection_guard`, `circuit_breaker_guard`, `skill_emergence_guard`,
+  `token_audit_autopilot`, `wiredo_subagent_verify`).
+
 ## [4.6.0] - 2026-04-29
 
 ### Known limitations (4.6.0 ship — fix in 4.6.1 / 4.7.0)
