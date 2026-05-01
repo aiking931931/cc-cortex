@@ -3,8 +3,9 @@
 @module ziq_persist
 @responsibility Provide a small, audit-friendly disk-backed primitive that
     converts the in-memory FTRL weight dicts used by ZIQ-aware consumers
-    (currently :class:`concinno.skills.disclosure.SkillDisclosure`; future
-    consumers welcome) into something that survives process restart.
+    into something that survives process restart. The original consumer
+    (``concinno.skills.disclosure.SkillDisclosure``) was removed in K5;
+    other ZIQ-aware sites continue to use this module.
 
 @dependencies stdlib only.
 @exports load_ftrl_state, record_ftrl_update, compact_ftrl_state,
