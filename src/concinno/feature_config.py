@@ -947,6 +947,49 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # ── Routebackend Prefix Pairing (Wave D Step C) ──
+    "routebackend_prefix_pairing": {
+        "category": "soft_gate",
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "Model alias swaps in psyche-engine cognition modules will "
+            "no longer be checked against the isSancioRouted allowlist. "
+            "A backend swap without a matching startsWith() prefix will "
+            "silently fall back to the default Anthropic upstream."
+        ),
+        "description": (
+            "PostToolUse warn-only guard. After Edit/Write/NotebookEdit "
+            "on psyche-engine/{src,dist}/cognition/*.{ts,js}, scan for "
+            "model: '<alias>' literals and confirm each non-claude/gpt "
+            "alias's prefix appears in psyche-engine/src/anthropic.ts "
+            "isSancioRouted startsWith() chain. Surfaces missing pairs "
+            "in additionalContext so the operator wires both files "
+            "before docker cp + container deploy."
+        ),
+        "description_zh": (
+            "PostToolUse 警告守衛。Edit/Write/NotebookEdit psyche-engine "
+            "cognition 模組後，掃 model: '<alias>' literal，確認每個 "
+            "非 claude/gpt alias 的 prefix 都在 anthropic.ts isSancioRouted "
+            "startsWith() chain 裡。漏配 pair 在 additionalContext 顯示，"
+            "讓 operator deploy 前對齊兩檔，避免悄悄走 default upstream。"
+        ),
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Guard disabled — backend alias swaps without router "
+                    "updates can ship unchecked"
+                ),
+                "risk_off_zh": (
+                    "Guard 關閉 — backend alias 替換漏配 router 不再檢查"
+                ),
+            },
+        },
+    },
     # ── PII Guard (4.3.0 Plan B Step 3) ──
     "pii_guard": {
         "category": "security",

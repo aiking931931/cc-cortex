@@ -66,15 +66,18 @@ _DEFAULT_WHITELIST = frozenset(
     }
 )
 
-#: NUCLEAR tier minimum whitelist — only the processes whose trim would
-#: actually break the system are protected. ``explorer.exe``, ``dwm.exe``,
-#: and IDEs that ``_DEFAULT_WHITELIST`` spares for UX reasons are
-#: deliberately omitted; NUCLEAR's contract is "as clean as a reboot,
-#: I accept the brief stutter". Trimming explorer / dwm forces them to
-#: page back from disk on next mouse move (~200-500 ms perceptible
-#: hiccup) but does not destabilise the session. Trimming winlogon /
-#: csrss / lsass / smss / services / wininit / system / registry /
-#: memcompression **does** destabilise — those stay protected.
+#: NUCLEAR tier minimum whitelist — processes whose trim would break the
+#: session OR cause visibly persistent UI lag. Trimming winlogon / csrss /
+#: lsass / smss / services / wininit / system / registry / memcompression
+#: destabilises the session. Trimming ``dwm.exe`` (Windows desktop
+#: compositor) and ``explorer.exe`` (taskbar / desktop shell) was
+#: previously deliberate for "as clean as a reboot, accept the stutter"
+#: framing — but **2026-05-02 user feedback** showed that on systems with
+#: auto-NUCLEAR firing at 95% RAM the brief 200-500 ms hiccup compounded
+#: into multi-second persistent lag every time the threshold was re-hit.
+#: The 5-10 MB extra reclaim from trimming the compositor is not worth
+#: a sluggish desktop on every NUCLEAR cycle. Spare them now; users who
+#: actually need the last 5 MB can tune via ``extra_whitelist``.
 _NUCLEAR_MIN_WHITELIST = frozenset(
     {
         "claude.exe",  # protect self so the cleanup process can keep going
@@ -88,6 +91,11 @@ _NUCLEAR_MIN_WHITELIST = frozenset(
         "smss.exe",
         "services.exe",
         "wininit.exe",
+        # 0.5.0 V5.0M — user-visible compositor / shell. Trim was the
+        # source of "螢幕控制起來會卡" reports even after reboot,
+        # because auto-NUCLEAR at 95% kept re-trimming on every cycle.
+        "dwm.exe",
+        "explorer.exe",
     }
 )
 
@@ -136,14 +144,31 @@ class CleanupMode(str, Enum):
 
 @dataclass
 class NuclearOptions:
-    """User-controllable knobs for the NUCLEAR tier. The four enabled-by-
-    default options are the Pareto top — they together reach ~88% reboot-
-    equivalence without crossing into "user perceives a UI freeze". The
-    two opt-out options trade extra reclaim for higher visible cost
-    (UI flash for ``cycle_services``, slower next app launch for
-    ``cycle_superfetch``); the two off-by-default options have either
-    high system-instability risk (``cycle_memory_compression``) or
-    interrupt user work (``shutdown_wsl`` kills running dev containers)."""
+    """User-controllable knobs for the NUCLEAR tier.
+
+    0.5.0 V5.0M defaults rebalance — UI-disrupting stages flipped OFF
+    by default. The previous "reach 88% reboot equivalence" framing
+    traded UI smoothness for a number on the dashboard, which the user
+    correctly called out as defeating the point: cleanup that causes
+    UI lag fails its own thesis (you clean RAM to *prevent* lag, not
+    cause it). The Pareto frontier is now:
+
+    * ON by default — silent stages with measurable reclaim and no UI
+      side effects: ``diagnose_pool_leaks`` (read-only) +
+      ``flush_combined_memory_list`` (page-combining defrag).
+    * OFF by default — visibly disruptive stages, the user opts in via
+      Settings → Schedule when they accept the trade-off explicitly:
+      ``cycle_services`` (UI re-style flash), ``cycle_superfetch``
+      (slower next app launches for minutes), ``shutdown_wsl`` (kills
+      running dev containers), ``cycle_memory_compression`` (system
+      instability risk).
+
+    The base NUCLEAR pipeline (working-set trim with the V5.0M
+    whitelist that protects ``dwm.exe`` / ``explorer.exe`` / IDEs,
+    standby release, modified-page flush, system file-cache shrink,
+    DLL section flush, pool-tag diagnostic) still gives meaningfully
+    more reclaim than AGGRESSIVE — modified-page flush + DLL flush +
+    pool diagnostic are nuclear-only — without the lag."""
 
     diagnose_pool_leaks: bool = True
     """Pre-flight ``NtQuerySystemInformation(SystemPoolTagInformation)``
@@ -158,16 +183,22 @@ class NuclearOptions:
     24H2 builds disabled this class — feature-detected; failure is
     silent and recorded as ``stage.skipped=True``."""
 
-    cycle_services: bool = True
+    cycle_services: bool = False
     """Stop+start the curated DLL/font-cache services
     (``Themes`` / ``FontCache`` / ``FontCache3.0.0.0`` / ``DPS``).
-    Causes a brief UI re-style flash; reclaims ~400-1200 MB of
-    cross-session DLL working set."""
+    Reclaims ~400-1200 MB of cross-session DLL working set BUT causes
+    a brief UI re-style flash. **0.5.0 V5.0M default flipped OFF** —
+    user feedback: the visual flash on every NUCLEAR cycle wasn't
+    worth the marginal reclaim. Opt in via Settings if you want it."""
 
-    cycle_superfetch: bool = True
-    """Stop+start ``SysMain``. Largest single reclaim (~1-3 GB) but the
-    next app launch may be slower for a few minutes until SuperFetch
-    re-warms its prefetch heuristics."""
+    cycle_superfetch: bool = False
+    """Stop+start ``SysMain``. Single largest reclaim (~1-3 GB) BUT
+    the next app launches feel slower for several minutes until
+    SuperFetch re-warms its prefetch heuristics. **0.5.0 V5.0M default
+    flipped OFF** — user feedback: persistent post-NUCLEAR sluggishness
+    came from this stage compounding when auto-NUCLEAR fired at 95%
+    threshold repeatedly. Opt in if reclaim matters more than launch
+    smoothness on your workload."""
 
     shutdown_wsl: bool = False
     """Run ``wsl --shutdown`` to release the Hyper-V vmmem balloon that
@@ -497,8 +528,13 @@ _POOL_TAG_HINTS: dict[str, str] = {
 #: positives on a healthy 32 GB workstation: at boot, no tag should
 #: cross either threshold; if one does after 8 hr of use, that's
 #: legitimately worth flagging.
-_POOL_LEAK_NONPAGED_THRESHOLD_BYTES = 500 * 1024 * 1024  # 500 MB
-_POOL_LEAK_PAGED_THRESHOLD_BYTES = 1024 * 1024 * 1024  # 1 GB
+# 0.5.0 V5.1: thresholds dropped 10× from 500MB / 1GB to 50MB / 100MB.
+# Real-world kernel pool leaks rarely cross 500MB on a single tag —
+# typical NVIDIA / VPN / AV driver leaks accumulate at 30-200MB over
+# days. The old thresholds meant the diagnostic essentially never
+# flagged anything on user machines, defeating the V5 design intent.
+_POOL_LEAK_NONPAGED_THRESHOLD_BYTES = 50 * 1024 * 1024   # 50 MB
+_POOL_LEAK_PAGED_THRESHOLD_BYTES = 100 * 1024 * 1024     # 100 MB
 
 
 def _run_tuple_stage(
@@ -577,6 +613,15 @@ def _run_pool_leak_diagnostic(
         ))
         return
     if not tags:
+        # 0.5.0 V5.1: upgraded to INFO so users can tell from
+        # ~/.claude/logs/memoria.log whether the diagnostic is
+        # privilege-blocked vs threshold-filtered. Previously this was
+        # a silent skip — every "no data" report looked identical
+        # regardless of root cause.
+        logger.info(
+            "pool_leak_diagnostic: 0 tags returned (privilege denied / "
+            "kernel API rejected); diagnostic unavailable",
+        )
         report.stages.append(StageResult(
             label=label,
             skipped=True,
@@ -594,6 +639,22 @@ def _run_pool_leak_diagnostic(
                 "paged_used_mb": entry.paged_used_bytes // (1024 * 1024),
                 "likely_driver": _POOL_TAG_HINTS.get(entry.tag, "unknown"),
             })
+    # 0.5.0 V5.1: log the actual occupancy spread + threshold gate so
+    # users know whether NUCLEAR returned "no leaks" because the kernel
+    # is healthy vs because every tag fell under the gate. Top-3 sizes
+    # are the most informative slice.
+    top3 = [
+        f"{e.tag}={(e.nonpaged_used_bytes + e.paged_used_bytes) // (1024 * 1024)}MB"
+        for e in tags[:3]
+    ]
+    logger.info(
+        "pool_leak_diagnostic: tags=%d flagged=%d (gate: %dMB nonpaged / "
+        "%dMB paged) top3=%s",
+        len(tags), len(flagged),
+        _POOL_LEAK_NONPAGED_THRESHOLD_BYTES // (1024 * 1024),
+        _POOL_LEAK_PAGED_THRESHOLD_BYTES // (1024 * 1024),
+        ",".join(top3),
+    )
     report.pool_leak_diagnostics = flagged
     report.stages.append(StageResult(
         label=label,

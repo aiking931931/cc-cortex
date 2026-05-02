@@ -324,12 +324,46 @@ def is_admin() -> bool:
 def _enable_privilege(name: str) -> bool:
     """Enable a single privilege on the current process token. Returns
     True on success, False otherwise. Does not raise — callers handle
-    the missing-privilege case explicitly via the ``False`` return."""
-    _require_windows()
-    advapi32 = ctypes.windll.advapi32  # type: ignore[attr-defined]
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    the missing-privilege case explicitly via the ``False`` return.
 
-    h_token = ctypes.wintypes.HANDLE()
+    0.5.0 V5.1: pinned argtypes + restype on every Win32 import (without
+    them, ``GetCurrentProcess`` returned ``int`` instead of ``HANDLE``,
+    truncating the 64-bit pseudo-handle on x64) and switched the
+    AdjustTokenPrivileges status check from ``ctypes.GetLastError()`` —
+    which only works when the DLL is loaded with
+    ``use_last_error=True`` and was returning stale values otherwise —
+    to a direct ``kernel32.GetLastError()`` call. The previous code
+    silently returned False on every admin process, so the V5
+    pool-leak diagnostic produced no data even with elevation."""
+    _require_windows()
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=False)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=False)
+    wt = ctypes.wintypes
+
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wt.HANDLE
+    kernel32.GetLastError.argtypes = []
+    kernel32.GetLastError.restype = wt.DWORD
+    kernel32.CloseHandle.argtypes = [wt.HANDLE]
+    kernel32.CloseHandle.restype = wt.BOOL
+    advapi32.OpenProcessToken.argtypes = [
+        wt.HANDLE, wt.DWORD, ctypes.POINTER(wt.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wt.BOOL
+    advapi32.LookupPrivilegeValueW.argtypes = [
+        wt.LPCWSTR, wt.LPCWSTR, ctypes.POINTER(_LUID),
+    ]
+    advapi32.LookupPrivilegeValueW.restype = wt.BOOL
+    advapi32.AdjustTokenPrivileges.argtypes = [
+        wt.HANDLE, wt.BOOL,
+        ctypes.POINTER(_TOKEN_PRIVILEGES),
+        wt.DWORD,
+        ctypes.POINTER(_TOKEN_PRIVILEGES),
+        ctypes.POINTER(wt.DWORD),
+    ]
+    advapi32.AdjustTokenPrivileges.restype = wt.BOOL
+
+    h_token = wt.HANDLE()
     if not advapi32.OpenProcessToken(
         kernel32.GetCurrentProcess(),
         TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
@@ -353,8 +387,14 @@ def _enable_privilege(name: str) -> bool:
         ):
             return False
         # AdjustTokenPrivileges returns success even if some privileges
-        # were not assignable; check GetLastError() for ERROR_NOT_ALL_ASSIGNED.
-        if ctypes.GetLastError() != 0:
+        # were not assignable; check the real Win32 last-error directly
+        # via kernel32 (NOT ``ctypes.GetLastError`` — that only works
+        # with ``use_last_error=True`` DLLs and returned stale values
+        # in the previous implementation, so every admin process saw
+        # this function return False).
+        last_err = kernel32.GetLastError()
+        ERROR_NOT_ALL_ASSIGNED = 1300
+        if last_err == ERROR_NOT_ALL_ASSIGNED:
             return False
         return True
     finally:
@@ -659,11 +699,19 @@ def query_pool_tags() -> list[PoolTagEntry]:
     the user understands why Memoria can't reclaim it; otherwise NUCLEAR
     looks like it failed when actually the OS is leaking.
 
-    Privilege: typically requires ``SeDebugPrivilege``. We fall back
-    silently to an empty list when denied — caller treats that as
+    Privilege: requires ``SeDebugPrivilege``. We attempt to enable it
+    (``_enable_privilege``) before the syscall — admin tokens have it
+    present-but-disabled by default and need an explicit AdjustToken
+    call. Non-admin tokens lack the privilege entirely, so the enable
+    returns False and the syscall returns 0xC0000061 (privilege not
+    held); we degrade to an empty list — caller treats that as
     "diagnostic unavailable", never "no leaks present"."""
     if not _IS_WINDOWS:
         return []
+    # 0.5.0 V5.1: explicit SeDebugPrivilege enable. Admin tokens hold
+    # the privilege in disabled state — the syscall demands enabled,
+    # not just held. Non-admin returns False here and we exit early.
+    _enable_privilege("SeDebugPrivilege")
     try:
         ntdll = ctypes.windll.ntdll  # type: ignore[attr-defined]
     except (AttributeError, OSError):
