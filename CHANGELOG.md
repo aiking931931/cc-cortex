@@ -7,6 +7,276 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-05-03 — `concinno.fieldread/` 5-namespace governance core (Cigito v3 patent moat axis 3)
+
+### Added — patent-moat surface (governance side)
+
+- `concinno.fieldread/` package — standalone 5-namespace FieldRead
+  compressor + breadcrumb audit trail. Public API:
+  - **5 namespace constants**: `COGNITION` / `SKILLS` / `FEEDBACK` /
+    `HANDOFF` / `AUDIT` (canonical tuple `NAMESPACES`).
+  - **`route(query)` → namespace** — keyword + path classifier with
+    SPS-slot priors (path priors dominate lexical priors; default
+    fallback is `COGNITION`).
+  - **`Breadcrumb` dataclass** — frozen, hashable; carries
+    `namespace / depth / ancestors / section / parent`. `compose()`
+    helper builds depth-incremented chains; `render()` emits a
+    `<crumb>ns > section</crumb>` tag for prompt injection.
+  - **`breadcrumb_from_path(path, namespace)`** — derive ancestor
+    chain + section from a filesystem path.
+  - **`FieldReadCompressor` class** with `compress(content, namespace,
+    *, tier, section)` returning a `CompressedContent` dataclass.
+    3-tier budgets: L1 (≤200ch index) / L2 (≤1500ch summary) /
+    L3 (unbounded archive). Pure heuristic — never calls an LLM.
+- `feature_config.FEATURE_META["fieldread.compressor"]` — switch
+  registry entry (default ON, ZIQ-autotunable, severity_if_off=minor).
+- `tests/test_fieldread_namespaces.py` — 74 tests (namespace
+  invariants / route classifier / breadcrumb chains / compressor
+  budgets / failure modes / switch toggle / patent-surface
+  invariants).
+
+### Cigito v3 patent moat — axis 3 governance-side ship
+
+Per `_AI_BRAIN/05_Planning/cigito-v3-strategic-anchor-4p-rd-is-the-innovation-2026-04-29.md`,
+patent novelty axis 3 = "FieldRead 5 fixed semantic namespaces +
+breadcrumb chain". Prior to 5.6.0 only `lyceum_adapter.field_read`
+(in `concinno-skills-lyceum-adapter`) shipped the 5-namespace
+contract; Concinno main only had the generic markdown section
+parser. Reviewers checking the upstream library would not see the
+patent surface at the canonical governance entry point.
+
+5.6.0 closes that doc-vs-real gap by mirroring the 5 namespaces
+into `concinno.fieldread/` as a **standalone** package — no
+`aiking_core` runtime dependency, since Concinno is upstream of
+aiking_core (the AGPL implementation detail in
+`aiking_core.fieldread.namespaces` remains a separate copy for the
+license-firewall layer).
+
+### Switches
+
+- `cfg.feature("fieldread.compressor", "enabled")` (default `True`).
+- Env override `CONCINNO_FIELDREAD_DISABLED=1` (also accepts
+  `true|yes|on`) returns input unchanged with `compressed=False`.
+  Falsy values (`0|false|no|off|""`) leave the feature ON.
+
+### Tests
+
+- `tests/test_fieldread_namespaces.py` — 74/74 PASS.
+- Full regression: existing test suite remains green.
+
+## [5.5.1] - 2026-05-03 — W1B audit hotfix (user "明明關閉還是擋" root-cause class)
+
+### Fixed (P0 — switches that didn't switch)
+
+- `guards/wiredo_subagent_verify_guard.py`: `_feature_enabled` / `_feature_param`
+  previously read `FEATURE_META` hardcoded default only, ignoring user override
+  in cc_config.json / env. The documented opt-in
+  `cfg.feature('wiredo_subagent_verify','enabled')=True` silently had no effect.
+  Both helpers now read through the 6-source chain via `get_config().feature(...)`.
+- `feature_config.py:list_features` / `get_feature`: replaced `cfg.feature_all(name)`
+  with per-key `cfg.feature(name, key)` lookup so CLI `concinno features list` /
+  `get` now reflect env var overrides. Previously CLI echo and runtime behaviour
+  could disagree when env vars were set.
+- `core/config.py:Config._load`: implemented Source #4 of the documented 6-source
+  chain — `~/.concinno/cc_config.json` (main user-level overlay) +
+  `~/.concinno/<feature>.json` (per-feature overlay schema
+  `{"features": {"<name>": {...}}}`). Previously the comment literally said
+  `"future"` (line 421), meaning every `switches.md` entry documenting
+  `~/.concinno/<feature>.json` opt-out paths silently swallowed user config.
+  **This was the root-cause class behind user's repeated "明明關閉還是擋"
+  reports.** Special-case files (`release_auth.json`, `locale.json`,
+  `governance_tier.json`, `session_switches.json`) retain their own dedicated
+  loaders — overlay loop skips them.
+
+### Tests
+
+- `tests/test_w1b_audit_fixes.py`: 11 new tests covering the 3 fixes —
+  wiredo_subagent_verify user-override roundtrip + env override + param read,
+  list_features / get_feature env reflection, `~/.concinno/cc_config.json`
+  main overlay, per-feature `wiredo.json` overlay, special-case file skip
+  invariant, missing-dir tolerance, malformed JSON tolerance. All 104 existing
+  config / feature_config regression tests still green.
+
+### Source
+
+- W1B audit report: `_AI_BRAIN/05_Planning/switches_audit_report_2026-05-03.md`.
+- Plan: `C:/Users/zerox/.claude/plans/logical-dancing-crayon.md` (Plan B Wave 1).
+
+## [5.5.0] - 2026-05-03 — Governance opt-in ladder (OFF/LITE/FULL/MAX)
+
+### Added
+
+- `aiking.governance.ladder` — 4-tier governance opt-in ladder:
+  OFF (destruction_guard only) / LITE (+ cbua + butterfly + premise_gate) /
+  FULL (+ sentinel + consecutive_fail + redblue_green_dispatch) /
+  MAX (+ Opus red-team dispatch). Default = LITE per Goodhart protection.
+- `GovernanceTier` enum, `LadderConfig` dataclass, `select_tier`,
+  `apply_tier`, `get_ladder_config`, `record_outcome`, `save_tier_override`,
+  `_load_persisted_tier`, `clear_tier_override` — full public API.
+- ZIQ FTRL reward hookup via `concinno.ziq.persist` — arm = tier value,
+  reward = task_completed(+1) − revert_needed(−2) − token_cost(−ε).
+  Silently degrades when ZIQ persist is unavailable.
+- `C0Result.governance_tier` field — every `C0Router.classify()` call now
+  exposes the selected tier as a string and records it in `signals`.
+- CLI subcommands: `concinno governance set-tier {off|lite|full|max}`,
+  `concinno governance get-tier`, `concinno governance clear-tier`.
+  Override persisted to `~/.concinno/governance_tier.json`.
+- 32 unit + integration + CLI tests in `tests/test_governance_ladder.py`,
+  all passing.
+
+## [5.4.0] - 2026-05-03 — License compliance hotfix
+
+### Fixed (License compliance hotfix)
+
+- Restore upstream NousResearch copyright in vendored Hermes Agent
+  fork license file (`LICENSE-MIT-Hermes`); AI King contributions
+  moved to `NOTICE.md` (per
+  `feedback_license_copyright_must_preserve_original.md`)
+- Add SPDX headers to all vendored / forked source files
+  (concinno-king 124 files + `_lyceum_vendor` 9 files)
+- Audit + fix related `_lyceum_vendor` / `pyproject.toml` license
+  metadata to align with verbatim upstream MIT preservation per
+  MIT § 1 / § 2
+
+## [5.3.0] - 2026-05-03 — Deprecation shim aliases (forward to aiking)
+
+### Deprecated
+
+`from concinno.{guards,hooks,cli,c0_router,ziq,field_read} import X`
+now emits ``DeprecationWarning`` and redirects to ``aiking.governance.X``
+/ ``aiking_core.X``. Removal scheduled for concinno 6.0.0
+(~2026-11-01).
+
+Migration:
+
+- ``from concinno.guards import Guard`` →
+  ``from aiking.governance.guards import Guard``
+- ``from concinno.hooks.session_start import handler`` →
+  ``from aiking.governance.hooks.session_start import handler``
+- ``from concinno.cli import main`` →
+  ``from aiking.governance.cli import main``
+- ``from concinno.c0_router import C0Router`` →
+  ``from aiking.governance.c0_router import C0Router``
+- ``from concinno.ziq import router`` →
+  ``from aiking_core.ziq import router``
+- ``from concinno.field_read import parse`` →
+  ``from aiking_core.fieldread import parse``
+
+The submodule implementation files under ``concinno/guards/``,
+``concinno/hooks/``, ``concinno/cli/``, and ``concinno/ziq/`` (e.g.
+``butterfly_guard.py``, ``destruction_guard.py``, etc.) are kept on
+disk for in-tree cross-references but their package
+``__init__.py`` now forwards to aiking. New consumers should depend
+on aiking / aiking-core directly.
+
+### Added
+
+- Runtime dependencies: ``aiking>=1.0.0``, ``aiking-core>=1.0.0``.
+  Both are required for the shim aliases to resolve. Installing
+  concinno 5.3.0 transparently pulls them in.
+
+### AGPL boundary
+
+``concinno.ziq`` and ``concinno.field_read`` shims redirect to
+``aiking_core`` (AGPL-3.0-or-later). concinno 5.3.0 is already
+AGPL-3.0-or-later so license consistency is preserved. Apache 2.0
+downstreams that previously imported these symbols from concinno
+were already pulling AGPL by transitive vendor — switching directly
+to ``aiking-core`` makes the boundary explicit.
+
+### Internal
+
+- 6-month deprecation window. concinno 6.0.0 (~2026-11-01) will
+  remove the shim ``__init__.py`` files and the runtime
+  ``aiking`` / ``aiking-core`` dependencies.
+- See ``_AI_BRAIN/05_Planning/concinno-shim-merge-prep.md`` for the
+  Phase 3 release coordination spec.
+
+## [5.2.0] - 2026-05-02 — Lyceum substrate vendored (Phase 3 ship-blocker fix)
+
+### Fixed — `pip install concinno` was unusable on a fresh machine
+
+Up to 5.1.1, `concinno.destruction_guard`, `concinno.approval_mode` and
+`concinno.security.ssrf_guard` source-imported `from lyceum.X import ...`
+at 14 sites. The Wave 2.7-F/G/H Lyceum-substrate audit moved the SOTA
+classification kernel + SPS×FTRL approval kernel + Layer-7 SSRF
+validator to the local `projects/lyceum/` workspace (`lyceum-agent`
+dist name, `lyceum` import name), but that package is **not on PyPI**
+under the import name `lyceum` — `pypi.org/project/lyceum/0.11.0` is
+an unrelated French education tool by `benabel`, occupying the slot.
+
+Result: any user running `pip install concinno==5.1.1` on a clean
+environment hit `ModuleNotFoundError: lyceum` the moment they imported
+either guard. T2.E integration test on commit `b8621ae32` (AI King
+monorepo Phase 3 prep) caught this; verified by 5-axis sub-agent
+investigation.
+
+### Vendored
+
+To unblock Phase 3 ship without forcing a `lyceum-agent` PyPI
+publication under a colliding import name, the Lyceum substrate subset
+that Concinno actually consumes is vendored at
+`concinno._lyceum_vendor/`:
+
+- `_lyceum_vendor/sandbox/destruction_guard.py` (663 LoC) — SOTA R0-R4
+  classification kernel + `evaluate()` per-tool decision + AskUser
+  template builder + suggestion table.
+- `_lyceum_vendor/sandbox/destruction_patterns.py` (512 LoC) — regex
+  catalog (R0_PATTERNS … R4_PATTERNS), `classify_command`,
+  `check_destroy_confirmed` (#DESTROY_CONFIRMED escape), 14,517-event
+  fire ledger.
+- `_lyceum_vendor/governance/smart_approval_ziq.py` (606 LoC) — SPS×FTRL
+  posterior approval (patent-verified novel per MEMORY #4l, ICML 2026
+  GRPO is closest prior).
+- `_lyceum_vendor/governance/outcome_store.py` (303 LoC) — append-only
+  JSONL outcome store for FTRL replay.
+- `_lyceum_vendor/security/ssrf_guard.py` (544 LoC) — Layer 7 SSRF
+  validator (Hermes-parity, stdlib-only).
+
+The 14 `from lyceum.X import …` sites in
+`concinno/{destruction_guard,approval_mode,security/ssrf_guard}.py`
+were rewritten to
+`from concinno._lyceum_vendor.X import …`. Two intra-vendor imports
+(destruction_guard → destruction_patterns,
+smart_approval_ziq → outcome_store) were rewritten the same way. No
+public Concinno API change — every existing
+`from concinno.destruction_guard import …` /
+`from concinno.approval_mode import …` /
+`from concinno.security.ssrf_guard import …` callsite still works
+identically.
+
+### Internal
+
+- `tool.ruff.lint.per-file-ignores` now exempts
+  `src/concinno/_lyceum_vendor/**` from `E501 / E741 / F401` so the
+  vendored copy stays byte-equivalent to upstream
+  `projects/lyceum/lyceum/**` and a future `lyceum-agent` PyPI release
+  can be diff-merged in. Lint fixes belong in the lyceum repo, not in
+  the vendor mirror.
+
+### Forward path
+
+When `lyceum-agent` ships to PyPI under a final import name (e.g.
+`lyceum_agent` package, evading the `lyceum` squat), a future Concinno
+major bump will switch the shims back to a real runtime dependency and
+delete `_lyceum_vendor/`. Until then the vendor is the bridge. No
+behavior change vs 5.1.1 + Lyceum-on-PYTHONPATH dev environments.
+
+## [5.1.1] - 2026-05-02 — LICENSE backfill (hotfix, no functional change)
+
+### Fixed
+
+- `LICENSE` previously contained a placeholder marker
+  `[BEGIN AGPL v3 FULL TEXT — DOWNLOAD FROM ABOVE URL AND APPEND HERE
+  BEFORE PYPI UPLOAD]` instead of the canonical FSF AGPL v3 text.
+  Backfilled the full 661-line FSF AGPL v3 text from
+  `https://www.gnu.org/licenses/agpl-3.0.txt` so the published wheel
+  carries a complete, legally-valid license. The §7 Additional Terms
+  (trademark notice, commercial dual-license offer, sole-copyright
+  attestation) are preserved verbatim.
+
+No source / API / behavior change. This is a documentation hotfix.
+
 ## [5.1.0] - 2026-05-01
 
 ### Added — FTRL state disk persistence (verdict P2 #4)

@@ -3010,6 +3010,55 @@ FEATURE_META: dict[str, dict[str, Any]] = {
             },
         },
     },
+    # 2026-05-03 — concinno 5.6.0 — fieldread/ 5-namespace governance core
+    # (Cigito v3 patent moat axis 3, governance side). Standalone — does NOT
+    # depend on aiking_core (Concinno is upstream of aiking_core; the
+    # aiking_core.fieldread.namespaces is a separate AGPL implementation
+    # detail with the same patent surface for license-firewall reasons).
+    "fieldread.compressor": {
+        "category": "context",
+        "description": (
+            "Concinno 5-namespace FieldRead compressor + breadcrumb "
+            "audit trail (Cigito v3 patent moat axis 3, governance side). "
+            "3-tier compression L1 (≤200ch index) / L2 (≤1500ch summary) / "
+            "L3 (unbounded archive). Standalone — no aiking_core runtime dep."
+        ),
+        "description_zh": (
+            "Concinno 5 命名空間 FieldRead 壓縮器 + 麵包屑審計鏈"
+            "（Cigito v3 專利護城河第 3 軸，治理側）。三層壓縮 "
+            "L1 (≤200 字索引) / L2 (≤1500 字摘要) / L3 (無上限存檔)。"
+            "獨立模組，不依賴 aiking_core runtime。"
+        ),
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "recommended": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "FieldRead 5-namespace 壓縮關閉，governance 端壓縮路徑不啟動，"
+            "改走原始 content + breadcrumb 直通；不影響其他功能"
+        ),
+        "consequences_if_off_en": (
+            "5-namespace FieldRead compression disabled — content "
+            "flows through unchanged with the breadcrumb still attached. "
+            "No other feature affected."
+        ),
+        "params": {
+            "enabled": {
+                "type": "bool",
+                "default": True,
+                "recommended": True,
+                "risk_off": (
+                    "Disabling skips the patent-moat compressor — "
+                    "governance flows still work but lose ≤200ch / ≤1500ch "
+                    "tier budgets."
+                ),
+                "risk_off_zh": (
+                    "關閉會跳過專利護城河壓縮，治理流程仍可運作但失去 "
+                    "≤200/≤1500 字層級預算"
+                ),
+            },
+        },
+    },
     # 2026-04-27 — MAR (Multi-Agent Reflexion) 4-perspective C5 self-correction.
     # Dispatches engineer / user / attacker / auditor Opus subagents in
     # parallel via the harness Agent dispatcher; aggregates findings with
@@ -4088,21 +4137,38 @@ def list_features(lang: str = "en") -> list[dict[str, Any]]:
     result = []
     for name, meta, origin in iter_all_features_with_origin():
         desc = meta.get(f"description_{lang}", meta["description"])
-        current = cfg.feature_all(name) if cfg else {}
-        result.append({
-            "name": name,
-            "category": meta["category"],
-            "description": desc,
-            "enabled": current.get("enabled", meta_enabled_default(name)),
-            "source": origin,
-            "params": {
+        # Bug fix v5.5.1 (W1B audit F2): per-key cfg.feature() lookup so the
+        # CLI listing reflects env var overrides. feature_all() returns the
+        # raw cc_config dict and silently drops env (CONCINNO_<FEATURE>_<PARAM>)
+        # overrides — that made `concinno features list` echo state that
+        # disagreed with runtime behaviour when env vars were set.
+        if cfg:
+            enabled_val = cfg.feature(name, "enabled")
+            params_dict = {}
+            for k, v in meta.get("params", {}).items():
+                cfg_val = cfg.feature(name, k)
+                params_dict[k] = {
+                    "value": cfg_val if cfg_val is not None else v.get("default"),
+                    "default": v.get("default"),
+                    "recommended": v.get("recommended"),
+                }
+        else:
+            enabled_val = meta_enabled_default(name)
+            params_dict = {
                 k: {
-                    "value": current.get(k, v.get("default")),
+                    "value": v.get("default"),
                     "default": v.get("default"),
                     "recommended": v.get("recommended"),
                 }
                 for k, v in meta.get("params", {}).items()
-            },
+            }
+        result.append({
+            "name": name,
+            "category": meta["category"],
+            "description": desc,
+            "enabled": enabled_val,
+            "source": origin,
+            "params": params_dict,
         })
     return result
 
@@ -4113,20 +4179,23 @@ def get_feature(name: str, lang: str = "en") -> Optional[dict[str, Any]]:
     if not meta:
         return None
 
+    # Bug fix v5.5.1 (W1B audit F2): use cfg.feature() per-key so env var
+    # overrides surface here too. feature_all() returned the raw cc_config
+    # dict and silently swallowed CONCINNO_<FEATURE>_<PARAM> env overrides.
     try:
         from concinno.core.config import get_config
 
         cfg = get_config()
-        current = cfg.feature_all(name)
     except Exception:
-        current = {}
+        cfg = None
 
     desc = meta.get(f"description_{lang}", meta["description"])
     params = {}
     for k, v in meta.get("params", {}).items():
         risk_suffix = f"_{lang}" if lang != "en" else ""
+        cfg_val = cfg.feature(name, k) if cfg else None
         params[k] = {
-            "value": current.get(k, v.get("default")),
+            "value": cfg_val if cfg_val is not None else v.get("default"),
             **v,
         }
         # Add localized risk text if available
@@ -4135,11 +4204,12 @@ def get_feature(name: str, lang: str = "en") -> Optional[dict[str, Any]]:
             if localized:
                 params[k][risk_key] = localized
 
+    enabled_val = cfg.feature(name, "enabled") if cfg else meta_enabled_default(name)
     return {
         "name": name,
         "category": meta["category"],
         "description": desc,
-        "enabled": current.get("enabled", meta_enabled_default(name)),
+        "enabled": enabled_val,
         "params": params,
     }
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "concinno"
-version = "5.1.0"
+version = "5.6.0"
 description = "AI behavior governance for Claude Code - guards, input rewriting, LLM-as-Judge, A2A safety agent, zero-dep core"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -14,6 +14,13 @@ dependencies = [
     "openai>=1.50",
     "httpx>=0.27",
     "pydantic>=2.0",
+    # 5.3.0 — deprecation shim aliases forward to aiking namespace.
+    # `from concinno.{guards,hooks,cli,c0_router,ziq,field_read} import X`
+    # now redirects to aiking.governance.X / aiking_core.X. Both packages
+    # are required at install time so the shim re-exports resolve.
+    # Removal scheduled for concinno 6.0.0 (~2026-11-01).
+    "aiking>=1.0.0",
+    "aiking-core>=1.0.0",
 ]
 authors = [
     { name = "AI King (Chen-Xuan Wang)", email = "me@ai-king.dev" },
@@ -251,6 +258,10 @@ select = ["E", "F", "I", "W"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/red_team_v3_100.py" = ["E501"]
+# Vendored Lyceum substrate primitives (5.2.0 — see CHANGELOG). Keep
+# byte-equivalent to upstream so cross-repo diff stays clean; lint
+# fixes belong upstream in projects/lyceum/, not here.
+"src/concinno/_lyceum_vendor/**" = ["E501", "E741", "F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

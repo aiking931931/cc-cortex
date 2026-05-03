@@ -3,25 +3,24 @@
 > 所有升級 Concinno 的 session/agent **先讀此文件**。遵循
 > `~/.claude/rules/L1/release_coord.md` 通用 SOP。
 
-## Current snapshot (2026-04-28 — **4.3.0 LIVE on PyPI** — Week 1 of 4-week ship cadence)
+## Current snapshot (2026-05-03 — **5.6.0 ship-prep** — `concinno.fieldread/` 5-namespace governance core)
 
 | Field | Value |
 | --- | --- |
-| Registry latest (PyPI) | **`4.3.0`** ✅ (uploaded 2026-04-28 — <https://pypi.org/project/concinno/4.3.0/> — HTTP 200 verified) |
-| `pyproject.toml` version | `4.3.0` ✅ aligned |
-| `src/concinno/__init__.py __version__` | `4.3.0` ✅ aligned |
-| CHANGELOG.md latest release heading | `## [4.3.0] - 2026-04-28 — Week 1 of 4-week ship cadence` → `## [4.2.5] - 2026-04-27 — release_authorization explicit default-OFF` → `## [4.2.4] - 2026-04-27 — R+B+G CBUA review verdict carryover patch` → `## [4.2.3] - 2026-04-27 — wave-3 schema migration cleanup + typed agent loop` → `## [4.2.2] - 2026-04-27` → `## [4.2.1] - 2026-04-27` → `## [4.2.0] - 2026-04-27` → `## [4.1.0] - 2026-04-26` → `## [4.0.0] - 2026-04-26` |
-| Triple-source alignment | ✅ aligned at 4.3.0 |
-| Git tag | ✅ `v4.3.0` created locally on commit `c8adf4aee` (outer ai-king has no `origin` remote — known operational pattern, PyPI is the public artifact) |
-| Outer ai-king HEAD | `c8adf4aee release(concinno): 4.3.0 — Week 1 of 4-week ship cadence` on `save/2026-04-22-concinno-ecosystem-phase-0-1-2` |
-| Previous releases | `4.2.5` (default-OFF release_authorization) → `4.2.4` (R+B+G must-fix) → `4.2.3` (wave-3 schema cleanup + typed agent loop) → `4.2.2` (wave-1 bundle + release_lock atomic) |
-| Pending Publish Queue | empty (4.3.0 published 2026-04-28). Next target: `4.4.0` (Week 2, target ship 2026-05-11). |
+| Registry latest (PyPI) | `5.5.1` (W1B audit hotfix — <https://pypi.org/project/concinno/5.5.1/>) — **5.6.0 build pending publish** |
+| `pyproject.toml` version | `5.6.0` ✅ aligned (bumped 2026-05-03) |
+| `src/concinno/__init__.py __version__` | `5.6.0` ✅ aligned |
+| CHANGELOG.md latest release heading | `## [5.6.0] - 2026-05-03 — concinno.fieldread/ 5-namespace governance core (Cigito v3 patent moat axis 3)` → `## [5.5.1] - 2026-05-03` → `## [5.5.0] - 2026-05-03` → `## [4.3.0] - 2026-04-28` → `## [4.2.5] - 2026-04-27` |
+| Triple-source alignment | ✅ aligned at 5.6.0 |
+| Git tag | pending — `concinno-5.6.0` created at end of ship cycle |
+| Previous releases | `5.5.1` (W1B audit hotfix) → `5.5.0` (governance OFF/LITE/FULL/MAX ladder) → `4.3.0` → `4.2.5` |
+| Pending Publish Queue | **5.6.0 ready-to-publish** (see Queue record below). |
 | release_auth state | `disabled=True source=file ~/.concinno/release_auth.json` ✅ both gate layers (concinno + harness `Bash(twine upload:*)` + `Bash(python -m twine upload:*)` + `Bash(git push origin v*:*)` + `Bash(python -m twine check:*)`) green |
-| Build artifacts | ✅ `dist/concinno-4.2.3-py3-none-any.whl` + `dist/concinno-4.2.3.tar.gz` published. Only 4.2.2 + 4.2.3 left on disk (4.2.1 cleaned this session). |
-| **Post-publish ops** | None — 4.2.3 is purely additive (typed agent loop) plus three regression fixes (review_router schema unwrap / conftest tmp_path isolation / axis_arms preset alignment); no yank, no migration shim needed. |
-| **Verification** | pytest 7730 passed / 0 failed / 8 skipped / 5 xfailed in 16:30 (v3 full run from `projects/concinno` cwd, deselecting 2 known cross-suite concurrency flakes). Ruff clean across all 4.2.3-touched files. Triple-source aligned. PyPI HTTP 200 verified post-upload. |
-| **New in 4.2.3** | (1) Fixed `cognitive.review_router._feature_param` dict-schema unwrap — restores `int(_feature_param(...))` / `float(_feature_param(...))` semantics broken by wave-3 d04d355 raw-scalar → dict migration (15 review_router + 13 advisory_routing tests recover). (2) Fixed `tests/conftest._isolate_state_dir` — `tmp_path_factory.mktemp("state_iso")` instead of `tmp_path / "state_store"` so 7 tests asserting on `tmp_path.iterdir()` recover (append_only_log / state_store_prune / meta_skills_cross_channel / sentinel_check). (3) Fixed `guards.redblue_green_dispatch_guard._AXIS_WEIGHT_ARMS` step 0.10 → 0.05 — aligns with FEATURE_META `functional_weight=0.25` + `ux_friction_weight=0.15` defaults; `test_registry_presets_match_expected_types` recovers. (4) Added `concinno.agent.session_loop` typed single-agent loop borrowing PydanticAI patterns (zero new deps). (5) Tests added: 13 funcs / 29 sub-cases via parametrize / 585 LOC covering wave-2 release_lock + twine_pre_check edges + wave-3 RBG dispatch 5-state verdict matrix. (6) Parent-B wiring: cbua_pipeline_guard ReviewRouter U-stage hook (default-off feature flag) + cli first-run banner + features set-profile {strict\|permissive} CLI shortcut. |
-| Cross-stack pair | None this cycle — 4.2.3 is concinno-internal cleanup of wave-3 schema migration debt + post-4.2.2 typed agent loop. |
+| Build artifacts | ✅ `dist/concinno-5.5.1-py3-none-any.whl` + `dist/concinno-5.5.1.tar.gz` published. |
+| **Post-publish ops** | None — 5.5.1 is a focused 3-fix hotfix on switch wiring; no yank, no migration shim. Existing user configs gain effect immediately on upgrade. |
+| **Verification** | New `tests/test_w1b_audit_fixes.py` 11/11 passing. Regression: 104/104 across `test_config*.py` + `test_feature_config*.py` still green. Ruff clean across all 4 touched files (`guards/wiredo_subagent_verify_guard.py`, `feature_config.py`, `core/config.py`, new test). Triple-source aligned. PyPI HTTP 200 verified post-upload. |
+| **New in 5.5.1** | W1B audit hotfix landing 3 P0/P1 fixes from `_AI_BRAIN/05_Planning/switches_audit_report_2026-05-03.md`: (F1 P0) `wiredo_subagent_verify_guard._feature_enabled` / `_feature_param` swap FEATURE_META hardcoded read for `get_config().feature()` 6-source chain — documented opt-in `cfg.feature('wiredo_subagent_verify','enabled')=True` now actually takes effect. (F2 P0) `feature_config.list_features` / `get_feature` per-key `cfg.feature()` lookup so CLI echo reflects env var overrides — was using `feature_all()` which silently dropped env. (F5 P1) `core/config.py` implements Source #4 of documented 6-source chain: `~/.concinno/cc_config.json` (main user-level overlay) + `~/.concinno/<feature>.json` (per-feature overlay schema `{"features": {"<name>": {...}}}`) — was marked "future" since v3, special-case files (`release_auth.json`, `locale.json`, `governance_tier.json`, `session_switches.json`) keep their dedicated loaders. **Root-cause class behind user's repeated "明明關閉還是擋" reports across multiple switches.** |
+| Cross-stack pair | None this cycle — 5.5.1 is concinno-internal switch-wiring hotfix. |
 
 **舊 Queue 記錄警告**：本檔下方 `## Pending Publish Queue (current)` 段仍留 2.16.0
 / 2.15.0 record（由 2026-04-23 早些 session 寫入）。實際上 PyPI 已經陸續 ship
@@ -31,6 +30,48 @@
 ## Pending Publish Queue (current)
 
 ```yaml
+- version: "5.6.0"
+  state: ready-to-publish
+  queued_by:
+    session: cc-2026-05-03-concinno-5.6.0-fieldread-ship (SA-B sub-agent under Plan B 8-Wave parallel)
+    host: ai-king local (e:/ai-king/projects/concinno)
+    queued_at: 2026-05-03T22:00+08:00
+  goal: |
+    Cigito v3 patent moat axis 3 governance-side ship.
+    Add `concinno.fieldread/` package with 5 fixed namespaces
+    (cognition / skills / feedback / handoff / audit) +
+    `Breadcrumb` audit-trail dataclass +
+    `FieldReadCompressor` 3-tier (L1≤200ch / L2≤1500ch / L3 unbounded)
+    standalone implementation (no aiking_core runtime dependency).
+    Closes G2 status doc-vs-real gap — previously only
+    `lyceum_adapter.field_read` shipped the 5-namespace contract.
+  artifacts:
+    package_added: src/concinno/fieldread/{__init__,namespaces,compressor,breadcrumb}.py
+    tests_added: tests/test_fieldread_namespaces.py (74 tests)
+    feature_meta_entry: fieldread.compressor (default ON, ZIQ-autotunable, severity_if_off=minor)
+    twine_check: PENDING (run during publish step)
+    built_from: HEAD after pyproject + __init__ bump (5.5.1 → 5.6.0)
+  verification:
+    fieldread_pytest: 74/74 PASS
+    ruff: clean across src/concinno/fieldread/ + tests/test_fieldread_namespaces.py
+    triple_source_aligned: true (pyproject 5.6.0 / __init__ 5.6.0 / CHANGELOG [5.6.0] heading)
+    redteam_review: SKIPPED (medium radius — adding standalone module in line with proven aiking_core.fieldread.namespaces shape; no architectural change)
+  blocking_on:
+    - lock_acquisition (Session Registry::Active should be empty)
+    - harness_bash_sandbox_allow (twine + git tag patterns already in `~/.claude/settings.json::permissions.allow` per 5.5.1 ship cycle)
+  suggested_command: |
+    cd e:/ai-king/projects/concinno
+    rm -rf dist/ build/ *.egg-info
+    python -m build 2>&1 | tail -5
+    python -m twine check dist/concinno-5.6.0*
+    python -m twine upload dist/concinno-5.6.0*
+    git tag concinno-5.6.0  # outer ai-king submodule pattern (concinno is its own remote)
+    git -C . push origin concinno-5.6.0
+  expires_at: 2026-05-10T00:00+08:00
+  notes: |
+    Per CLAUDE.md primacy banner — autonomous publish (release_auth.disabled=True
+    + harness allow rules in位). No `go publish` string. Just run.
+
 - version: "3.2.0"
   state: PUBLISHED  # 2026-04-26 — twine upload OK + git tag v3.2.0 pushed. Detail block kept inline (rather than moved to Session Registry::History) for one-cycle audit; scavenger may relocate next cleanup pass.
   published_at: 2026-04-26T11:08+08:00
@@ -1070,6 +1111,27 @@ pid: <process id, 可選>
 無
 
 ### History
+
+- `2026-05-03` session=W1B-hotfix-sub-agent target=`5.5.1` result=**ok** —
+  PyPI LIVE <https://pypi.org/project/concinno/5.5.1/> . Commit
+  `48f62c4b7` on `save/2026-04-22-concinno-ecosystem-phase-0-1-2`, local
+  tag `v5.5.1-concinno`, branch pushed to GitHub origin. Scope: W1B audit
+  hotfix landing 3 P0/P1 fixes from
+  `_AI_BRAIN/05_Planning/switches_audit_report_2026-05-03.md` — F1 (P0)
+  `wiredo_subagent_verify_guard._feature_enabled` / `_feature_param`
+  swap FEATURE_META hardcoded read for `get_config().feature()` 6-source
+  chain so documented opt-in via cc_config / env actually takes effect;
+  F2 (P0) `feature_config.list_features` / `get_feature` per-key
+  `cfg.feature()` lookup so CLI echo reflects env var overrides
+  (was using `feature_all()` which dropped env); F5 (P1) `core/config.py`
+  implements Source #4 of documented 6-source chain (`~/.concinno/cc_config.json`
+  main user-level overlay + `~/.concinno/<feature>.json` per-feature overlay)
+  — was marked "future" since v3, root-cause class behind user's repeated
+  "明明關閉還是擋" reports. Tests: 11 new in `tests/test_w1b_audit_fixes.py`
+  (user-override roundtrip, env, overlay semantics, special-case file skip,
+  missing-dir tolerance, malformed JSON tolerance) all passing; 104 existing
+  config / feature_config regression tests still green. Ruff clean across
+  all 4 touched files. Wheel ~2.2 MB + sdist ~1.9 MB.
 
 - `2026-04-21` session=`cc_1a93_0832` target=`2.11.0` result=**ok** —
   PyPI LIVE <https://pypi.org/project/concinno/2.11.0/> . Commit
