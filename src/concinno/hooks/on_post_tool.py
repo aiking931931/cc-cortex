@@ -29,6 +29,7 @@ import sys
 
 from concinno.constants import WRITE_TOOLS_EXT as _WRITE_TOOLS
 from concinno.hooks.io_utils import cache_path, get_project_dir
+from concinno.hooks.relay_helpers import emit_with_habituation
 
 _MILESTONE_INTERVAL = 5
 
@@ -154,12 +155,18 @@ def _throttle(lines: list[str], session_id: str = "") -> list[str]:
         level = _classify(line)
         if level == "CRITICAL":
             _emit_stderr(_stderr_summary(line) + token_suffix)
-            output.append(f"[SHOW USER VERBATIM] {line}{token_suffix}")
-            output.append(
-                "⚠ 蝴蝶效應鐵律：完成當前子任務後，"
-                "立即回頭修復上述問題（含 pre-existing）。"
-                "不修不能開始下一個任務。"
+            wrapped = emit_with_habituation(
+                "post_tool_critical",
+                f"{line}{token_suffix}",
+                session_id=session_id,
             )
+            if wrapped:
+                output.append(wrapped)
+                output.append(
+                    "⚠ 蝴蝶效應鐵律：完成當前子任務後，"
+                    "立即回頭修復上述問題（含 pre-existing）。"
+                    "不修不能開始下一個任務。"
+                )
         elif level == "MILESTONE":
             count = _extract_streak_count(line)
             is_named = count in (25, 50, 100)
@@ -167,7 +174,11 @@ def _throttle(lines: list[str], session_id: str = "") -> list[str]:
             if is_named or is_interval:
                 display = f"{line}{token_suffix}"
                 _emit_stderr(display)
-                output.append(f"[SHOW USER VERBATIM] {display}")
+                wrapped = emit_with_habituation(
+                    "streak_ux", display, session_id=session_id,
+                )
+                if wrapped:
+                    output.append(wrapped)
         else:
             output.append(line)
     return output
@@ -513,7 +524,12 @@ def _get_handoff_mode() -> str:
 
 
 def _append_token_fragments(
-    result: dict, token_msg: str, mode: str, fragments: list[str],
+    result: dict,
+    token_msg: str,
+    mode: str,
+    fragments: list[str],
+    *,
+    session_id: str = "",
 ) -> None:
     """Append token warning fragments based on handoff mode.
 
@@ -521,7 +537,11 @@ def _append_token_fragments(
     Other modes: display + handoff guidance at high thresholds.
     """
     threshold = result["threshold"]
-    fragments.append(f"[SHOW USER VERBATIM] {token_msg}")
+    wrapped = emit_with_habituation(
+        "token_monitor", token_msg, session_id=session_id,
+    )
+    if wrapped:
+        fragments.append(wrapped)
     # Full mode: display context usage but never inject
     # handoff guidance — user delegated autonomous execution.
     if mode in ("full", "competition"):
@@ -542,6 +562,15 @@ def _run_token_monitor(
     hook_data: dict, fragments: list[str],
 ) -> None:
     """Token monitor: 100K/140K/160K threshold warnings (real API data only)."""
+    # F8 (2.7.1): token-zone hint is pure UX — the hard handoff gate
+    # in handoff_engine.check_token_gate (Agent spawn deny) runs on
+    # its own PreToolUse channel and is unaffected.
+    try:
+        from concinno.cache.ux_gate import is_ux_enabled
+        if not is_ux_enabled():
+            return
+    except Exception:
+        pass
     try:
         from concinno.token_monitor import check_threshold
 
@@ -557,7 +586,10 @@ def _run_token_monitor(
         if not result:
             return
         token_msg = _format_token_warning(result, lang)
-        _append_token_fragments(result, token_msg, _get_handoff_mode(), fragments)
+        _append_token_fragments(
+            result, token_msg, _get_handoff_mode(), fragments,
+            session_id=session_id,
+        )
     except (ImportError, Exception):
         pass
 
@@ -633,10 +665,12 @@ def _check_context_compressed(hook_data: dict, tool_name: str) -> bool:
         "Stop all Edit/Write. Write handoff NOW."
     )
     _emit_stderr(msg)
-    _emit_output(
-        [f"[SHOW USER VERBATIM] {msg}"],
-        session_id=hook_data.get("session_id", ""),
+    session_id = hook_data.get("session_id", "")
+    wrapped = emit_with_habituation(
+        "context_compression", msg, session_id=session_id,
     )
+    if wrapped:
+        _emit_output([wrapped], session_id=session_id)
     return True
 
 
@@ -695,12 +729,37 @@ def _run_auto_checkpoint(
         _emit_stderr(f"auto-checkpoint → {os.path.basename(result)}")
 
 
+def _build_emergence_shape(tool_name: str, tool_input: dict) -> str:
+    """Canonical workflow fingerprint — same shape across runs.
+
+    Stripped of arguments / file paths / timestamps so the same
+    workflow primitive collapses to one fingerprint regardless of
+    which file it touches.
+    """
+    if tool_name == "Bash":
+        cmd = str(tool_input.get("command", "") or "")
+        head = cmd.strip().split(None, 2)[:2]
+        return " ".join(head)
+    if tool_name in ("Edit", "Write", "NotebookEdit"):
+        fp = str(tool_input.get("file_path") or tool_input.get("path") or "")
+        if "." in os.path.basename(fp):
+            return os.path.splitext(fp)[1].lstrip(".")
+    return ""
+
+
 def _run_streak_ux(
     tool_name: str, tool_input: dict, guard_ctx: str,
     hook_data: dict, fragments: list[str],
 ) -> None:
-    """Track clean-edit streak and append UX message if applicable."""
+    """Track clean-edit streak and append UX message if applicable.
+
+    Respects ``/hook streak_ux off``: when the feature flag is false we
+    skip the streak counter entirely rather than tracking silently.
+    """
     if tool_name not in _WRITE_TOOLS:
+        return
+    from concinno.core.config import get_config
+    if not get_config().feature("streak_ux", "enabled"):
         return
     fp = tool_input.get("file_path") or tool_input.get("path") or ""
     has_errors = "\U0001f534" in guard_ctx  # 🔴
@@ -752,6 +811,28 @@ def main(hook_data: dict | None = None) -> None:
 
     # 5. Sentinel outcome recording
     _run_sentinel(hook_data, tool_name)
+
+    # 5.4 polling-watcher — register wait state for async ops (4.1.0)
+    try:
+        from concinno.hooks.wait_watcher import maybe_register_wait
+        polling_ctx = maybe_register_wait(tool_name, tool_input)
+        if polling_ctx:
+            fragments.append(polling_ctx)
+    except Exception:
+        pass  # never block the hook
+
+    # 5.45 pip-aftermath — detect pip touching concinno + Memoria
+    # heartbeat staleness (4.2.0)
+    try:
+        from concinno.hooks.pip_aftermath import detect_pip_concinno
+        pip_ctx = detect_pip_concinno(tool_name, tool_input)
+        if pip_ctx:
+            fragments.append(pip_ctx)
+    except Exception:
+        pass
+
+    # 5.47 Optional concinno-skills-memory candidate capture (0.2.0+).
+    _memory_lifecycle_post_tool_use(tool_name, hook_data)
 
     # 5.5 ThinkingDepthGuard — record ALL tools, warn only on Edit
     try:
@@ -815,6 +896,38 @@ def main(hook_data: dict | None = None) -> None:
     # 6. Output
     if fragments:
         _emit_output(fragments, session_id=hook_data.get("session_id", ""))
+
+
+def _memory_lifecycle_post_tool_use(tool_name: str, hook_data: dict) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent.
+
+    Captures the just-finished tool's output as a *candidate* snippet
+    (no auto-write — gating happens in :func:`on_stop`'s lifecycle
+    invocation). Any ImportError or runtime failure is swallowed so
+    the host hook keeps running.
+    """
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
+            on_post_tool_use as _memory_on_post_tool_use,
+        )
+
+        tool_response = hook_data.get("tool_response", {}) or {}
+        if isinstance(tool_response, dict):
+            output = str(tool_response.get("output", ""))
+        else:
+            output = str(tool_response)
+        _memory_on_post_tool_use(
+            _MemoryCtx(
+                session_id=hook_data.get("session_id", ""),
+                tool_name=tool_name,
+                tool_output=output,
+            )
+        )
+    except (ImportError, Exception):
+        pass
 
 
 if __name__ == "__main__":

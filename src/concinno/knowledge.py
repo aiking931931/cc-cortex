@@ -377,7 +377,7 @@ def get_pending_promotions(
         return []
 
     if use_ftrl:
-        return [
+        promotions = [
             item
             for item in items
             if isinstance(item, dict)
@@ -387,14 +387,37 @@ def get_pending_promotions(
                 item.get("last_seen", ""),
             ) >= ftrl_threshold
         ]
+        # ZIQ outcome wire (4.4.0 — sub-agent K wave-2). The reward
+        # signal here is "did this threshold yield at least one
+        # promotion candidate this scan". A productive threshold = the
+        # learning sediment rate is healthy at this cutoff; a barren
+        # threshold either too high (real signals dropped) or pristine
+        # input (no new corrections). Either way the FTRL learner sees
+        # tripped=False when promotions exist (success), tripped=True
+        # when they do not (signal to lower the threshold).
+        try:
+            from concinno.ziq_emit_helpers import emit_threshold_outcome
 
-    return [
+            emit_threshold_outcome(
+                "knowledge.ftrl_threshold",
+                value=ftrl_threshold,
+                observed=float(len(promotions)),
+                tripped=(len(promotions) == 0),
+                source="concinno.knowledge.get_pending_promotions",
+                metadata={"mode": "ftrl", "candidate_count": len(promotions)},
+            )
+        except Exception:
+            pass
+        return promotions
+
+    promotions = [
         item
         for item in items
         if isinstance(item, dict)
         and item.get("count", 0) >= threshold
         and not item.get("promoted", False)
     ]
+    return promotions
 
 
 def suggest_rule_promotions(
@@ -645,6 +668,30 @@ def detect_skill_candidates(
             }
             existing_candidates.append(candidate)
             newly_added.append(candidate)
+
+    # ZIQ outcome wire (4.4.0 — sub-agent K wave-2). The reward
+    # signal here is the rate at which patterns reached the
+    # promotion bar. observed = newly-added candidate count; the
+    # gate is "tripped" (low reward) when nothing crossed the bar
+    # — interpretation: threshold too high or learning surface
+    # too thin. When candidates do appear the reward grows with
+    # remaining headroom relative to the threshold value.
+    try:
+        from concinno.ziq_emit_helpers import emit_threshold_outcome
+
+        emit_threshold_outcome(
+            "knowledge.pattern_threshold",
+            value=float(pattern_threshold),
+            observed=float(len(newly_added)),
+            tripped=(len(newly_added) == 0),
+            source="concinno.knowledge.detect_skill_candidates",
+            metadata={
+                "candidates_added": len(newly_added),
+                "patterns_seen": len(pattern_counts),
+            },
+        )
+    except Exception:
+        pass
 
     if newly_added:
         try:

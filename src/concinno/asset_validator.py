@@ -16,10 +16,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
+import subprocess  # noqa: F401 - kept for legacy callers expecting top-level import
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from concinno.core import subprocess_safe
 
 # ── Asset Types ──────────────────────────────────────────────────────
 
@@ -221,7 +223,7 @@ def _check_image_observable(path: str, workspace: str) -> tuple[bool, str]:
 def _ffprobe(path: str) -> dict:
     """Run ffprobe and return parsed JSON."""
     try:
-        result = subprocess.run(
+        result = subprocess_safe.run(
             [
                 "ffprobe", "-v", "quiet", "-print_format", "json",
                 "-show_format", "-show_streams", path,

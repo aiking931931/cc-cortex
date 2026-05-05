@@ -206,12 +206,54 @@ class DeliveryGate:
             current_iteration: Current loop count.
         """
         if result.all_passed:
+            # Success — emit reward proportional to how many iterations
+            # were unused (lower iteration count = better budget choice).
+            try:
+                from concinno.ziq_outcome_bus import Outcome
+                from concinno.ziq_outcome_bus import get_bus as _gbus
+
+                used_ratio = current_iteration / max(1, max_iterations)
+                reward = max(0.5, 1.0 - used_ratio * 0.5)
+                _gbus().emit(
+                    Outcome(
+                        tunable="delivery.gate.max_iterations",
+                        value=max_iterations,
+                        reward=reward,
+                        source="concinno.delivery.gate.DeliveryGate",
+                        metadata={
+                            "current_iteration": current_iteration,
+                            "outcome": "passed",
+                        },
+                    )
+                )
+            except Exception:
+                pass
             return False
         if current_iteration >= max_iterations:
             logger.info(
                 "Karpathy Loop: max iterations (%d) reached for %s",
                 max_iterations, result.criteria.task,
             )
+            # Hit cap without success — emit failure signal so FTRL
+            # learns to raise the cap when this happens often.
+            try:
+                from concinno.ziq_outcome_bus import Outcome
+                from concinno.ziq_outcome_bus import get_bus as _gbus
+
+                _gbus().emit(
+                    Outcome(
+                        tunable="delivery.gate.max_iterations",
+                        value=max_iterations,
+                        reward=0.0,
+                        source="concinno.delivery.gate.DeliveryGate",
+                        metadata={
+                            "current_iteration": current_iteration,
+                            "outcome": "exhausted",
+                        },
+                    )
+                )
+            except Exception:
+                pass
             return False
         # At least one failed criterion must have been evaluated (fixable)
         fixable = [

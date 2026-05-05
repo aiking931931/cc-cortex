@@ -647,7 +647,10 @@ class TestCLI:
 
     @patch("concinno.rag.RAGIndex")
     def test_cli_search(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["concinno-rag", "search", "test query", "--project-dir", "/tmp"])
+        monkeypatch.setattr(
+            "sys.argv",
+            ["concinno-rag", "search", "test query", "--project-dir", "/tmp"],
+        )
         mock_instance = MagicMock()
         mock_instance.search.return_value = [
             {"score": 0.9, "file": "kb/a.md", "heading": "Test", "text": "Content"}
@@ -703,7 +706,10 @@ class TestCLI:
 
     @patch("concinno.rag.RAGIndex")
     def test_cli_prune_execute(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["concinno-rag", "prune", "--execute", "--project-dir", "/tmp"])
+        monkeypatch.setattr(
+            "sys.argv",
+            ["concinno-rag", "prune", "--execute", "--project-dir", "/tmp"],
+        )
         mock_instance = MagicMock()
         mock_instance.prune.return_value = {
             "dry_run": False, "pruned": [], "count": 0,
@@ -718,7 +724,10 @@ class TestCLI:
 
     @patch("concinno.rag.RAGIndex")
     def test_cli_update(self, MockIdx, monkeypatch):
-        monkeypatch.setattr("sys.argv", ["concinno-rag", "update", "kb/new.md", "--project-dir", "/tmp"])
+        monkeypatch.setattr(
+            "sys.argv",
+            ["concinno-rag", "update", "kb/new.md", "--project-dir", "/tmp"],
+        )
         mock_instance = MagicMock()
         mock_instance.update.return_value = {"chunks_indexed": 3, "duration_ms": 50}
         MockIdx.return_value = mock_instance

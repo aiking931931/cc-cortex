@@ -232,6 +232,71 @@ def _cbua_forced_classification(
         return None
 
 
+def _stage_minus_1_anchor(
+    user_prompt: str,
+    cache_dir: str = "",
+    session_id: str = "",
+) -> str | None:
+    """Inject a Stage -1 intent anchor on first turn for non-Simple tasks.
+
+    CBUA v3.2 minimal Stage -1 (concinno 2.35.0): extract ``done_spec`` +
+    ``constraints`` heuristically from the user's first prompt and persist
+    them on the ``intent_anchor`` namespace so the existing
+    :class:`concinno.intent_anchor_guard.IntentAnchorGuard` can fold them
+    into every periodic re-injection. Returns the rendered anchor block
+    as additionalContext so the model also sees it once at submit time.
+
+    Skipped:
+        * Simple complexity (ZIQ whitelist) — overhead exceeds the lift
+          on trivial prompts.
+        * Empty / trivially short prompts.
+        * Subsequent turns — anchor already present means a previous
+          first-turn submit captured it; further turns are handled by
+          :class:`concinno.intent_anchor_guard.IntentAnchorGuard`.
+    """
+    if not user_prompt or len(user_prompt.strip()) < 8:
+        return None
+    if not cache_dir or not session_id:
+        return None
+
+    try:
+        from concinno.core.state_store import StateStore
+        from concinno.intent_anchor import extract_anchor, render_anchor_block
+
+        store = StateStore(cache_dir)
+        existing = store.read("intent_anchor", session_id, default={})
+
+        # First-turn detection — back-compat with v2.9 'intent' key.
+        if existing.get("summary") or existing.get("intent"):
+            return None
+
+        # ZIQ Simple whitelist: respect classification set by Step 6
+        # earlier in the same submit handler. C0Router persists at
+        # `c0_route` namespace; missing → assume Complicated to be safe.
+        c0_state = store.read("c0_route", session_id, default=None)
+        complexity = (c0_state or {}).get("complexity", "complicated")
+        if complexity == "simple":
+            return None
+
+        anchor = extract_anchor(user_prompt)
+        if anchor.is_empty():
+            return None
+
+        merged = dict(existing)
+        merged.update(anchor.to_dict())
+        merged["intent"] = anchor.summary  # v2.9 back-compat alias
+        merged["intent_source"] = "stage_minus_1"
+        store.write("intent_anchor", session_id, merged)
+
+        return render_anchor_block(
+            anchor,
+            title="🎯 Stage -1 意圖錨定（首輪）",
+        )
+    except Exception:
+        # Stage -1 anchor must never break submit flow.
+        return None
+
+
 def handle_prompt_submit(
     user_prompt: str,
     *,
@@ -248,32 +313,38 @@ def handle_prompt_submit(
         - "deny": hook deny dict (if clarity gate rejects)
         - "contexts": list[str] of additionalContext fragments
     """
+    from concinno.core.config import get_config
     from concinno.insight_engine import check_insight
     from concinno.prompt_guard import (
         multi_question_injection,
         run_clarity_gate,
     )
 
-    # 1. TADS-3 clarity gate
-    deny = run_clarity_gate(user_prompt, prefs_path=prefs_path)
-    if deny:
-        return {"deny": deny}
+    cfg = get_config()
+
+    # 1. TADS-3 clarity gate — respect /hook clarity_gate off.
+    if cfg.feature("clarity_gate", "enabled"):
+        deny = run_clarity_gate(user_prompt, prefs_path=prefs_path)
+        if deny:
+            return {"deny": deny}
 
     contexts: list[str] = []
 
-    # 2. Multi-question checklist injection
-    mq = multi_question_injection(user_prompt)
-    if mq:
-        contexts.append(mq)
+    # 2. Multi-question checklist injection — gated by prompt_guard.
+    if cfg.feature("prompt_guard", "enabled"):
+        mq = multi_question_injection(user_prompt)
+        if mq:
+            contexts.append(mq)
 
-    # 3. Proactive Insight Engine
-    insight = check_insight(
-        user_prompt,
-        cache_dir=cache_dir,
-        session_id=session_id,
-    )
-    if insight:
-        contexts.append(insight)
+    # 3. Proactive Insight Engine — gated by insight_engine feature.
+    if cfg.feature("insight_engine", "enabled"):
+        insight = check_insight(
+            user_prompt,
+            cache_dir=cache_dir,
+            session_id=session_id,
+        )
+        if insight:
+            contexts.append(insight)
 
     # 4. FTRL-weighted learning injection (top corrections by recency × count)
     ftrl_ctx = _ftrl_learning_injection(cache_dir=cache_dir)
@@ -295,7 +366,254 @@ def handle_prompt_submit(
     if b1_ctx:
         contexts.append(b1_ctx)
 
-    # 7. Auto-capture session goal from first prompt (side-effect only)
+    # 7. CBUA Stage -1 intent anchor (concinno 2.35.0 — minimal v3.2 ship)
+    #    First-turn only, ZIQ Simple whitelist skip, additive on top of
+    #    the existing intent_anchor namespace so v2.9 readers stay happy.
+    stage_neg1_ctx = _stage_minus_1_anchor(user_prompt, cache_dir, session_id)
+    if stage_neg1_ctx:
+        contexts.append(stage_neg1_ctx)
+
+    # 8. Auto-capture session goal from first prompt (side-effect only)
     _auto_capture_goal(user_prompt, cache_dir, session_id)
 
+    # 9. Handoff resume — when user says "交接 X" / "/handoff resume X",
+    #    detect intent and inject §0/§1/§5 from the existing handoff.
+    handoff_ctx = _handoff_resume_inject(user_prompt)
+    if handoff_ctx:
+        contexts.append(handoff_ctx)
+
+    # 10. time_steward — DAG visualiser / pre-spawn contention / idle
+    #     detection / sub-agent budget tracker / re-triage on completion /
+    #     cancel-restart heuristic. Wired in Phase 2 of 3.2.0 ship-prep
+    #     (replaces the older single-purpose parallel_spawn_reminder).
+    time_steward_ctx = _time_steward_inject(
+        user_prompt, session_id=session_id,
+    )
+    if time_steward_ctx:
+        contexts.append(time_steward_ctx)
+
+    # 11. polling-watcher — surface active waits + drained alerts
+    #     so the agent sees pending async work at every prompt without
+    #     depending on sub-agent notifications.
+    try:
+        from concinno.hooks.wait_inject import build_context as _wi_build
+        polling_ctx = _wi_build()
+        if polling_ctx:
+            contexts.append(polling_ctx)
+    except Exception:
+        pass  # never block prompt submission on this
+
+    # 12. proactive Skill router — surface "/<skill> matches your
+    #     request" advisories when the user's prompt semantically maps
+    #     to a registered Skill. FATAL-1 fix wave (sub-agent O): the
+    #     module shipped without a production caller — this wiring
+    #     activates it and lets the ZIQ FTRL loop earn its reward.
+    skill_ctx = _skill_proactive_router_inject(user_prompt)
+    if skill_ctx:
+        contexts.append(skill_ctx)
+
+    # 14. user-correction signal — persist for the post-tool hook so
+    #     downstream behavior signals can read it. The two hooks run in
+    #     different processes; the file at
+    #     ``~/.concinno/state/user_correction_signal.json`` is the
+    #     hand-off. Best-effort — never blocks prompt submission.
+    try:
+        from concinno.skills.user_correction_signal import record_prompt
+        record_prompt(user_prompt)
+    except Exception:
+        pass
+
+    # 15. 軌 B 件 3 — feed the user-accept signal into the FTRL learner.
+    #     Per F7 fix in the 2026-04-29 4-channel commander verdict, we
+    #     use the next-turn user-correction state (corrected = 0.0
+    #     reward, silent = 1.0) — NOT behaviour-shifted, to avoid the
+    #     Goodhart inflation a "behaviour shifted" framing would create.
+    #     Best-effort: the FTRL learner is opt-in (env-disabled) and the
+    #     prompt-submit hot path must never crash on a learner failure.
+    try:
+        from concinno.knowledge import is_correction
+        from concinno.ziq_hook_ignore_rate import record_user_accept_signal
+
+        result = is_correction(user_prompt or "", return_confidence=True)
+        if isinstance(result, tuple) and len(result) == 2:
+            corrected = bool(result[0])
+        else:
+            corrected = bool(result)
+        record_user_accept_signal(
+            user_corrected=corrected, session_id=session_id,
+        )
+
+        # 15b. 軌 B 件 2 — when the user explicitly corrected, every
+        #      hook that fired in the previous turn earned an "ignored"
+        #      verdict (LLM saw the warning, the user still had to step
+        #      in). Step the per-feature tier counter accordingly so
+        #      the auto-demote ladder reflects real LLM behaviour, not
+        #      just FTRL EMA. F3 ship-fix wave (sub-agent ship-fix-wave):
+        #      this is the missing production caller for
+        #      ``concinno.hooks.auto_demote.record_ignore`` — without it
+        #      the tier ladder is dead code per FATAL-3 attack.
+        if corrected:
+            _feed_correction_into_auto_demote(session_id=session_id)
+    except Exception:
+        pass
+
+    _memory_lifecycle_user_prompt_submit(user_prompt, session_id)
     return {"contexts": contexts}
+
+
+def _feed_correction_into_auto_demote(*, session_id: str = "") -> None:
+    """Feed user-correction verdict into the auto-demote tier ladder.
+
+    F3 ship-fix wave production wiring for
+    :func:`concinno.hooks.auto_demote.record_ignore`. Reads the pending
+    queue maintained by :mod:`concinno.ziq_hook_ignore_rate` (件 3 FTRL)
+    and calls :func:`record_ignore` once per pending feature emitted in
+    the **current** session. We do NOT promote on accept — auto-demote
+    semantics intentionally reset the consecutive-ignore counter via
+    :func:`record_accept` only on explicit non-correction signal, but
+    the cheap silence ≠ accept (silence may also be "user moved on
+    without realising the warning was wrong"). Per the F7 fix lineage,
+    only an explicit correction is treated as ignored — silence is
+    handled by the FTRL EMA decay, not the tier counter.
+
+    De-dups by feature name so a hook that fired five times in one turn
+    only counts as one ignore against the tier ladder (otherwise a
+    high-frequency hook would race to ``SILENT_LOG`` after a single
+    correction). Best-effort: any failure swallows so this never breaks
+    prompt submission.
+    """
+    try:
+        from concinno.hooks.auto_demote import (
+            is_disabled as _ad_disabled,
+        )
+        from concinno.hooks.auto_demote import (
+            record_ignore as _ad_record_ignore,
+        )
+        from concinno.ziq_hook_ignore_rate import pending_emits
+
+        if _ad_disabled():
+            return
+        seen: set[str] = set()
+        for entry in pending_emits():
+            if not isinstance(entry, dict):
+                continue
+            feature = entry.get("feature")
+            entry_session = entry.get("session_id", "")
+            if not isinstance(feature, str) or not feature:
+                continue
+            if session_id and entry_session and entry_session != session_id:
+                continue
+            if feature in seen:
+                continue
+            seen.add(feature)
+            _ad_record_ignore(feature)
+    except Exception:
+        return
+
+
+def _memory_lifecycle_user_prompt_submit(
+    user_prompt: str,
+    session_id: str,
+) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
+            on_user_prompt_submit as _memory_on_user_prompt_submit,
+        )
+
+        _memory_on_user_prompt_submit(
+            _MemoryCtx(session_id=session_id, user_prompt=user_prompt)
+        )
+    except (ImportError, Exception):
+        pass
+
+
+def _handoff_resume_inject(user_prompt: str) -> str | None:
+    """Best-effort §0/§1/§5 inject for resumed handoffs.
+
+    Catches every exception so a missing handoff dir / unreadable file
+    cannot break prompt submission. The handoff path is derived from
+    ``$HOME/_AI_BRAIN/06_Handoffs/<project>/`` glob; if no file matches
+    the project name the underlying ``build_resume_inject`` returns the
+    "not found" advisory which is still useful to the agent.
+    """
+    try:
+        from pathlib import Path
+
+        from concinno.handoff_resume_hook import (
+            build_resume_inject,
+            detect_resume_intent,
+        )
+        proj = detect_resume_intent(user_prompt)
+        if not proj:
+            return None
+        # Resolve handoff dir: $HOME/_AI_BRAIN/06_Handoffs/<proj>/.
+        # In environments without _AI_BRAIN (e.g. fresh strangers),
+        # advisory still fires with a "not found" message.
+        base = Path.home() / "_AI_BRAIN" / "06_Handoffs" / proj
+        if base.is_dir():
+            candidates = sorted(base.glob("交接_*.md"), reverse=True)
+            if not candidates:
+                candidates = sorted(base.glob("*.md"), reverse=True)
+            handoff_path = candidates[0] if candidates else (base / "交接.md")
+        else:
+            handoff_path = base / "交接.md"
+        return build_resume_inject(proj, handoff_path)
+    except Exception:
+        return None
+
+
+def _skill_proactive_router_inject(user_prompt: str) -> str | None:
+    """Best-effort proactive Skill router inject (FATAL-1 fix sub-agent O).
+
+    Wires :func:`concinno.skill_proactive_router.propose_skills` into the
+    UserPromptSubmit hook chain so a registered Skill that semantically
+    matches the user's request surfaces as an advisory line. Failure-
+    safe: any exception swallows silently — the router itself never
+    raises but the import or feature lookup might.
+
+    Gated by ``feature_config['skill_proactive_router']['enabled']``.
+    """
+    try:
+        from concinno.core.config import get_config
+        from concinno.skill_proactive_router import propose_skills
+
+        cfg = get_config()
+        if not cfg.feature("skill_proactive_router", "enabled"):
+            return None
+        result = propose_skills(user_prompt)
+        text = (result.additional_context or "").strip()
+        return text or None
+    except Exception:
+        return None
+
+
+def _time_steward_inject(
+    user_prompt: str, *, session_id: str | None = None,
+) -> str | None:
+    """Best-effort time_steward inject.
+
+    Calls ``run_time_steward`` with the current prompt + session id and
+    returns the inject text (or ``None`` if no advice this turn). Catches
+    every exception so a state-file glitch / missing dir cannot break
+    prompt submission. Supersedes the older single-purpose
+    ``parallel_spawn_reminder`` (now collapsed into one of six
+    time_steward capabilities — idle detection — alongside DAG
+    visualiser, pre-spawn contention, budget tracker, re-triage,
+    cancel-restart, and the polling watchdog landed in Phase 3).
+    """
+    try:
+        from concinno.time_steward import run_time_steward
+        result = run_time_steward(
+            agent_recent_turns=[user_prompt] if user_prompt else [],
+            session_id=session_id or "unknown",
+            turn_index=0,
+        )
+        if isinstance(result, dict):
+            return result.get("inject") or None
+        return None
+    except Exception:
+        return None

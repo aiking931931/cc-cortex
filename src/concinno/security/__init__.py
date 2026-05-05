@@ -36,6 +36,40 @@ from concinno.security.bash_validators import (  # noqa: F401
     validate_unicode_whitespace,
     validate_zsh_dangerous_commands,
 )
+from concinno.security.circuit_breaker_guard import (  # noqa: F401
+    DEFAULT_BACKOFF_BASE_S,
+    DEFAULT_BACKOFF_MAX_S,
+    DEFAULT_COOLDOWN_S,
+    DEFAULT_FAILURE_THRESHOLD,
+    DEFAULT_MAX_CALLS,
+    DEFAULT_WINDOW_S,
+    CallRecord,
+    CircuitBreakerFinding,
+    CircuitBreakerGuard,
+    CircuitBreakerSnapshot,
+    CircuitState,
+)
+from concinno.security.deserialize_guard import (  # noqa: F401
+    DEFAULT_TRUSTED_MODULES,
+    PATTERN_SEVERITY,
+    SAFE_YAML_FUNCTIONS,
+    SAFE_YAML_LOADERS,
+    DeserializeFinding,
+    DeserializeGuard,
+)
+from concinno.security.http_client_guard import (  # noqa: F401
+    DEFAULT_ALLOWLIST,
+    DEFAULT_DENYLIST,
+    PRODUCTION_HOST_PATTERNS,
+    SECRET_HEADER_PATTERNS,
+    HttpClientFinding,
+    HttpClientGuard,
+    HttpClientPipelineGuard,
+    HttpRequestPayload,
+    extract_payload,
+    parse_curl_command,
+    parse_python_http_kwargs,
+)
 from concinno.security.llm_judge_guard import (  # noqa: F401
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_MAX_CACHE_SIZE,
@@ -57,21 +91,44 @@ from concinno.security.permission_mode import (  # noqa: F401
     PermissionRule,
     PermissionVerdict,
 )
+from concinno.security.pii_guard import (  # noqa: F401
+    PIIGuard,
+    PIIType,
+)
 from concinno.security.policy_gate import (  # noqa: F401
     OWASP_LLM_BASELINE,
     CallableMatcher,
     CompositeMatcher,
     ContentPatternMatcher,
+    Decision,
     EngineResult,
+    FailMode,
+    Finding,
     MetadataMatcher,
     PolicyAction,
     PolicyContext,
     PolicyEngine,
+    PolicyGate,
+    PolicyGateResult,
     PolicyMatcher,
     PolicyRule,
     PolicyVerdict,
+    Severity,
     ThreatCategory,
     ToolNameMatcher,
+)
+from concinno.security.rce_injection_guard import (  # noqa: F401
+    RCE_PATTERN_SEVERITY,
+    RceFinding,
+    RceInjectionBaseGuard,
+    RceInjectionGuard,
+    RcePayload,
+    extract_code_payload,
+)
+from concinno.security.sql_injection_guard import (  # noqa: F401
+    SqlInjectionFinding,
+    SqlInjectionGuard,
+    extract_sql_payload,
 )
 from concinno.security.ssrf_guard import (  # noqa: F401
     CLOUD_METADATA_HOSTS,
@@ -162,4 +219,56 @@ __all__ = [
     "PolicyVerdict",
     "ThreatCategory",
     "ToolNameMatcher",
+    # 4.3.0 — PolicyGate shared base for security guards
+    "Decision",
+    "FailMode",
+    "Finding",
+    "PolicyGate",
+    "PolicyGateResult",
+    "Severity",
+    # 4.3.0 — Deserialize guard
+    "DEFAULT_TRUSTED_MODULES",
+    "DeserializeFinding",
+    "DeserializeGuard",
+    "PATTERN_SEVERITY",
+    "SAFE_YAML_FUNCTIONS",
+    "SAFE_YAML_LOADERS",
+    # 4.3.0 — PII guard
+    "PIIGuard",
+    "PIIType",
+    # 4.4.0 — Circuit breaker guard
+    "CallRecord",
+    "CircuitBreakerFinding",
+    "CircuitBreakerGuard",
+    "CircuitBreakerSnapshot",
+    "CircuitState",
+    "DEFAULT_BACKOFF_BASE_S",
+    "DEFAULT_BACKOFF_MAX_S",
+    "DEFAULT_COOLDOWN_S",
+    "DEFAULT_FAILURE_THRESHOLD",
+    "DEFAULT_MAX_CALLS",
+    "DEFAULT_WINDOW_S",
+    # 4.6.0 — RCE injection guard
+    "RCE_PATTERN_SEVERITY",
+    "RceFinding",
+    "RceInjectionBaseGuard",
+    "RceInjectionGuard",
+    "RcePayload",
+    "extract_code_payload",
+    # 4.6.0 — SQL injection guard
+    "SqlInjectionFinding",
+    "SqlInjectionGuard",
+    "extract_sql_payload",
+    # 4.6.0 — HTTP-client request-shape policy gate
+    "DEFAULT_ALLOWLIST",
+    "DEFAULT_DENYLIST",
+    "HttpClientFinding",
+    "HttpClientGuard",
+    "HttpClientPipelineGuard",
+    "HttpRequestPayload",
+    "PRODUCTION_HOST_PATTERNS",
+    "SECRET_HEADER_PATTERNS",
+    "extract_payload",
+    "parse_curl_command",
+    "parse_python_http_kwargs",
 ]

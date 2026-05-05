@@ -20,7 +20,12 @@ def _register_security(pipe: GuardPipeline) -> None:
     from concinno.git_safety import GitSafetyGuard
     from concinno.identity_guard import IdentityGuard
     from concinno.prompt_injection_guard import PromptInjectionGuard
+    from concinno.publish_scan import PublishScanGuard
+    from concinno.release_authorization import ReleaseAuthorizationGuard
     from concinno.secret_scan import SecretScanGuard
+    from concinno.security.http_client_guard import HttpClientPipelineGuard
+    from concinno.security.rce_injection_guard import RceInjectionBaseGuard
+    from concinno.security.sql_injection_guard import SqlInjectionBaseGuard
 
     pipe.register(PromptInjectionGuard())
     pipe.register(SecretScanGuard())
@@ -29,6 +34,30 @@ def _register_security(pipe: GuardPipeline) -> None:
     pipe.register(ExfilGuard())
     pipe.register(IdentityGuard())
     pipe.register(DestructionGuard())
+    # 4.6.0: HTTP-client request-shape policy gate. Default OFF per
+    # 4.0.0 SEMVER baseline; complementary to ExfilGuard (file-bound
+    # exfil pattern detection) and SSRFGuard (network endpoint
+    # validation). Wires the PolicyGate-based HttpClientGuard into
+    # the pipeline via a thin BaseGuard adapter.
+    pipe.register(HttpClientPipelineGuard())
+    # 4.6.0 W4: RCE injection guard. Default OFF per 4.0.0 SEMVER
+    # baseline (FEATURE_META gate suppresses execution unless an
+    # operator opts in). Catches dynamic-code-construction patterns
+    # — f-string into shell, eval/exec on dynamic args,
+    # compile(..., 'exec'), Bash backtick + unquoted-var shapes —
+    # which the deserialize_guard / SSRFGuard / sql_injection_guard
+    # trio do not cover.
+    pipe.register(RceInjectionBaseGuard())
+    # 4.6.0 W4 wave-1: SQL injection scanner. Default OFF per 4.0.0
+    # SEMVER baseline (FEATURE_META gate suppresses execution unless
+    # an operator opts in). Catches the 5 unsafe SQL construction
+    # styles the deserialize / RCE / HTTP-client guards do not cover.
+    pipe.register(SqlInjectionBaseGuard())
+    # 3.1.3: previously orphaned — defined as BaseGuard subclasses but
+    # never registered, so the publish-time secret scan + the publish
+    # authorisation gate were both dead code. Wiring audit 2026-04-26.
+    pipe.register(PublishScanGuard())
+    pipe.register(ReleaseAuthorizationGuard())
 
 
 def _register_quality(pipe: GuardPipeline) -> None:
@@ -59,7 +88,6 @@ def _register_quality(pipe: GuardPipeline) -> None:
     from concinno.overflow_gate import OverflowGate
     from concinno.pre_tool_guards import BashPythonGuard, ReadBudgetGuard, ReadFirstGuard
     from concinno.premise_gate import PremiseGate
-    from concinno.proposal_guard import ProposalGuard
     from concinno.sentinel import (
         ConsecutiveFailGuard,
         HijackGuard,
@@ -90,7 +118,6 @@ def _register_quality(pipe: GuardPipeline) -> None:
     pipe.register(SentinelGuard())
     pipe.register(FileTrackerGuard())
     pipe.register(BoundaryGuard())
-    pipe.register(ProposalGuard())
     pipe.register(UIVerifyGuard())
     pipe.register(ButterflyGuard())
     # RLHF Side-Effect gates (2026-03-26)
@@ -125,12 +152,16 @@ def _register_quality(pipe: GuardPipeline) -> None:
     # 2.2.0: edit-time version-drift gate (pairs with CI test_version_sync).
     from concinno.version_sync_guard import VersionSyncGuard
     pipe.register(VersionSyncGuard())
+    # 3.1.3: previously orphaned — defined in publish_scan.py but never
+    # registered. Warns on breaking API changes when an api_snapshot.json
+    # baseline is committed; otherwise no-op.
+    from concinno.publish_scan import SemverGuard
+    pipe.register(SemverGuard())
 
 
 def _register_cognitive(pipe: GuardPipeline) -> None:
     """Layer 3: COGNITIVE — knowledge injection."""
     from concinno.cognitive import CognitiveGuard
-    from concinno.cognitive_anchor import CognitiveAnchorGuard
     from concinno.confidence_gate import ConfidenceGate
     from concinno.hypothesis_tracker import HypothesisTrackerGuard
     from concinno.milestone_gate import MilestoneGate
@@ -140,7 +171,6 @@ def _register_cognitive(pipe: GuardPipeline) -> None:
     pipe.register(CognitiveGuard())
     pipe.register(ConfidenceGate())
     pipe.register(HypothesisTrackerGuard())
-    pipe.register(CognitiveAnchorGuard())
     # CBUA v2: intent anchoring (2026-04-10)
     from concinno.intent_anchor_guard import IntentAnchorGuard
     pipe.register(IntentAnchorGuard())

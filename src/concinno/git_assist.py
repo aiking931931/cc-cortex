@@ -10,12 +10,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import stat
 import subprocess
 import sys
 from typing import Optional
 
+from concinno.destruction_guard import destruction_gate
 from concinno.i18n import msg as i18n_msg
 
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -55,8 +58,97 @@ def _git(args: list[str], cwd: str, timeout: int = 10) -> Optional[str]:
         return None
 
 
+def _git_raw(args: list[str], cwd: str, timeout: int = 10) -> Optional[str]:
+    """Like ``_git`` but does NOT strip stdout — use for ``git status -z``
+    (NUL-terminated, no leading/trailing whitespace meaningful).
+
+    2.10.4 治本 — `_git`'s `.strip()` ate the leading space of `" M path"`
+    so column-3 path slicing went off-by-one. Cleanup.py already worked
+    around this with an inline subprocess; this helper is the shared fix.
+    """
+    try:
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=cwd,
+            capture_output=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=_CREATE_NO_WINDOW,
+            startupinfo=_hidden_startupinfo(),
+        )
+        if result.returncode == 0:
+            return result.stdout
+        return None
+    except Exception:
+        return None
+
+
+def _status_records_z(cwd: str, timeout: int = 10) -> Optional[list[str]]:
+    """Return git status records as raw strings, NUL-separated.
+
+    2.10.4 治本 (FATAL F1) — ``git status --short`` quotes paths with
+    non-ASCII characters or spaces (``"交接_X.md"`` / ``"path with
+    space.txt"``), and ``_parse_status``'s ``line[3:].strip()`` then
+    handed the still-quoted path to ``_is_large_unignored`` /
+    ``_is_secret``, where ``os.stat()`` raised ``FileNotFoundError``
+    on the literal ``"<quote>foo<quote>"`` filename and the file was
+    silently passed through. Real ai-king CJK paths reproduced this.
+
+    ``status -z`` outputs the unquoted byte stream of paths separated
+    by NUL — no shell escaping, no leading-space ambiguity.
+    """
+    raw = _git_raw(
+        ["-c", "core.quotepath=false", "status", "-z"], cwd, timeout=timeout
+    )
+    if raw is None:
+        return None
+    # Split by NUL; rename records emit `R XX\0old\0new` so a naive split
+    # leaves a stray "old" record; we filter it out below in the parser.
+    return [r for r in raw.split("\x00") if r]
+
+
+def _parse_status_z(records: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Parse ``git status -z`` records into (staged, unstaged, untracked).
+
+    Each record is ``XY path`` with X/Y guaranteed (-z preserves the
+    leading space; no quoting). For rename records ``R  new`` the next
+    record is the old path — skipped here because the cleanup callers
+    only need the destination path.
+    """
+    staged, unstaged, untracked = [], [], []
+    skip_next = False
+    for rec in records:
+        if skip_next:
+            skip_next = False
+            continue
+        if len(rec) < 3:
+            continue
+        x, y = rec[0], rec[1]
+        # Path is everything from col 3 onwards. -z preserves leading
+        # space (no shell-escaping); column offsets are stable.
+        fname = rec[3:]
+        if x == "?":
+            untracked.append(fname)
+        elif x != " ":
+            staged.append(fname)
+            # Rename / copy emits the old path as the next NUL record.
+            if x in ("R", "C"):
+                skip_next = True
+        if y != " " and y != "?":
+            unstaged.append(fname)
+    return staged, unstaged, untracked
+
+
 def _parse_status(raw: str) -> tuple[list[str], list[str], list[str]]:
-    """Parse git status --short output into (staged, unstaged, untracked)."""
+    """Parse git status --short output into (staged, unstaged, untracked).
+
+    ⚠ Legacy parser — uses ``line[3:].strip()`` which fails on quoted
+    paths (CJK / spaces). Kept for ``generate_report`` (display-only,
+    quotes are tolerable). New code (auto_commit, anything that touches
+    the filesystem with the path) MUST use ``_status_records_z`` +
+    ``_parse_status_z`` instead.
+    """
     staged, unstaged, untracked = [], [], []
     for line in raw.splitlines():
         if len(line) < 3:
@@ -201,6 +293,57 @@ _TRIVIAL_PATH_FRAGMENTS = (
 )
 
 
+def _large_file_threshold() -> int:
+    """Bytes above which a tracked-or-newly-added file is considered large.
+
+    Configurable via ``CONCINNO_LARGE_FILE_THRESHOLD`` (bytes). Defaults to
+    10 MiB — PyPI's per-file limit is 100 MiB and GitHub warns at 50 MiB,
+    but most accidental bloat (model checkpoints, datasets, backup zips)
+    sits at 10 MiB+ so that's where the pre-commit filter trips.
+    """
+    try:
+        raw = os.environ.get("CONCINNO_LARGE_FILE_THRESHOLD", "10485760")
+        val = int(raw)
+        return val if val > 0 else 10_485_760
+    except (ValueError, TypeError):
+        return 10_485_760
+
+
+def _is_large_unignored(path: str, cwd: str, threshold: Optional[int] = None) -> bool:
+    """Return True when ``path`` in ``cwd`` is ≥threshold bytes AND the
+    file is currently staged or tracked (not already gitignored).
+
+    2.10.3 治本 — ``auto_commit`` calls this after ``git add -A`` to
+    unstage accidentally-bulked files (model checkpoints, datasets,
+    backup archives) before they enter outer .git history. MEMORY #77
+    noted the 7.6 GB bloat traced to LoRA / safetensors / BEIR corpus
+    blobs the .gitignore did not catch. The squash-runaway fix (2.10.2)
+    makes keep=3 work, but squashing historical blobs is expensive — it
+    is cheaper to never stage them in the first place.
+
+    Failure modes (all treated as "not large"): path missing, broken
+    symlink, stat errors, git command failure. Large-file detection is a
+    hygiene signal, not a security gate — on doubt, let the commit
+    through and let the operator notice.
+    """
+    if threshold is None:
+        threshold = _large_file_threshold()
+
+    try:
+        full = os.path.join(cwd, path)
+        # follow_symlinks=False: symlinks themselves are tiny, and the
+        # thing they point at may live outside the repo; don't blame the
+        # link for its target's size.
+        st = os.stat(full, follow_symlinks=False)
+    except OSError:
+        return False
+
+    if not stat.S_ISREG(st.st_mode):
+        return False
+
+    return st.st_size >= threshold
+
+
 def _is_trivial_path(path: str) -> bool:
     """True if *path* is pure hook-internal state, not user work.
 
@@ -211,6 +354,120 @@ def _is_trivial_path(path: str) -> bool:
         return False
     norm = "/" + path.replace("\\", "/").lstrip("/")
     return any(frag in norm for frag in _TRIVIAL_PATH_FRAGMENTS)
+
+
+# Default staleness threshold. A real `git commit` or `git add` holds
+# ``.git/index.lock`` for milliseconds; any lock older than 60s with no
+# live progress is orphaned (process killed, parent session died, etc.)
+# and must be cleared before subsequent commits will ever succeed.
+# Override via ``CONCINNO_LOCK_STALE_SEC`` for tests / unusual setups.
+_DEFAULT_LOCK_STALE_SEC = 60
+
+
+def _stale_lock_threshold() -> int:
+    """Read the staleness threshold (seconds) from env, falling back to default."""
+    try:
+        return max(1, int(os.environ.get("CONCINNO_LOCK_STALE_SEC", "")))
+    except (TypeError, ValueError):
+        return _DEFAULT_LOCK_STALE_SEC
+
+
+def _resolve_index_lock_path(cwd: str) -> str:
+    """Return the absolute path of ``.git/index.lock`` for *cwd*.
+
+    Handles three layouts:
+        1. Normal repo: ``cwd/.git/`` is a directory → lock at ``cwd/.git/index.lock``.
+        2. Worktree / submodule: ``cwd/.git`` is a file containing ``gitdir: <path>``
+           → lock at ``<path>/index.lock``.
+        3. Unresolvable → fall back to layout #1 (caller's stat will miss and bail).
+    """
+    default = os.path.join(cwd, ".git", "index.lock")
+    dot_git = os.path.join(cwd, ".git")
+    if os.path.isdir(dot_git):
+        return default
+    if not os.path.isfile(dot_git):
+        return default
+    try:
+        with open(dot_git, encoding="utf-8") as fh:
+            line = fh.readline().strip()
+    except OSError:
+        return default
+    if not line.startswith("gitdir: "):
+        return default
+    real = line[len("gitdir: "):]
+    if not os.path.isabs(real):
+        real = os.path.normpath(os.path.join(cwd, real))
+    return os.path.join(real, "index.lock")
+
+
+def _clear_stale_index_lock(cwd: str, max_age: Optional[int] = None) -> bool:
+    """Remove ``{cwd}/.git/index.lock`` if it is an orphan.
+
+    Returns True when it is now safe to proceed (no lock, or we removed a
+    stale one). Returns False when a *live* lock exists (someone is mid-
+    commit): caller must bail rather than racing.
+
+    Why this exists: when a prior ``git add -A`` / ``git commit`` is
+    SIGKILLed (CC session crash, Ctrl-C during startup, Windows reboot,
+    sub-agent timeout), it leaves behind a zero-byte lock file that
+    blocks every subsequent commit with
+    ``fatal: Unable to create '.git/index.lock': File exists``.
+    Sub-agents mis-diagnose this as a pre-commit hook recreating the
+    lock and reach for ``--no-verify``, which bypasses nothing because
+    no hook is involved — the root cause is the orphan.
+
+    Safety model:
+        - Only remove locks older than ``max_age`` (default 60s). A
+          real op completes in milliseconds, so 60s = comfortably past
+          any legitimate git call.
+        - If removal fails (another process actually owns it or the
+          filesystem denies delete), return False. Caller must skip
+          this commit cycle rather than spinning.
+        - Zero-age lock or mid-op writes are left alone.
+
+    Tunable via env ``CONCINNO_LOCK_STALE_SEC``.
+    """
+    import time
+
+    if max_age is None:
+        max_age = _stale_lock_threshold()
+
+    lock_path = _resolve_index_lock_path(cwd)
+    try:
+        st = os.stat(lock_path)
+    except (FileNotFoundError, OSError):
+        return True  # no lock, proceed
+
+    age = time.time() - st.st_mtime
+    if age < max_age:
+        # Lock is fresh → a real op is in progress elsewhere. Do not
+        # race; caller bails.
+        return False
+
+    # Orphan: remove and report stderr breadcrumb so operators can
+    # correlate with the crashed session.
+    try:
+        os.remove(lock_path)
+    except OSError as exc:
+        _safe_stderr(
+            f"[git_assist] stale lock present but unremovable "
+            f"({lock_path}, age={int(age)}s): {exc}\n",
+        )
+        return False
+    _safe_stderr(
+        f"[git_assist] cleared stale .git/index.lock "
+        f"(age={int(age)}s) — prior git op was killed mid-write\n",
+    )
+    return True
+
+
+def _safe_stderr(msg: str) -> None:
+    """Write to stderr, never raising (sys.stderr can be None under Windows GUI hosts)."""
+    try:
+        if sys.stderr is not None:
+            sys.stderr.write(msg)
+    except Exception:
+        pass
 
 
 def ensure_git_repo(
@@ -278,6 +535,7 @@ def ensure_git_repo(
     return result
 
 
+@destruction_gate(risk="R3", op_name="rollback")
 def rollback(
     cwd: str | None = None,
     steps: int = 1,
@@ -364,8 +622,12 @@ def auto_commit(
     finishes in O(seconds) regardless of file count.
 
     Skip gates (return None without staging anything):
-        1. ``CONCINNO_NO_AUTOCOMMIT=1`` env override — for polling /
-           benchmark sessions that explicitly opt out.
+        1. ``CONCINNO_NO_AUTOCOMMIT=1`` (or alias
+           ``CONCINNO_SKIP_AUTO_COMMIT=1``, the name documented in
+           ``rules/official/L1/switches.md`` row #5) env override — for
+           polling / benchmark sessions that explicitly opt out. The
+           alias was added 2026-04-26 because the docs and the code had
+           drifted to different env var names since 2.x.
         2. Working tree contains only hook-internal state — see
            ``_is_trivial_path``. Without this, a 5-minute polling
            session burns one commit per turn on cache/marker writes
@@ -375,8 +637,13 @@ def auto_commit(
     Returns:
         Commit message on success, or None if nothing to commit / failed.
     """
-    # Skip gate 1: explicit opt-out
+    # Skip gate 1: explicit opt-out. Both env var names accepted —
+    # ``CONCINNO_NO_AUTOCOMMIT`` is the original; ``CONCINNO_SKIP_AUTO_COMMIT``
+    # is the name documented in switches.md row #5. User setting either
+    # must work, otherwise the documented opt-out is illusory.
     if os.environ.get("CONCINNO_NO_AUTOCOMMIT") == "1":
+        return None
+    if os.environ.get("CONCINNO_SKIP_AUTO_COMMIT") == "1":
         return None
 
     if cwd is None:
@@ -390,11 +657,30 @@ def auto_commit(
     if _git(["rev-parse", "--is-inside-work-tree"], cwd, timeout=timeout) != "true":
         return None
 
-    status = _git(["status", "--short"], cwd, timeout=timeout)
-    if not status:
+    # Clear stale .git/index.lock orphans before any write op. A fresh
+    # lock (age < threshold) means a sibling is mid-commit: bail rather
+    # than race. See ``_clear_stale_index_lock`` for the full rationale.
+    if not _clear_stale_index_lock(cwd):
         return None
 
-    staged, unstaged, untracked = _parse_status(status)
+    # 2.10.4 治本 (FATAL F1): use -z + core.quotepath=false so CJK / spaced
+    # paths arrive unquoted. _parse_status's "line[3:].strip()" handed
+    # quoted paths like "交接_X.md" to os.stat() which then 404'd, so the
+    # large-file/secret filters silently passed CJK files through. Real
+    # ai-king CJK paths reproduced this on 2.10.3.
+    #
+    # Fallback to legacy `--short` parsing only if `-z` returns None — that
+    # path is a hygiene safety net for environments where `_git_raw` cannot
+    # spawn (constrained sandboxes, mocked subprocess in tests). Real git
+    # repos always succeed via the -z path.
+    records = _status_records_z(cwd, timeout=timeout)
+    if records is not None:
+        staged, unstaged, untracked = _parse_status_z(records)
+    else:
+        status = _git(["status", "--short"], cwd, timeout=timeout)
+        if not status:
+            return None
+        staged, unstaged, untracked = _parse_status(status)
     all_files = staged + unstaged + untracked
     if not all_files:
         return None
@@ -409,17 +695,9 @@ def auto_commit(
     if not safe_files:
         return None
 
-    # Batch stage everything (L0: never per-file).
-    if _git(["add", "-A"], cwd, timeout=op_timeout) is None:
+    safe_files = _stage_and_filter(cwd, all_files, safe_files, op_timeout)
+    if safe_files is None:
         return None
-
-    # Defensive unstage: remove any newly-detected secret-like files
-    # from the index before committing. Already-tracked secrets that
-    # predate this guard are out of scope — those need a manual
-    # `git rm --cached`. This only protects against the new stage.
-    secret_files = [f for f in all_files if _is_secret(f)]
-    if secret_files:
-        _git(["reset", "HEAD", "--", *secret_files], cwd, timeout=op_timeout)
 
     # Generate commit message from file types
     exts = set()
@@ -437,6 +715,78 @@ def auto_commit(
     # 反熵優先: squash old commits when accumulated beyond threshold
     _inline_squash_if_needed(cwd, timeout=timeout)
     return msg
+
+
+def _stage_and_filter(
+    cwd: str,
+    all_files: list[str],
+    safe_files: list[str],
+    op_timeout: int,
+) -> list[str] | None:
+    """Stage all files, unstage secrets + large blobs, return remaining safe list.
+
+    Extracted from ``auto_commit`` to keep that function under 120 lines.
+    Returns the filtered safe_files list, or None if nothing is left to commit
+    (caller should return None from auto_commit).
+    """
+    # 2.13.1 治本 — skip nested repo subdirs from `git add -A` to break
+    # the outer-inner race of MEMORY #67. When an outer repo intentionally
+    # tracks paths inside a nested working tree (e.g. ai-king's
+    # `!projects/concinno/` carve-out), a plain `git add -A` stages the
+    # inner-repo's untracked WIP into the outer index. Any subsequent
+    # outer rebase/checkout that replays an older outer tree state can
+    # then **delete those files from the inner working tree** (they are
+    # now outer-tracked paths, and the old tree does not contain them).
+    # Set ``CONCINNO_SKIP_NESTED_ADD=0`` to restore pre-2.13.1 behavior.
+    nested_excludes: list[str] = []
+    if os.environ.get("CONCINNO_SKIP_NESTED_ADD", "1") != "0":
+        try:
+            from concinno.cleanup import _detect_embedded_nested_repos
+            nested_excludes = _detect_embedded_nested_repos(cwd)
+        except Exception:
+            nested_excludes = []
+
+    # Batch stage everything (L0: never per-file).
+    if nested_excludes:
+        add_cmd = ["add", "-A", "--", "."] + [
+            f":(exclude){rel}" for rel in nested_excludes
+        ]
+        _safe_stderr(
+            f"concinno: skipping `git add -A` for {len(nested_excludes)} "
+            f"nested repo subdir(s) to avoid outer-inner race: "
+            f"{', '.join(nested_excludes[:3])}"
+            + (" …" if len(nested_excludes) > 3 else "")
+            + " (escape: CONCINNO_SKIP_NESTED_ADD=0)"
+        )
+    else:
+        add_cmd = ["add", "-A"]
+    if _git(add_cmd, cwd, timeout=op_timeout) is None:
+        return None
+
+    # Defensive unstage: remove any newly-detected secret-like files.
+    secret_files = [f for f in all_files if _is_secret(f)]
+    if secret_files:
+        _git(["reset", "HEAD", "--", *secret_files], cwd, timeout=op_timeout)
+
+    # 2.10.3 治本 — unstage large unignored blobs (≥threshold) to prevent
+    # repo bloat. MEMORY #77's 7.6 GB traced to LoRA/safetensors blobs
+    # the .gitignore missed.
+    large_files = [f for f in safe_files if _is_large_unignored(f, cwd)]
+    if large_files:
+        _git(["reset", "HEAD", "--", *large_files], cwd, timeout=op_timeout)
+        _safe_stderr(
+            f"concinno: unstaged {len(large_files)} large file(s) "
+            f"(≥{_large_file_threshold() // 1_048_576} MiB each) to prevent "
+            "repo bloat. Add matching patterns to .gitignore:\n  " +
+            "\n  ".join(large_files[:5]) +
+            ("\n  …" if len(large_files) > 5 else "") +
+            "\n(escape: CONCINNO_LARGE_FILE_THRESHOLD=<bytes>)"
+        )
+        safe_files = [f for f in safe_files if f not in large_files]
+        if not safe_files:
+            return None
+
+    return safe_files
 
 
 def _inline_squash_if_needed(
@@ -461,9 +811,227 @@ def _inline_squash_if_needed(
     # Import here to avoid circular dependency
     try:
         from concinno.cleanup import squash_auto_commits
-        squash_auto_commits(cwd, keep=keep)
-    except Exception:
-        pass  # Non-critical: cleanup failure shouldn't block commits
+        # destruction_gate escape: this is the trusted inline path that
+        # auto-commit invokes from the stop hook pipeline. Set the
+        # per-op flag so the decorator passes through without demanding
+        # a reason kwarg.
+        prev_flag = os.environ.get("CONCINNO_INLINE_SQUASH")
+        os.environ["CONCINNO_INLINE_SQUASH"] = "1"
+        try:
+            result = squash_auto_commits(cwd, keep=keep)
+        finally:
+            if prev_flag is None:
+                os.environ.pop("CONCINNO_INLINE_SQUASH", None)
+            else:
+                os.environ["CONCINNO_INLINE_SQUASH"] = prev_flag
+        # Surface squash errors to stderr — prior `pass` silently masked
+        # dirty-tree aborts so the "keep N commits" rule appeared to work
+        # while .git bloated unbounded.
+        if result.error:
+            sys.stderr.write(f"concinno: inline squash skipped — {result.error}\n")
+    except Exception as e:
+        # Keep hook resilient: any unexpected failure logs, does not raise.
+        sys.stderr.write(f"concinno: inline squash failed — {type(e).__name__}: {e}\n")
+
+
+# ── Nested repo discovery + allowlist ────────────────────────────────────────
+
+_DEFAULT_ALLOWLIST_PATH = os.path.join(
+    os.path.expanduser("~"), ".concinno", "auto_commit_repos.json"
+)
+
+# Hardcoded upstream/dataset patterns that are NEVER auto-committed even if
+# they appear in nested scan (short-circuits allowlist for obvious upstreams).
+_UPSTREAM_DIR_MARKERS = frozenset({
+    "ImpliRet", "locomo", "locomo_dataset",
+})
+
+# Directory names to prune from nested search (same as cleanup.py convention).
+_NESTED_PRUNE_DIRS = frozenset({
+    ".git", ".venv", "venv", "env", "node_modules",
+    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".hypothesis", ".tox", "dist", "build",
+})
+
+
+def _load_auto_commit_allowlist(root: str) -> list[str] | None:
+    """Load allowlist from ~/.concinno/auto_commit_repos.json.
+
+    Returns list of absolute paths to include, or None if the file
+    does not exist (caller uses auto-discover mode).
+
+    File format::
+
+        {
+            "repos": [
+                "/abs/path/to/repo",
+                "relative/to/root"
+            ]
+        }
+
+    Relative paths are resolved relative to *root*.
+    ``null`` / missing file → auto-discover mode (scan nested .git dirs).
+    """
+    path = _DEFAULT_ALLOWLIST_PATH
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        repos = data.get("repos", [])
+        result: list[str] = []
+        for r in repos:
+            if os.path.isabs(r):
+                result.append(os.path.normpath(r))
+            else:
+                result.append(os.path.normpath(os.path.join(root, r)))
+        return result if result else None
+    except Exception as exc:
+        _safe_stderr(f"[git_assist] allowlist load failed ({path}): {exc}\n")
+        return None
+
+
+def _is_upstream_repo(path: str) -> bool:
+    """Return True if any path component matches an upstream marker."""
+    parts = path.replace("\\", "/").split("/")
+    return any(p in _UPSTREAM_DIR_MARKERS for p in parts)
+
+
+def discover_nested_repos(
+    root: str,
+    max_depth: int = 5,
+    timeout: int = 10,
+) -> list[str]:
+    """Find self-owned nested git repos under *root* to auto-commit.
+
+    Discovery order:
+    1. If ``~/.concinno/auto_commit_repos.json`` exists and has a ``repos``
+       list, use that (explicit allowlist — fastest, most predictable).
+    2. Otherwise scan *root* for nested ``.git`` dirs (auto-discover mode).
+       Excludes:
+       - *root* itself (handled by caller's ``auto_commit(root)``)
+       - ``_NESTED_PRUNE_DIRS`` subtrees
+       - Paths matching ``_UPSTREAM_DIR_MARKERS``
+       - Repos whose toplevel is not inside *root* (symlink loops)
+    3. Always includes *root* itself as index 0.
+
+    Returns absolute paths (including *root* as first entry).
+    """
+    root_abs = os.path.abspath(root)
+
+    # Always include root first
+    result: list[str] = [root_abs]
+
+    # Try explicit allowlist
+    allowlist = _load_auto_commit_allowlist(root_abs)
+    if allowlist is not None:
+        for repo_path in allowlist:
+            abs_path = os.path.abspath(repo_path)
+            if abs_path == root_abs:
+                continue  # already added as first entry
+            if not os.path.isdir(abs_path):
+                _safe_stderr(
+                    f"[git_assist] allowlist entry not found, skipping: {abs_path}\n"
+                )
+                continue
+            if _is_upstream_repo(abs_path):
+                _safe_stderr(
+                    f"[git_assist] skipping upstream repo from allowlist: {abs_path}\n"
+                )
+                continue
+            # Verify it's actually a git repo
+            if _git(["rev-parse", "--is-inside-work-tree"], abs_path, timeout=timeout) == "true":
+                result.append(abs_path)
+        return result
+
+    # Auto-discover mode: walk tree looking for .git dirs
+    try:
+        for dirpath, dirnames, _filenames in os.walk(root_abs, followlinks=False):
+            rel_dir = os.path.relpath(dirpath, root_abs)
+            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+
+            # Prune dirs in-place to avoid descending
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in _NESTED_PRUNE_DIRS
+            ]
+
+            if depth >= max_depth:
+                dirnames.clear()
+                continue
+
+            if ".git" in os.listdir(dirpath) if dirpath != root_abs else []:
+                abs_path = os.path.abspath(dirpath)
+                if abs_path == root_abs:
+                    continue  # root handled above
+                if _is_upstream_repo(abs_path):
+                    _safe_stderr(
+                        f"[git_assist] skipping upstream repo: {abs_path}\n"
+                    )
+                    continue
+                is_repo = _git(
+                    ["rev-parse", "--is-inside-work-tree"],
+                    abs_path, timeout=timeout,
+                ) == "true"
+                if is_repo:
+                    result.append(abs_path)
+    except Exception as exc:
+        _safe_stderr(f"[git_assist] nested repo discovery error: {exc}\n")
+
+    return result
+
+
+def count_uncommitted(cwd: str, timeout: int = 10) -> int:
+    """Return the number of uncommitted changes in *cwd*, or 0 on error."""
+    if _git(["rev-parse", "--is-inside-work-tree"], cwd, timeout=timeout) != "true":
+        return 0
+    records = _status_records_z(cwd, timeout=timeout)
+    if records is None:
+        raw = _git(["status", "--short"], cwd, timeout=timeout) or ""
+        return sum(1 for line in raw.splitlines() if line.strip())
+    return len(records)
+
+
+def auto_commit_all_repos(
+    root: str | None = None,
+    timeout: int = 15,
+) -> dict[str, str | None]:
+    """Auto-commit all self-owned repos (root + nested).
+
+    Calls ``auto_commit()`` for each repo returned by ``discover_nested_repos``.
+    Skips upstream repos and honours the same env opt-out flags as
+    ``auto_commit``.
+
+    Returns:
+        Mapping of ``{abs_path: commit_msg_or_None}`` for all repos attempted.
+        Root is always the first key.
+    """
+    if os.environ.get("CONCINNO_NO_AUTOCOMMIT") == "1":
+        return {}
+    if os.environ.get("CONCINNO_SKIP_AUTO_COMMIT") == "1":
+        return {}
+
+    if root is None:
+        root = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+
+    repos = discover_nested_repos(root, timeout=timeout)
+    results: dict[str, str | None] = {}
+
+    for repo_path in repos:
+        try:
+            msg = auto_commit(cwd=repo_path, timeout=timeout)
+            results[repo_path] = msg
+            if msg:
+                _safe_stderr(
+                    f"[git_assist] auto-committed nested repo {repo_path}: {msg}\n"
+                )
+        except Exception as exc:
+            _safe_stderr(
+                f"[git_assist] auto_commit failed for {repo_path}: {exc}\n"
+            )
+            results[repo_path] = None
+
+    return results
 
 
 def generate_report(

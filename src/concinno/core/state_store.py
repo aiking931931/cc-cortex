@@ -12,12 +12,51 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import sys
 import time
 from typing import Any
 
 from .atomic import acquire_file_lock, read_json, release_file_lock, write_atomic
 
 logger = logging.getLogger("concinno.state_store")
+
+
+def _observable_write_failure(
+    namespace: str,
+    session_id: str,
+    exc: Exception,
+    *,
+    scope: str,
+) -> None:
+    """Emit a visible warning + audit entry when state persistence fails.
+
+    Previously these failures hit ``logger.debug`` which nobody reads, so
+    sentinel / read-log / cooldown corruption went unnoticed until a
+    downstream consumer blew up. Surfacing through stderr + the
+    destruction_guard audit log keeps the signal loud enough to notice.
+    """
+    msg = (
+        f"\033[93m\u26a0 [state_store] {scope} failed for "
+        f"{namespace}/{session_id[:8] if session_id else '-'}: "
+        f"{type(exc).__name__}: {exc}\033[0m\n"
+    )
+    try:
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        from concinno.destruction_guard import audit
+
+        audit(
+            f"state_store:{scope}",
+            0,
+            "warn",
+            f"{namespace}/{session_id[:8] if session_id else '-'} | "
+            f"{type(exc).__name__}: {str(exc)[:200]}",
+        )
+    except Exception:
+        pass
 
 
 class StateStore:
@@ -163,7 +202,10 @@ class StateStore:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             write_atomic(path, data)
         except Exception as exc:
-            logger.debug("state_store write failed: %s %s — %s", namespace, session_id[:8], exc)
+            # Escalated from logger.debug (invisible) to stderr + audit log —
+            # silent write failures previously masked state corruption until
+            # a downstream consumer asserted on stale data.
+            _observable_write_failure(namespace, session_id, exc, scope="write")
 
     def read_modify_write(
         self,
@@ -251,7 +293,9 @@ class StateStore:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             write_atomic(path, data)
         except Exception as exc:
-            logger.debug("state_store write_flat failed: %s/%s — %s", namespace, filename, exc)
+            _observable_write_failure(
+                namespace, filename, exc, scope="write_flat",
+            )
 
     def prune_dict(
         self,

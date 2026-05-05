@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,43 @@ from typing import Any
 
 _LOCALE_DIR = Path(__file__).parent / "locale"
 _DEFAULT_LOCALE = "en"
-_BUILTIN_LOCALES = ("en", "zh_TW", "ja", "ko", "es")  # Always loaded for pattern detection
+
+
+def _locale_to_filename(locale: str) -> str:
+    """Normalize a BCP-47 locale to the filename form used on disk.
+
+    ``config._VALID_LOCALES`` stores BCP-47 hyphenated strings (``zh-TW``)
+    because that is the standard users type into
+    ``concinno config set locale``. On disk we ship ``zh_TW.json`` because
+    underscores are friendlier across filesystems (e.g. some URL-escape
+    setups choke on hyphen + capital combos). Everywhere else in i18n
+    uses the filename form as the cache key.
+    """
+    return locale.replace("-", "_")
+
+
+def _derive_builtin_locales() -> tuple[str, ...]:
+    """Derive the set of builtin locales from :data:`config._VALID_LOCALES`.
+
+    Single source of truth lives in ``concinno.config`` so adding a new
+    locale only requires updating one frozenset. Filename-form locales
+    (underscored) are returned here; callers load them from disk.
+
+    Falls back to the historical built-in list if the config module is
+    unavailable during very early import (should never happen, but keeps
+    i18n usable when someone vendors just the i18n file).
+    """
+    try:
+        from concinno.config import _VALID_LOCALES
+    except Exception:
+        return ("en", "zh_TW", "ja", "ko", "es")
+    return tuple(sorted(_locale_to_filename(loc) for loc in _VALID_LOCALES))
+
+
+# Always loaded for pattern detection. Derived from config._VALID_LOCALES
+# so a new locale added there automatically participates here — no more
+# drift between the two (fixed 2.6.1, was bug F4 in S5 redteam).
+_BUILTIN_LOCALES = _derive_builtin_locales()
 
 # ── Module state ─────────────────────────────────────────────────
 
@@ -58,8 +95,26 @@ def _load_locale_file(locale: str) -> tuple[dict[str, str], dict[str, list[str]]
 
 
 def _resolve_display_locale() -> str:
-    """Read CC_UX_LANG env var → normalize to locale key."""
-    raw = os.environ.get("CC_UX_LANG", _DEFAULT_LOCALE).strip()
+    """Resolve display locale from layered config → normalize to locale key.
+
+    Priority (first non-empty wins):
+      1. ``CC_UX_LANG`` env var (legacy — kept for back-compat with Skills that
+         export it).
+      2. :func:`concinno.config.get("locale")` (new canonical path — reads the
+         four-layer stack env > project > user > default).
+      3. ``_DEFAULT_LOCALE`` as a last-resort safety net if config import fails.
+    """
+    raw: str = os.environ.get("CC_UX_LANG", "").strip()
+    if not raw:
+        try:
+            from concinno.config import get as _cfg_get
+
+            raw = str(_cfg_get("locale")).strip()
+        except Exception:
+            raw = _DEFAULT_LOCALE
+    if not raw:
+        raw = _DEFAULT_LOCALE
+
     # Normalize: "zh-TW" → "zh_TW", "zh" → "zh_TW", "en" → "en"
     normalized = raw.replace("-", "_")
     if normalized in ("zh", "zh_TW", "zh_tw"):
@@ -69,8 +124,17 @@ def _resolve_display_locale() -> str:
     return normalized
 
 
+_missing_locale_warned: set[str] = set()
+
+
 def _ensure_loaded() -> None:
-    """Lazy-load all built-in locales + user's display locale."""
+    """Lazy-load all built-in locales + user's display locale.
+
+    Missing translation files for a declared builtin locale (e.g. user
+    added ``fr`` to config._VALID_LOCALES but didn't ship ``fr.json``)
+    emit a one-shot stderr warning and fall back silently to English so
+    callers still get a usable string — no raise, no chatty spam.
+    """
     global _loaded, _display_locale
     if _loaded:
         return
@@ -90,6 +154,25 @@ def _ensure_loaded() -> None:
         if msgs or pats:
             _message_cache[_display_locale] = msgs
             _pattern_cache[_display_locale] = pats
+
+    # Warn (once per process) if the user asked for a locale that has
+    # no translation file on disk — prevents the silent-English-fallback
+    # UX bug where `concinno config set locale fr` seemed to succeed but
+    # the user never saw French messages.
+    if (
+        _display_locale != _DEFAULT_LOCALE
+        and not _message_cache.get(_display_locale)
+        and _display_locale not in _missing_locale_warned
+    ):
+        _missing_locale_warned.add(_display_locale)
+        try:
+            print(
+                f"[concinno.i18n] locale {_display_locale!r} has no "
+                f"translation file; falling back to {_DEFAULT_LOCALE!r}",
+                file=sys.stderr,
+            )
+        except Exception:
+            pass
 
     _loaded = True
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Optional
 
 from concinno.constants import make_deny
@@ -116,6 +117,35 @@ REMINDER_FILE_MIN = 3
 #     remove every interruption that costs scoreboard cycles.
 #
 HANDOFF_MODES = ("save-token", "phase", "full", "competition")
+
+# F6 (2.7.1): Legacy mode names some 2.5-era cc_config.json files still
+# carry on disk. Normalise them up-front so pre-existing installs keep
+# working after the rename. ``autonomous`` was the 2.5 name for the
+# ``full`` mode; ``save_token`` (with underscore) was an older spelling
+# of ``save-token``. Unknown legacy values fall through and the caller
+# degrades to the ship default.
+_LEGACY_MODE_ALIASES: dict[str, str] = {
+    "autonomous": "full",
+    "save_token": "save-token",
+}
+
+
+def _normalize_legacy_mode(raw: object) -> str | None:
+    """Map a raw legacy mode value to its canonical ``HANDOFF_MODES`` entry.
+
+    Returns ``None`` for non-string, unknown, or empty input so callers
+    can treat "no legacy opinion" the same way as "legacy file absent".
+    Canonical names already in ``HANDOFF_MODES`` pass through unchanged.
+    """
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    if raw in HANDOFF_MODES:
+        return raw
+    return _LEGACY_MODE_ALIASES.get(raw)
+
 # Legacy constants — callers use _model_thresholds() at runtime
 _PHASE_GATE = 180_000
 _PHASE_REMINDER = 150_000
@@ -153,23 +183,108 @@ def is_autonomous_or_competition() -> bool:
     return get_handoff_mode() in ("full", "competition")
 
 
-def get_handoff_mode() -> str:
-    """Read handoff_mode from cc_config.json. Returns 'phase' if unset."""
+# Mapping between concinno.config `mode` values (general|handoff) and the
+# richer handoff_engine states (save-token|phase|full|competition).
+# - ``general`` (Concinno 2.6 ship default) == ``phase`` — no gating at
+#   normal context, one reminder near the top, treats handoff as opt-in.
+# - ``handoff`` == ``save-token`` — AI King's personal preference,
+#   conservative gates, early reminders.
+# Legacy ``cc_config.json::handoff_mode`` values (save-token/phase/full/
+# competition) take precedence when present so existing installs keep
+# their exact tuning — we only fall to ``concinno.config`` when the
+# legacy file has no opinion.
+_CONFIG_MODE_TO_HANDOFF: dict[str, str] = {
+    "general": "phase",
+    "handoff": "save-token",
+}
+
+
+def _read_legacy_cc_config_mode() -> str | None:
+    """Return handoff_mode from cc_config.json if present, else None.
+
+    None means "no legacy opinion" → fall through to concinno.config.
+    Invalid values (unknown mode string, bad JSON) also map to None so
+    the caller can degrade gracefully instead of inheriting garbage.
+    """
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
     cfg_path = os.path.join(project_dir, ".claude", "hooks", "cc_config.json")
     if not os.path.isfile(cfg_path):
-        return "phase"
+        return None
     try:
         with open(cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-        mode = cfg.get("handoff_mode", "phase")
-        return mode if mode in HANDOFF_MODES else "phase"
     except Exception:
-        return "phase"
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    # F6 (2.7.1): normalise legacy aliases (autonomous → full,
+    # save_token → save-token) so old cc_config.json files keep
+    # working after the rename.
+    return _normalize_legacy_mode(cfg.get("handoff_mode"))
+
+
+def _read_concinno_config_mode() -> str | None:
+    """Return handoff mode derived from concinno.config `mode`, else None.
+
+    Runtime-aware: reads env > project > user > ship-default layers via
+    concinno.config.get("mode"). Only ``general`` / ``handoff`` are the
+    documented concinno.config values; anything else (a power-user hand-
+    editing config to "save-token" directly) is also accepted verbatim
+    as long as it's in HANDOFF_MODES so the underlying tuning still
+    works.
+    """
+    try:
+        from concinno.config import get as _cfg_get
+
+        raw = _cfg_get("mode")
+    except Exception:
+        return None
+    if not isinstance(raw, str):
+        return None
+    if raw in _CONFIG_MODE_TO_HANDOFF:
+        return _CONFIG_MODE_TO_HANDOFF[raw]
+    # Power-user override: direct HANDOFF_MODES value written into
+    # concinno.config also honored, for symmetry with legacy. Legacy
+    # aliases (autonomous / save_token) are also normalised here (F6)
+    # so a user flipping between cc_config.json and concinno.config
+    # does not need to remember which spelling each layer accepts.
+    return _normalize_legacy_mode(raw)
+
+
+def get_handoff_mode() -> str:
+    """Return the effective handoff mode.
+
+    Resolution order (first non-None wins):
+      1. Legacy ``cc_config.json::handoff_mode`` under
+         ``$CLAUDE_PROJECT_DIR/.claude/hooks/`` — preserves exact
+         behavior for existing installs.
+      2. :func:`concinno.config.get` ``mode`` key, mapped via
+         ``_CONFIG_MODE_TO_HANDOFF`` (``general`` → ``phase``,
+         ``handoff`` → ``save-token``). This is the new 2.6.1
+         runtime consumer of ``concinno config set mode``.
+      3. Fallback ``"phase"`` — concinno ship default after mapping.
+
+    Invalid values at any layer are ignored (not propagated) so a
+    single malformed file cannot poison the whole mode decision.
+    """
+    legacy = _read_legacy_cc_config_mode()
+    if legacy is not None:
+        return legacy
+    from_config = _read_concinno_config_mode()
+    if from_config is not None:
+        return from_config
+    return "phase"
 
 
 def set_handoff_mode(mode: str) -> bool:
-    """Write handoff_mode to cc_config.json. Returns True on success."""
+    """Write handoff_mode to cc_config.json. Returns True on success.
+
+    Side effect (2.21.0+): launches / tears down full-mode bundled
+    services via :func:`concinno.full_mode_services.ensure_services_for_mode`.
+    Currently that means starting the config GUI when flipping to
+    ``full``, stopping it when flipping out. Opt-out env vars documented
+    in :mod:`concinno.full_mode_services`.
+    """
     if mode not in HANDOFF_MODES:
         return False
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
@@ -181,9 +296,30 @@ def set_handoff_mode(mode: str) -> bool:
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
             f.write("\n")
-        return True
     except Exception:
         return False
+    # Fire-and-forget service lifecycle — failure here must not reverse
+    # the mode change or surface as False to callers (the config write
+    # is the authoritative act).
+    try:
+        from concinno.full_mode_services import ensure_services_for_mode
+        report = ensure_services_for_mode(mode)
+        gui = (report.get("services") or {}).get("gui") or {}
+        status = gui.get("status")
+        if status == "launched":
+            print(
+                f"[handoff_engine] full-mode GUI started on {gui.get('url')}",
+                file=sys.stderr,
+            )
+        elif status == "stopped":
+            print(
+                f"[handoff_engine] full-mode GUI stopped (pid {gui.get('pid')})",
+                file=sys.stderr,
+            )
+    except Exception as err:
+        print(f"[handoff_engine] full-mode services error: {err}",
+              file=sys.stderr)
+    return True
 
 # ── Handoff Reminder State (module-level, per-process) ────
 

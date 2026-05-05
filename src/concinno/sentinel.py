@@ -645,6 +645,43 @@ def _count_sig_failures(calls: list) -> dict[str, int]:
     return counts
 
 
+def _emit_consec_fail_outcome(
+    max_fails: int, tripped: bool, observed: int, *, mode: str = "raw",
+) -> None:
+    """ZIQ outcome emit for `consecutive_fail_gate.max_fails`.
+
+    Tripped = True → low reward (gate fired), scaled by how aggressive
+    the threshold is. Tripped = False → reward grows with the headroom
+    the threshold left unused (smaller observed/max_fails ratio).
+    """
+    try:
+        from concinno.ziq_outcome_bus import Outcome
+        from concinno.ziq_outcome_bus import get_bus as _gbus
+
+        if tripped:
+            # Lower max_fails = earlier interruption = worse signal
+            # unless observed >> max_fails (proves gate caught real loop).
+            reward = max(0.0, min(0.5, max_fails / 10.0))
+        else:
+            used_ratio = observed / max(1, max_fails)
+            reward = max(0.5, 1.0 - used_ratio * 0.5)
+        _gbus().emit(
+            Outcome(
+                tunable="consecutive_fail_gate.max_fails",
+                value=max_fails,
+                reward=reward,
+                source="concinno.sentinel.gate_consecutive_fail",
+                metadata={
+                    "tripped": tripped,
+                    "observed": observed,
+                    "mode": mode,
+                },
+            )
+        )
+    except Exception:
+        pass
+
+
 def gate_consecutive_fail(
     session_id: str, state_dir: str, *, max_fails: int = 3,
 ) -> Optional[dict]:
@@ -660,6 +697,7 @@ def gate_consecutive_fail(
         worst_sig = max(sig_counts, key=sig_counts.get)  # type: ignore[arg-type]
         worst_count = sig_counts[worst_sig]
         if worst_count >= max_fails:
+            _emit_consec_fail_outcome(max_fails, True, worst_count, mode="sig")
             return make_deny(
                 f"Three Strikes: same problem '{worst_sig}' failed {worst_count} times",
                 additionalContext=(
@@ -667,6 +705,7 @@ def gate_consecutive_fail(
                     f"{_three_strikes_action()}"
                 ),
             )
+        _emit_consec_fail_outcome(max_fails, False, worst_count, mode="sig")
         return None  # Different problems, none recurring enough
 
     # Fallback: no sigs available, count raw consecutive fails
@@ -677,12 +716,15 @@ def gate_consecutive_fail(
         elif c.get("ok") is True:
             break
     if consec >= max_fails:
+        _emit_consec_fail_outcome(max_fails, True, consec, mode="raw")
         return make_deny(
             f"Three Strikes: {consec} consecutive failures",
             additionalContext=(
                 f"{consec} consecutive failures (no specific signature).\n{_three_strikes_action()}"
             ),
         )
+    if consec > 0:
+        _emit_consec_fail_outcome(max_fails, False, consec, mode="raw")
     return None
 
 
@@ -703,6 +745,30 @@ def _has_lint_errors(file_path: str) -> bool:
     return False
 
 
+def _emit_sentinel_outcome(max_repeats: int, observed: int, tripped: bool) -> None:
+    """ZIQ outcome emit for `sentinel_gate.max_repeats`."""
+    try:
+        from concinno.ziq_outcome_bus import Outcome
+        from concinno.ziq_outcome_bus import get_bus as _gbus
+
+        if tripped:
+            reward = max(0.0, min(0.5, max_repeats / 15.0))
+        else:
+            used_ratio = observed / max(1, max_repeats)
+            reward = max(0.5, 1.0 - used_ratio * 0.5)
+        _gbus().emit(
+            Outcome(
+                tunable="sentinel_gate.max_repeats",
+                value=max_repeats,
+                reward=reward,
+                source="concinno.sentinel.gate_sentinel",
+                metadata={"observed": observed, "tripped": tripped},
+            )
+        )
+    except Exception:
+        pass
+
+
 def gate_sentinel(
     session_id: str, tool_name: str, tool_input: dict, state_dir: str,
     *, max_repeats: int = 5, lint_exception: bool = True,
@@ -721,9 +787,12 @@ def gate_sentinel(
         else:
             break
     if consec < max_repeats:
+        if consec > 0:
+            _emit_sentinel_outcome(max_repeats, consec, tripped=False)
         return None
     if lint_exception and _has_lint_errors(file_path):
         return None
+    _emit_sentinel_outcome(max_repeats, consec, tripped=True)
     basename = os.path.basename(file_path)
     return make_deny(
         f"Sentinel Gate: {tool_name} on {basename} repeated {consec}x — stuck loop detected",
@@ -767,6 +836,7 @@ class HijackGuard(BaseGuard):
     """TADS four-level circuit breaker based on hijack_score."""
 
     name = "hijack_guard"
+    feature_name = "hijack_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "attention hijack loop detected"
 
@@ -802,6 +872,7 @@ class ConsecutiveFailGuard(BaseGuard):
     """DENY when consecutive tool failures exceed threshold."""
 
     name = "consecutive_fail"
+    feature_name = "consecutive_fail_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "consecutive tool failures"
 
@@ -832,6 +903,7 @@ class SentinelGuard(BaseGuard):
     """DENY Edit on same file when repeated too many times (stuck loop)."""
 
     name = "sentinel"
+    feature_name = "sentinel_gate"
     category = GuardCategory.QUALITY
     step_back_reason = "repeated edits on same file"
 

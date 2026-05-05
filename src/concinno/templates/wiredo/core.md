@@ -48,7 +48,7 @@ tool_result strings to gather evidence.
 Return JSON in EXACTLY this shape:
 
 {
-  "decision": "block" | "allow",
+  "decision": "block" | "allow" | "route",
   "change_type": "<one of: frontend, backend, library, hook,
     migration, deploy, cli, word_doc, image, audio, video,
     db_query, ai_prompt, build_artifact, test_only, docs_only,
@@ -61,12 +61,23 @@ Return JSON in EXACTLY this shape:
     "D": {"status": "✓|✗|N/A", "evidence": "..."},
     "O": {"status": "✓|✗|N/A", "evidence": "..."}
   },
+  "route_to": "deploy_recipe",                    // only present if decision=route
+  "route_context": {"dimension_in_doubt": "D",    // only present if decision=route
+                    "recipe_hint": "<one of: build_smoke, migration_safe, ui_screenshot, ...>"},
   "reason": "<one sentence — empty if decision=allow>"
 }
 
 Decision rule:
-  - block if ANY required-by-routing dimension has status="✗"
-  - block if D is "✗" regardless of routing (D is strongest)
+
+  - block if D is "✗" regardless of routing (D is strongest,
+    delivery verified is non-negotiable)
+  - block if ANY required-by-routing dimension has status="✗" AND
+    the operator clearly claimed delivery
+  - route if a dimension's status is uncertain — Haiku cannot
+    reliably decide whether the evidence passes (e.g. "D: is this
+    smoke test sufficient?", "build_artifact changed: was it
+    rebuilt or just edited?") — emit a recipe hint so a deeper
+    evaluator can verify with the right rubric
   - allow otherwise
 
 Auto-pass shortcut (still return full checklist with all N/A):

@@ -17,7 +17,7 @@
 
 Design notes
 ------------
-Ported from Sancio (``projects/persona-api/src/persona/tools/``) to become
+Ported from Sancio (``projects/sancio/src/persona/tools/``) to become
 the canonical location for network-read tools in the Concinno library.
 
 Differences from the Sancio originals:
@@ -355,6 +355,19 @@ class FetchUrlTool:
             client = httpx.Client(
                 timeout=self._timeout_s,
                 follow_redirects=True,
+                headers={
+                    # Wikimedia & other servers reject the default
+                    # ``python-httpx/X`` UA. Identify the tool politely
+                    # so we are not mistaken for a scraper.
+                    "User-Agent": (
+                        "concinno/2.34 (+https://pypi.org/"
+                        "project/concinno/) httpx"
+                    ),
+                    "Accept": (
+                        "text/html,application/xhtml+xml,"
+                        "application/xml;q=0.9,*/*;q=0.8"
+                    ),
+                },
             )
         try:
             try:

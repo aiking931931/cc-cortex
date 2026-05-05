@@ -236,6 +236,16 @@ class WiredoGuard(BaseGuard):
 
     def check(self, ctx: GuardContext) -> Optional[GuardResult]:
         """Inject WIREDO checklist once per session per asset type."""
+        # F8 (2.7.1): gate behind ux_injection. The checklist is pure
+        # coaching; WiredoEnforcementGuard below handles the hard deny
+        # for missing WIREDO tables and is NOT gated here.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
+
         asset_type = _detect_task_type(ctx)
         if asset_type is None:
             return None
@@ -372,9 +382,47 @@ class WiredoEnforcementGuard(BaseGuard):
             return None
 
         if _has_wiredo_table(content):
-            return GuardResult.allow_advisory(
-                context="✅ WIREDO table verified in handoff file",
-            )
+            advisory = "✅ WIREDO table verified in handoff file"
+            # Schedule a distinct Opus sub-agent to perform the D-axis
+            # functional verification (per user directive 2026-04-29).
+            # The structural self-fill check above only proves the
+            # WIREDO table is *present*; the sub-agent verifier proves
+            # the deliverable actually runs and does what it should.
+            try:
+                from concinno.guards.redblue_green_dispatch_guard import (
+                    Radius,
+                )
+                from concinno.guards.wiredo_subagent_verify_guard import (
+                    WiredoSubagentVerifyGuard,
+                )
+
+                verify_guard = WiredoSubagentVerifyGuard()
+                asset_paths: list[str] = []
+                try:
+                    from concinno.delivery.wiredo import _get_session_code_files
+
+                    asset_paths = list(
+                        _get_session_code_files(ctx.cache_dir, ctx.session_id),
+                    )
+                except Exception:
+                    asset_paths = []
+                task_id = verify_guard.register_pending(
+                    original_agent_id=ctx.session_id,
+                    asset_paths=asset_paths,
+                    change_summary=content[:500],
+                    radius=Radius.HIGH,
+                )
+                if task_id:
+                    advisory = (
+                        f"{advisory}. Sub-agent functional verification "
+                        f"queued: {task_id}"
+                    )
+            except Exception:
+                # Feature wiring failure must never break the existing
+                # advisory path. The hard-deny branch below is the
+                # backstop; this advisory is best-effort.
+                pass
+            return GuardResult.allow_advisory(context=advisory)
 
         # Hard deny — no WIREDO table found
         return GuardResult.deny(

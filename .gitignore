@@ -14,6 +14,7 @@ benchmarks/datasets/
 benchmarks/results/
 .tempero_cache/
 .claude-forge/
+.concinno_cache/
 
 # Red-team batch test fixtures — contain format-valid dummy secrets
 # that GitHub push protection flags. Dev-only, not part of pytest CI.
@@ -27,11 +28,17 @@ tests/openclaw_security_test.py
 .env.*
 credentials*
 secrets*
+# Exception: the CredentialStore source module is library code, not a
+# secret file. 2.15.0 shipped without this file because `credentials*`
+# above caught it — 2.15.1 patch adds these exceptions to restore it.
+!src/concinno/core/credentials.py
+!tests/core/test_credentials.py
 
 # Internal / not for release
 _recycled/
 _cognitive/
 .tempero_cache/
+scratch/
 
 # Testing & linting caches
 .pytest_cache/
@@ -57,3 +64,4 @@ node_modules/
 .DS_Store
 Thumbs.db
 *.log
+_AI_BRAIN_safe/

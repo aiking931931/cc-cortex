@@ -276,6 +276,71 @@ def main(hook_data: dict | None = None) -> None:
     if supervisor_ctx:
         manifest = manifest + "\n" + supervisor_ctx
 
+    # WiredoSubagentVerifyGuard — pull pending verifications keyed off
+    # the just-finished sub-agent id and surface them in the manifest
+    # so the parent agent sees "verification queued" / "verifier
+    # passed" / "verifier reported failures" alongside the L1/L2
+    # results above. Best-effort — never break the host hook.
+    try:
+        from concinno.guards.wiredo_subagent_verify_guard import (
+            WiredoSubagentVerifyGuard,
+        )
+
+        verify_guard = WiredoSubagentVerifyGuard()
+        finished_id = ""
+        if isinstance(hook_data, dict):
+            finished_id = (
+                hook_data.get("subagentId")
+                or hook_data.get("subagent_id")
+                or hook_data.get("agent_id")
+                or ""
+            )
+        if finished_id:
+            pending_for_agent = [
+                p for p in verify_guard.pending_tasks()
+                if p.original_agent_id == finished_id
+            ]
+            if pending_for_agent:
+                lines = [
+                    "🔎 WIREDO sub-agent verify — queued tasks for "
+                    f"{finished_id}:",
+                ]
+                for pending in pending_for_agent:
+                    lines.append(
+                        f"  • {pending.task_id} "
+                        f"(retry {pending.retry_count}, radius "
+                        f"{pending.radius.value})",
+                    )
+                manifest = manifest + "\n" + "\n".join(lines)
+    except Exception:
+        pass
+
+    # Mark sub-agent complete in time_steward registry + ask for
+    # re-triage advice (capability #5). Best-effort — registration
+    # / advice failure must never break the host hook.
+    agent_id = ""
+    if isinstance(hook_data, dict):
+        agent_id = (
+            hook_data.get("subagentId")
+            or hook_data.get("subagent_id")
+            or hook_data.get("agent_id")
+            or ""
+        )
+    if agent_id:
+        try:
+            from concinno.time_steward import (
+                TimeSteward,
+                register_subagent_complete,
+            )
+            register_subagent_complete(agent_id=agent_id)
+            retriage = TimeSteward().advise_retriage(
+                completed_agent_id=agent_id,
+            )
+            if isinstance(retriage, dict) and retriage.get("inject"):
+                manifest = manifest + "\n" + str(retriage["inject"])
+        except Exception:
+            pass
+
     _write_output("SubagentStop", manifest)
 
 

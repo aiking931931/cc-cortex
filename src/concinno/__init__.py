@@ -11,7 +11,7 @@ Legacy API (v0.5, deprecated — removed in v1.0)::
 Migration guide: https://github.com/aiking931931/concinno/blob/main/docs/migration-v05-v06.md
 """
 
-__version__ = "2.3.0"
+__version__ = "5.7.0"
 
 import warnings as _warnings
 
@@ -36,12 +36,45 @@ from concinno.convention_engine import (  # noqa: F401
     check_naming,
     suggest_path,
 )
+
+# ── 1.14.0 LLM gateway + few-shot + tool loop ────────────
+from concinno.escalation import (  # noqa: F401
+    DEFAULT_CHAIN,
+    EscalationExhausted,
+    EscalationResult,
+    EscalationTier,
+    LLMEscalator,
+    TierResult,
+    escalate,
+)
+from concinno.fewshot import (  # noqa: F401
+    DEFAULT_STOP_WORDS,
+    FewshotBank,
+    FewshotCase,
+    load_bank,
+    retrieve_fewshot,
+)
+from concinno.fidelity_delta import (  # noqa: F401
+    FidelityDeltaRecord,
+    compute_fidelity_delta,
+)
 from concinno.field_read import (  # noqa: F401
     COMPRESS_BREAKEVEN_TOKENS,
     FieldReadConfig,
     build_field_context,
     read_handoff_fields,
     read_memory_fields,
+)
+from concinno.gaia_meta_router import (  # noqa: F401
+    ARMS,
+    Arm,
+    ArmDecision,
+    ArmFTRL,
+    record_arm_outcome,
+    select_arm,
+    select_arm_with_reason,
+    sps_arm_scores,
+    subagent_count,
 )
 
 # ── v0.6+ Guard Pipeline API (recommended) ───────────────
@@ -59,6 +92,7 @@ from concinno.guards.rewrite_guards import (  # noqa: F401
     BashPipeToShellRewriter,
     WriteSecretFileRewriter,
 )
+from concinno.library import CortexLibrary, LibraryResult  # noqa: F401
 from concinno.prompt_hooks import (  # noqa: F401
     ALL_JUDGES,
     CODE_QUALITY_JUDGE,
@@ -69,6 +103,16 @@ from concinno.prompt_hooks import (  # noqa: F401
     install_prompt_hooks,
     list_installed_judges,
     uninstall_prompt_hooks,
+)
+from concinno.release_authorization import (  # noqa: F401
+    PUBLISH_PATTERNS,
+    AuthorizationConfig,
+    AuthorizationMode,
+    check_authorization,
+    describe_current_config,
+    detect_publish_operation,
+    format_required_string,
+    load_config,
 )
 from concinno.riverbed import (  # noqa: F401
     RecallResult,
@@ -117,30 +161,36 @@ from concinno.token_zone import (  # noqa: F401
     write_zone_file,
     zone_injection,
 )
-from concinno.library import CortexLibrary, LibraryResult  # noqa: F401
-
-# ── 1.14.0 LLM gateway + few-shot + tool loop ────────────
-from concinno.escalation import (  # noqa: F401
-    DEFAULT_CHAIN,
-    EscalationExhausted,
-    EscalationResult,
-    EscalationTier,
-    LLMEscalator,
-    TierResult,
-    escalate,
-)
-from concinno.fewshot import (  # noqa: F401
-    DEFAULT_STOP_WORDS,
-    FewshotBank,
-    FewshotCase,
-    load_bank,
-    retrieve_fewshot,
-)
 from concinno.tool_executor import (  # noqa: F401
     ExecutionState,
     Tool,
     ToolExecutor,
     ToolStep,
+)
+from concinno.ziq_autotune_registry import (  # noqa: F401
+    TUNABLE_REGISTRY,
+    TunableSpec,
+    get_tuner,
+    list_targets,
+)
+from concinno.ziq_autotuner import (  # noqa: F401
+    AutoTuneObservation,
+    AutoTuneRegime,
+    ZIQAutoTuner,
+    is_autotune_enabled,
+)
+from concinno.ziq_outcome_bus import (  # noqa: F401
+    Outcome,
+    ZIQOutcomeBus,
+)
+from concinno.ziq_outcome_bus import (
+    emit as ziq_emit,  # noqa: F401
+)
+from concinno.ziq_outcome_bus import (
+    get_bus as get_ziq_bus,  # noqa: F401
+)
+from concinno.ziq_outcome_bus import (
+    is_bus_disabled as is_ziq_bus_disabled,  # noqa: F401
 )
 
 # ── v0.5 legacy API (deprecated since v0.6, removed in v1.0) ─
@@ -251,6 +301,36 @@ __all__ = [
     "Tool",
     "ExecutionState",
     "ToolStep",
+    # 2.12.1 release_authorization (separate from destruction_guard)
+    "AuthorizationConfig",
+    "AuthorizationMode",
+    "PUBLISH_PATTERNS",
+    "check_authorization",
+    "describe_current_config",
+    "detect_publish_operation",
+    "format_required_string",
+    "load_config",
+    # 2.12.0 ZIQ auto-tune + GAIA SAS/MAS meta-router
+    "ZIQAutoTuner",
+    "AutoTuneObservation",
+    "AutoTuneRegime",
+    "is_autotune_enabled",
+    "TUNABLE_REGISTRY",
+    "TunableSpec",
+    "get_tuner",
+    "list_targets",
+    "select_arm",
+    "select_arm_with_reason",
+    "record_arm_outcome",
+    "sps_arm_scores",
+    "subagent_count",
+    "ArmDecision",
+    "ArmFTRL",
+    "ARMS",
+    "Arm",
+    # Subagent fork fidelity delta (DPI-loss measurement)
+    "FidelityDeltaRecord",
+    "compute_fidelity_delta",
     # v0.5 legacy (deprecated, triggers DeprecationWarning)
     "HookResult",
     "Pipeline",

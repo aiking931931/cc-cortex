@@ -76,10 +76,6 @@ MODULES = {
         "description": "Enterprise delivery gate — verified results, not guesses",
         "default": True,
     },
-    "proposal_guard": {
-        "description": "Block proposals without side-effect analysis (Poka-Yoke)",
-        "default": True,
-    },
     "ui_verify": {
         "description": "Lock after deploy+UI changes until screenshot verification",
         "default": True,
@@ -107,14 +103,18 @@ HOOK_FILES = [
     ("on_stop.py", "on-stop.py"),
     ("on_pre_tool.py", "on-pre-tool.py"),
     ("on_post_tool.py", "on-post-tool.py"),
+    ("ask_user_toast.py", "ask-user-toast.py"),
 ]
 
-# (installed filename, Claude Code hook event) — for settings.json registration
+# (installed filename, Claude Code hook event, matcher) — settings.json.
+# ``matcher`` defaults to "" (all tools). AskUserQuestion has a
+# dedicated matcher so we don't toast on every tool call.
 HOOK_EVENTS = [
-    ("on-session-start.py", "SessionStart"),
-    ("on-stop.py", "Stop"),
-    ("on-pre-tool.py", "PreToolUse"),
-    ("on-post-tool.py", "PostToolUse"),
+    ("on-session-start.py", "SessionStart", ""),
+    ("on-stop.py", "Stop", ""),
+    ("on-pre-tool.py", "PreToolUse", ""),
+    ("on-post-tool.py", "PostToolUse", ""),
+    ("ask-user-toast.py", "PreToolUse", "AskUserQuestion"),
 ]
 
 
@@ -175,7 +175,15 @@ def _register_hooks_in_settings() -> int:
     hooks = settings.setdefault("hooks", {})
     registered = 0
 
-    for hook_file, event in HOOK_EVENTS:
+    for entry in HOOK_EVENTS:
+        # Accept both legacy 2-tuples (filename, event) and the
+        # 2.7+ 3-tuples (filename, event, matcher) so downstream
+        # forks that import this list keep working.
+        if len(entry) == 2:
+            hook_file, event = entry
+            matcher = ""
+        else:
+            hook_file, event, matcher = entry
         hook_path = HOOKS_DIR / hook_file
         if not hook_path.exists():
             continue
@@ -194,7 +202,7 @@ def _register_hooks_in_settings() -> int:
 
         event_groups.append(
             {
-                "matcher": "",
+                "matcher": matcher,
                 "hooks": [{"type": "command", "command": command}],
             }
         )
@@ -214,7 +222,7 @@ def _unregister_hooks_from_settings() -> int:
     if not hooks:
         return 0
 
-    hook_filenames = {hf for hf, _ in HOOK_EVENTS}
+    hook_filenames = {entry[0] for entry in HOOK_EVENTS}
     removed = 0
 
     for event in list(hooks.keys()):
@@ -410,6 +418,19 @@ def cmd_status(_args: argparse.Namespace) -> None:
         print(f"  Config: {cfg_status}")
     else:
         print("  Config: not found (run `concinno init`)")
+
+    # WIREDO sub-agent verify — pending count surfaced for ops
+    # visibility (Concinno 4.6.0). Best-effort — a missing or
+    # disabled feature must not break ``concinno status``.
+    try:
+        from concinno.guards.wiredo_subagent_verify_guard import (
+            WiredoSubagentVerifyGuard,
+        )
+
+        pending_count = len(WiredoSubagentVerifyGuard().pending_tasks())
+        print(f"  wiredo_pending_verifications: {pending_count}")
+    except Exception:
+        pass
 
 
 def cmd_doctor(_args: argparse.Namespace) -> None:
@@ -702,8 +723,22 @@ def cmd_validate(args: argparse.Namespace) -> None:
     print(format_report(results))
 
 
-def cmd_plugins_list(_args: argparse.Namespace) -> None:
-    """List all guards (built-in + plugins)."""
+def cmd_plugins_list(args: argparse.Namespace) -> None:
+    """Unified plugin listing (guards + features + skills + allowlist).
+
+    2.32.0 delegates to :mod:`concinno.cli.plugins_cmd` which
+    orchestrates all three ``concinno.*`` entry-points groups
+    (``concinno.guards``, ``concinno.features``, ``concinno.skills``)
+    plus the file + env allowlist state. The pre-2.32.0 guards-only
+    body below is kept as ``cmd_plugins_list_guards_only`` for
+    diagnostic use under ``--verbose``.
+    """
+    from .plugins_cmd import cmd_plugins_list as _unified
+    _unified(args)
+
+
+def cmd_plugins_list_guards_only(_args: argparse.Namespace) -> None:
+    """Pre-2.32.0 guards-only view. Retained for diagnostic fallback."""
     from ..guards.registry import create_default_pipeline
     from ..plugin_loader import discover_plugins
 
@@ -1029,6 +1064,132 @@ def cmd_evolve(args: argparse.Namespace) -> None:
     print(f"  Task: {TASK_CONFIG['name']} (every {TASK_CONFIG['min_interval_hours']}h)")
 
 
+def cmd_features(args: argparse.Namespace) -> None:
+    """Export / sync the FEATURE_META Markdown table into README."""
+    from concinno.feature_readme import main as _main
+    raise SystemExit(_main([args.features_command] + (
+        [args.path] if args.features_command == "sync-readme" and args.path else []
+    )))
+
+
+def cmd_commands(args: argparse.Namespace) -> None:
+    """Install / list / clean Concinno slash-commands in ~/.claude/commands/."""
+    from concinno.commands_sync import main as _main
+    extra = [args.path] if getattr(args, "path", None) else []
+    raise SystemExit(_main([args.commands_action] + extra))
+
+
+def cmd_rules(args: argparse.Namespace) -> None:
+    """Install / list / uninstall the bundled official rule set."""
+    from concinno.rules_install import main as _main
+    extra = [args.path] if getattr(args, "path", None) else []
+    raise SystemExit(_main([args.rules_action] + extra))
+
+
+def cmd_gui(args: argparse.Namespace) -> None:
+    """Launch the localhost config GUI (requires ``concinno[gui]`` extras).
+
+    Two modes:
+
+    * **Default** — full FEATURE_META + skills + harness GUI on
+      ``--port`` (defaults to 8400).
+    * **``--switcher``** — federation switcher reverse-proxy on
+      ``--port`` (defaults to 8399). Proxies traffic to the Concinno
+      GUI (``--concinno-port``, default 8400) and the Sancio GUI
+      (``--sancio-port``, default 8401), reading each backend's bearer
+      token off disk so the operator authenticates once to the
+      switcher rather than once per backend.
+
+    ``--print-token-path`` short-circuits before any uvicorn import so
+    a deploy that has not yet installed ``[gui]`` extras can still
+    discover the token path. In switcher mode this prints the
+    *switcher's* token path, not the main GUI token path.
+    """
+    switcher_mode = bool(getattr(args, "switcher", False))
+
+    if getattr(args, "print_token_path", False):
+        if switcher_mode:
+            from concinno.gui.switcher import get_switcher_token_path
+            print(get_switcher_token_path())
+        else:
+            from concinno.gui.auth import get_token_path
+            print(get_token_path())
+        return
+
+    # Resolve port default by mode (8399 switcher / 8400 main).
+    port = args.port
+    if port is None:
+        port = 8399 if switcher_mode else 8400
+
+    if switcher_mode:
+        try:
+            from concinno.gui.switcher import run_switcher as _run_switcher
+        except ImportError as err:
+            print(f"[gui] missing dependency: {err}")
+            print("Install with: pip install 'concinno[gui]'")
+            sys.exit(1)
+        print(
+            f"[gui --switcher] serving on http://{args.host}:{port}  "
+            f"(proxying concinno=:{args.concinno_port} "
+            f"sancio=:{args.sancio_port}; Ctrl+C to stop)"
+        )
+        _run_switcher(
+            host=args.host,
+            port=port,
+            reload=args.reload,
+            concinno_port=args.concinno_port,
+            sancio_port=args.sancio_port,
+        )
+        return
+
+    try:
+        from concinno.gui import run as _run
+    except ImportError as err:
+        print(f"[gui] missing dependency: {err}")
+        print("Install with: pip install 'concinno[gui]'")
+        sys.exit(1)
+    print(f"[gui] serving on http://{args.host}:{port}  (Ctrl+C to stop)")
+    _run(host=args.host, port=port, reload=args.reload)
+
+
+def cmd_features_audit(args: argparse.Namespace) -> None:
+    """Print current critical / major feature state for the operator.
+
+    Used to answer "what is currently disabled that REALLY should be on?"
+    without diving into ``cc_config.json`` by hand. Reads severity from
+    :data:`concinno.feature_config.FEATURE_META` and current ``enabled``
+    state from the live config.
+    """
+    from concinno.feature_config import FEATURE_META, get_severity_tier
+    try:
+        from concinno.core.config import get_config
+        cfg = get_config()
+    except Exception:
+        cfg = None
+
+    rows: list[tuple[str, str, str, bool]] = []
+    for name, meta in sorted(FEATURE_META.items()):
+        sev = get_severity_tier(name)
+        if sev not in ("major", "critical"):
+            continue
+        try:
+            enabled = bool(cfg.feature(name, "enabled")) if cfg else True
+        except Exception:
+            enabled = True
+        consequences = meta.get("consequences_if_off", "") or ""
+        rows.append((name, sev, consequences, enabled))
+
+    if not rows:
+        print("(no critical/major features registered)")
+        return
+    rows.sort(key=lambda r: (0 if r[1] == "critical" else 1, r[0]))
+    for name, sev, conseq, enabled in rows:
+        flag = "✅ on" if enabled else "❌ OFF"
+        print(f"  [{sev:8s}] {flag}  {name}")
+        if conseq:
+            print(f"             ↳ {conseq}")
+
+
 def cmd_uninstall(args: argparse.Namespace) -> None:
     """Remove concinno hooks and config."""
     if not args.yes:
@@ -1072,75 +1233,14 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    """CLI entry point."""
-    # Fix Windows console encoding for Unicode output (⬜, ✅, etc.)
-    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr,attr-defined]
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr,attr-defined]
+# ---------------------------------------------------------------------------
+# Subparser registration helpers (2.33.1 refactor — extracted from main()
+# to drop the function below the 120-line func_length guard threshold and
+# group argparse wiring by command namespace).
+# ---------------------------------------------------------------------------
 
-    parser = argparse.ArgumentParser(
-        prog="concinno",
-        description="Production-grade hooks for Claude Code",
-    )
-    sub = parser.add_subparsers(dest="command")
 
-    # init
-    p_init = sub.add_parser("init", help="Initialize concinno in current project")
-    p_init.add_argument("--force", action="store_true", help="Overwrite existing files")
-    p_init.set_defaults(func=cmd_init)
-
-    # enable
-    p_enable = sub.add_parser("enable", help="Enable a module")
-    p_enable.add_argument("module", help="Module name")
-    p_enable.set_defaults(func=cmd_enable)
-
-    # disable
-    p_disable = sub.add_parser("disable", help="Disable a module")
-    p_disable.add_argument("module", help="Module name")
-    p_disable.set_defaults(func=cmd_disable)
-
-    # status
-    p_status = sub.add_parser("status", help="Show module status")
-    p_status.set_defaults(func=cmd_status)
-
-    # doctor
-    p_doctor = sub.add_parser("doctor", help="Check installation health")
-    p_doctor.set_defaults(func=cmd_doctor)
-
-    # backup
-    p_backup = sub.add_parser("backup", help="Manage destruction guard backups")
-    backup_sub = p_backup.add_subparsers(dest="backup_command")
-
-    backup_list = backup_sub.add_parser("list", help="List all backups")
-    backup_list.set_defaults(func=cmd_backup_list)
-
-    backup_clean = backup_sub.add_parser("cleanup", help="Clean expired backups")
-    backup_clean.add_argument(
-        "--days",
-        type=int,
-        default=None,
-        help="Retention days (default: from config)",
-    )
-    backup_clean.set_defaults(func=cmd_backup_cleanup)
-
-    backup_restore = backup_sub.add_parser("restore", help="Restore a backup")
-    backup_restore.add_argument("backup_id", help="Backup ID to restore")
-    backup_restore.set_defaults(func=cmd_backup_restore)
-
-    backup_pin = backup_sub.add_parser("pin", help="Pin a backup")
-    backup_pin.add_argument("backup_id", help="Backup ID to pin")
-    backup_pin.set_defaults(func=cmd_backup_pin)
-
-    backup_unpin = backup_sub.add_parser("unpin", help="Unpin a backup")
-    backup_unpin.add_argument("backup_id", help="Backup ID to unpin")
-    backup_unpin.set_defaults(func=cmd_backup_unpin)
-
-    p_backup.set_defaults(
-        func=lambda a: cmd_backup_list(a) if not a.backup_command else None,
-    )
-
-    # autopilot
+def _register_autopilot(sub: argparse._SubParsersAction) -> None:
     p_auto = sub.add_parser("autopilot", help="Manage autopilot maintenance tasks")
     auto_sub = p_auto.add_subparsers(dest="autopilot_command")
 
@@ -1180,7 +1280,8 @@ def main() -> None:
         func=lambda a: cmd_autopilot_list(a) if not a.autopilot_command else None,
     )
 
-    # cognitive
+
+def _register_cognitive(sub: argparse._SubParsersAction) -> None:
     p_cog = sub.add_parser("cognitive", help="Cognitive layer inspection")
     cog_sub = p_cog.add_subparsers(dest="cognitive_command")
 
@@ -1227,107 +1328,8 @@ def main() -> None:
         func=lambda a: cmd_cognitive_status(a) if not a.cognitive_command else None,
     )
 
-    # audit
-    p_audit = sub.add_parser("audit", help="Attention budget audit + strike scan")
-    p_audit.add_argument(
-        "audit_mode", nargs="?", default="all",
-        choices=["all", "strike", "release", "budget", "upgrade"],
-        help="Scan mode (default: all)",
-    )
-    p_audit.add_argument("--workspace", default="", help="Workspace path")
-    p_audit.add_argument(
-        "--corrections", default="",
-        help="Relative path to corrections JSONL",
-    )
-    p_audit.add_argument(
-        "--budget", default="",
-        help="Relative path to attention-budget.json",
-    )
-    p_audit.add_argument("--dry", action="store_true", help="Dry run (upgrade mode)")
-    p_audit.set_defaults(func=cmd_audit)
 
-    # pipeline
-    p_pipe = sub.add_parser("pipeline", help="Think→Ship pipeline state management")
-    pipe_sub = p_pipe.add_subparsers(dest="pipeline_command")
-
-    pipe_status = pipe_sub.add_parser("status", help="Show pipeline progress")
-    pipe_status.set_defaults(func=cmd_pipeline_status)
-
-    pipe_clear = pipe_sub.add_parser("clear", help="Clear pipeline state")
-    pipe_clear.set_defaults(func=cmd_pipeline_clear)
-
-    pipe_design = pipe_sub.add_parser(
-        "design", help="Generate parallel design prompts"
-    )
-    pipe_design.add_argument("requirements", help="Feature requirements text")
-    pipe_design.add_argument(
-        "--constraint-set",
-        dest="constraint_set",
-        default="performance_vs_readability",
-        help="Constraint set (performance_vs_readability|monolith_vs_modular|defensive_vs_minimal)",
-    )
-    pipe_design.set_defaults(func=cmd_pipeline_design)
-
-    p_pipe.set_defaults(
-        func=lambda a: cmd_pipeline_status(a) if not a.pipeline_command else None,
-    )
-
-    # validate
-    p_validate = sub.add_parser("validate", help="Validate handoff files")
-    p_validate.add_argument("path", nargs="?", default="", help="Handoff directory")
-    p_validate.add_argument("--pattern", default="", help="Glob pattern (auto-detect)")
-    p_validate.add_argument("--fix", action="store_true", help="Auto-fix missing frontmatter")
-    p_validate.set_defaults(func=cmd_validate)
-
-    # plugins
-    p_plug = sub.add_parser("plugins", help="Manage guard plugins")
-    plug_sub = p_plug.add_subparsers(dest="plugins_command")
-
-    plug_list = plug_sub.add_parser("list", help="List all guards (built-in + plugins)")
-    plug_list.set_defaults(func=cmd_plugins_list)
-
-    plug_validate = plug_sub.add_parser("validate", help="Validate a plugin file")
-    plug_validate.add_argument("path", help="Path to plugin .py file")
-    plug_validate.set_defaults(func=cmd_plugins_validate)
-
-    plug_scan = plug_sub.add_parser("scan", help="Scan for installed plugin entrypoints")
-    plug_scan.set_defaults(func=cmd_plugins_scan)
-
-    p_plug.set_defaults(
-        func=lambda a: cmd_plugins_list(a) if not a.plugins_command else None,
-    )
-
-    # aegis — task/cost inspection
-    p_aegis = sub.add_parser(
-        "aegis",
-        help="Inspect live Aegis task/cost state",
-    )
-    aegis_sub = p_aegis.add_subparsers(dest="aegis_command")
-
-    aegis_status = aegis_sub.add_parser(
-        "status",
-        help="Show progress + cost snapshot",
-    )
-    aegis_status.set_defaults(func=cmd_aegis_status)
-
-    aegis_goal = aegis_sub.add_parser(
-        "goal",
-        help="Set the current session's goal",
-    )
-    aegis_goal.add_argument("goal", help="Goal description")
-    aegis_goal.add_argument(
-        "--subtask",
-        action="append",
-        help="Subtask label (repeatable)",
-    )
-    aegis_goal.set_defaults(func=cmd_aegis_goal)
-
-    def _aegis_default(_args: argparse.Namespace) -> None:
-        p_aegis.print_help()
-
-    p_aegis.set_defaults(func=_aegis_default)
-
-    # rag — namespace routing inspection
+def _register_rag(sub: argparse._SubParsersAction) -> None:
     p_rag = sub.add_parser(
         "rag",
         help="Inspect RAG namespaces and ZIQ routing",
@@ -1364,16 +1366,153 @@ def main() -> None:
 
     p_rag.set_defaults(func=_rag_default)
 
-    # cleanup
-    p_clean = sub.add_parser("cleanup", help="Run cleanup (stale files, logs, git gc)")
-    p_clean.add_argument("--handoff-dir", default="", help="Handoff directory to scan")
-    p_clean.add_argument("--log-dir", default="", help="Log directory to rotate")
-    p_clean.add_argument("--dry-run", action="store_true", help="Show what would be cleaned")
-    p_clean.add_argument("--squash", action="store_true", help="Squash old auto-commits")
-    p_clean.add_argument("--gc", action="store_true", help="Run aggressive git gc")
-    p_clean.set_defaults(func=cmd_cleanup)
 
-    # evolve
+def _register_backup(sub: argparse._SubParsersAction) -> None:
+    p_backup = sub.add_parser("backup", help="Manage destruction guard backups")
+    backup_sub = p_backup.add_subparsers(dest="backup_command")
+
+    backup_list = backup_sub.add_parser("list", help="List all backups")
+    backup_list.set_defaults(func=cmd_backup_list)
+
+    backup_clean = backup_sub.add_parser("cleanup", help="Clean expired backups")
+    backup_clean.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Retention days (default: from config)",
+    )
+    backup_clean.set_defaults(func=cmd_backup_cleanup)
+
+    backup_restore = backup_sub.add_parser("restore", help="Restore a backup")
+    backup_restore.add_argument("backup_id", help="Backup ID to restore")
+    backup_restore.set_defaults(func=cmd_backup_restore)
+
+    backup_pin = backup_sub.add_parser("pin", help="Pin a backup")
+    backup_pin.add_argument("backup_id", help="Backup ID to pin")
+    backup_pin.set_defaults(func=cmd_backup_pin)
+
+    backup_unpin = backup_sub.add_parser("unpin", help="Unpin a backup")
+    backup_unpin.add_argument("backup_id", help="Backup ID to unpin")
+    backup_unpin.set_defaults(func=cmd_backup_unpin)
+
+    p_backup.set_defaults(
+        func=lambda a: cmd_backup_list(a) if not a.backup_command else None,
+    )
+
+
+def _register_audit(sub: argparse._SubParsersAction) -> None:
+    p_audit = sub.add_parser("audit", help="Attention budget audit + strike scan")
+    p_audit.add_argument(
+        "audit_mode", nargs="?", default="all",
+        choices=["all", "strike", "release", "budget", "upgrade"],
+        help="Scan mode (default: all)",
+    )
+    p_audit.add_argument("--workspace", default="", help="Workspace path")
+    p_audit.add_argument(
+        "--corrections", default="",
+        help="Relative path to corrections JSONL",
+    )
+    p_audit.add_argument(
+        "--budget", default="",
+        help="Relative path to attention-budget.json",
+    )
+    p_audit.add_argument("--dry", action="store_true", help="Dry run (upgrade mode)")
+    p_audit.set_defaults(func=cmd_audit)
+
+
+def _register_pipeline(sub: argparse._SubParsersAction) -> None:
+    p_pipe = sub.add_parser("pipeline", help="Think→Ship pipeline state management")
+    pipe_sub = p_pipe.add_subparsers(dest="pipeline_command")
+
+    pipe_status = pipe_sub.add_parser("status", help="Show pipeline progress")
+    pipe_status.set_defaults(func=cmd_pipeline_status)
+
+    pipe_clear = pipe_sub.add_parser("clear", help="Clear pipeline state")
+    pipe_clear.set_defaults(func=cmd_pipeline_clear)
+
+    pipe_design = pipe_sub.add_parser(
+        "design", help="Generate parallel design prompts"
+    )
+    pipe_design.add_argument("requirements", help="Feature requirements text")
+    pipe_design.add_argument(
+        "--constraint-set",
+        dest="constraint_set",
+        default="performance_vs_readability",
+        help="Constraint set (performance_vs_readability|monolith_vs_modular|defensive_vs_minimal)",
+    )
+    pipe_design.set_defaults(func=cmd_pipeline_design)
+
+    p_pipe.set_defaults(
+        func=lambda a: cmd_pipeline_status(a) if not a.pipeline_command else None,
+    )
+
+
+def _register_plugins(sub: argparse._SubParsersAction) -> None:
+    p_plug = sub.add_parser("plugins", help="Manage guard plugins")
+    plug_sub = p_plug.add_subparsers(dest="plugins_command")
+
+    plug_list = plug_sub.add_parser(
+        "list",
+        help="List all plugins (guards / features / skills) + allowlist",
+    )
+    plug_list.add_argument(
+        "--format", choices=("text", "json"), default="text",
+        help="Output format (default: text)",
+    )
+    plug_list.add_argument(
+        "--verbose", action="store_true",
+        help="Include built-in guard details and per-plugin error info",
+    )
+    plug_list.set_defaults(func=cmd_plugins_list)
+
+    plug_validate = plug_sub.add_parser("validate", help="Validate a plugin file")
+    plug_validate.add_argument("path", help="Path to plugin .py file")
+    plug_validate.set_defaults(func=cmd_plugins_validate)
+
+    plug_scan = plug_sub.add_parser("scan", help="Scan for installed plugin entrypoints")
+    plug_scan.set_defaults(func=cmd_plugins_scan)
+
+    # 2.32.0 -- allowlist subcommand tree for file-based persistence.
+    from .plugins_cmd import register_allowlist_subparsers
+    register_allowlist_subparsers(plug_sub)
+
+    p_plug.set_defaults(
+        func=lambda a: cmd_plugins_list(a) if not a.plugins_command else None,
+    )
+
+
+def _register_aegis(sub: argparse._SubParsersAction) -> None:
+    p_aegis = sub.add_parser(
+        "aegis",
+        help="Inspect live Aegis task/cost state",
+    )
+    aegis_sub = p_aegis.add_subparsers(dest="aegis_command")
+
+    aegis_status = aegis_sub.add_parser(
+        "status",
+        help="Show progress + cost snapshot",
+    )
+    aegis_status.set_defaults(func=cmd_aegis_status)
+
+    aegis_goal = aegis_sub.add_parser(
+        "goal",
+        help="Set the current session's goal",
+    )
+    aegis_goal.add_argument("goal", help="Goal description")
+    aegis_goal.add_argument(
+        "--subtask",
+        action="append",
+        help="Subtask label (repeatable)",
+    )
+    aegis_goal.set_defaults(func=cmd_aegis_goal)
+
+    def _aegis_default(_args: argparse.Namespace) -> None:
+        p_aegis.print_help()
+
+    p_aegis.set_defaults(func=_aegis_default)
+
+
+def _register_evolve(sub: argparse._SubParsersAction) -> None:
     p_evolve = sub.add_parser(
         "evolve",
         help="Weekly evolution digest — research + summarise recent AI/LLM/CC developments",
@@ -1392,9 +1531,272 @@ def main() -> None:
     )
     p_evolve.set_defaults(func=cmd_evolve)
 
+
+def _register_rules(sub: argparse._SubParsersAction) -> None:
+    p_rules = sub.add_parser(
+        "rules",
+        help="Install / list / uninstall the bundled official rule set",
+    )
+    rules_sub = p_rules.add_subparsers(dest="rules_action")
+    r_install = rules_sub.add_parser(
+        "install", help="Install official rules to ~/.claude/rules/official/",
+    )
+    r_install.add_argument("path", nargs="?", default=None)
+    r_install.set_defaults(func=cmd_rules)
+    r_list = rules_sub.add_parser("list", help="List bundled rule files")
+    r_list.set_defaults(func=cmd_rules)
+    r_dry = rules_sub.add_parser(
+        "dry-run", help="Preview install without writing",
+    )
+    r_dry.add_argument("path", nargs="?", default=None)
+    r_dry.set_defaults(func=cmd_rules)
+    r_uninstall = rules_sub.add_parser(
+        "uninstall", help="Remove installed official rule tree",
+    )
+    r_uninstall.add_argument("path", nargs="?", default=None)
+    r_uninstall.set_defaults(func=cmd_rules)
+
+
+def _register_commands(sub: argparse._SubParsersAction) -> None:
+    p_cmd = sub.add_parser(
+        "commands",
+        help="Install Concinno slash-commands into ~/.claude/commands/",
+    )
+    cmd_sub = p_cmd.add_subparsers(dest="commands_action")
+    cmd_sync = cmd_sub.add_parser("sync", help="Install/refresh commands")
+    cmd_sync.add_argument("path", nargs="?", default=None)
+    cmd_sync.set_defaults(func=cmd_commands)
+    cmd_list = cmd_sub.add_parser("list", help="List discoverable slash commands")
+    cmd_list.set_defaults(func=cmd_commands)
+    cmd_clean = cmd_sub.add_parser("clean", help="Remove managed command files")
+    cmd_clean.add_argument("path", nargs="?", default=None)
+    cmd_clean.set_defaults(func=cmd_commands)
+
+
+def _register_features(sub: argparse._SubParsersAction) -> None:
+    p_feat = sub.add_parser(
+        "features",
+        help="Export FEATURE_META as Markdown / sync README",
+    )
+    feat_sub = p_feat.add_subparsers(dest="features_command")
+    feat_export = feat_sub.add_parser(
+        "export-readme",
+        help="Print FEATURE_META Markdown table to stdout",
+    )
+    feat_export.set_defaults(func=cmd_features)
+    feat_sync = feat_sub.add_parser(
+        "sync-readme",
+        help="Inject FEATURE_META table into README.md between anchors",
+    )
+    feat_sync.add_argument("path", nargs="?", default=None,
+                           help="Target README path (default: repo README.md)")
+    feat_sync.set_defaults(func=cmd_features)
+
+    # 2.36.0a1 — audit currently-OFF critical/major features
+    feat_audit = feat_sub.add_parser(
+        "audit",
+        help=("Print critical/major features and whether they are enabled. "
+              "Helps spot 'I disabled X but forgot it was a hard-gate'."),
+    )
+    feat_audit.set_defaults(func=cmd_features_audit)
+
+    # 2.30.1 — user-feature registry commands (attach to same `features` namespace)
+    from .features_register_cmd import register_features_subcommands
+    register_features_subcommands(feat_sub)
+
+    # 4.2.x — set-profile bulk-toggle shortcut for 4.0.0 default-off features
+    from .features_profile_cmd import (
+        register_disable_all_d_class,
+        register_set_profile,
+    )
+    register_set_profile(feat_sub)
+    # 5.0.0 — explicit 4.x-compat alias for the D-class default-on flip
+    register_disable_all_d_class(feat_sub)
+
+
+def _register_gui(sub: argparse._SubParsersAction) -> None:
+    p_gui = sub.add_parser(
+        "gui",
+        help="Launch localhost config GUI (requires `pip install concinno[gui]`)",
+    )
+    p_gui.add_argument("--host", default="127.0.0.1",
+                       help="Bind host (default: 127.0.0.1 loopback)")
+    p_gui.add_argument("--port", type=int, default=None,
+                       help=("Bind port. Default 8400 for the main GUI; "
+                             "default 8399 when --switcher is set."))
+    p_gui.add_argument("--reload", action="store_true",
+                       help="Enable uvicorn auto-reload (dev only)")
+    p_gui.add_argument(
+        "--print-token-path", action="store_true",
+        help=("Print the OS-appropriate path where the bearer token "
+              "is/will be stored, then exit. The token value itself is "
+              "NEVER printed — clients should read it from this path."),
+    )
+    p_gui.add_argument(
+        "--switcher", action="store_true",
+        help=("Run as a federation switcher (reverse-proxy) on port 8399 "
+              "instead of the main GUI. Proxies traffic to the Concinno "
+              "GUI (8400) and the Sancio GUI (8401), reading each "
+              "backend's bearer token off disk."),
+    )
+    p_gui.add_argument(
+        "--concinno-port", type=int, default=8400,
+        help=("Backend port for the Concinno GUI (switcher mode only; "
+              "default: 8400)."),
+    )
+    p_gui.add_argument(
+        "--sancio-port", type=int, default=8401,
+        help=("Backend port for the Sancio GUI (switcher mode only; "
+              "default: 8401)."),
+    )
+    p_gui.set_defaults(func=cmd_gui)
+
+
+def main() -> None:
+    """CLI entry point."""
+    # Fix Windows console encoding for Unicode output (⬜, ✅, etc.)
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr,attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr,attr-defined]
+
+    from concinno.cli._first_run import maybe_print_first_run_banner
+    maybe_print_first_run_banner()
+
+    parser = argparse.ArgumentParser(
+        prog="concinno",
+        description="Production-grade hooks for Claude Code",
+        epilog=(
+            "Environment variables:\n"
+            "  CONCINNO_FIRST_RUN_BANNER=0   Suppress the post-4.0.0 onboarding\n"
+            "                                banner shown once per machine on a\n"
+            "                                fresh install. Accepts 0/false/no/off\n"
+            "                                (case-insensitive). The banner is also\n"
+            "                                auto-suppressed when stderr is not a TTY\n"
+            "                                (CI logs, Docker bootstrap, shell pipes).\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # init
+    p_init = sub.add_parser("init", help="Initialize concinno in current project")
+    p_init.add_argument("--force", action="store_true", help="Overwrite existing files")
+    p_init.set_defaults(func=cmd_init)
+
+    # enable
+    p_enable = sub.add_parser("enable", help="Enable a module")
+    p_enable.add_argument("module", help="Module name")
+    p_enable.set_defaults(func=cmd_enable)
+
+    # disable
+    p_disable = sub.add_parser("disable", help="Disable a module")
+    p_disable.add_argument("module", help="Module name")
+    p_disable.set_defaults(func=cmd_disable)
+
+    # status
+    p_status = sub.add_parser("status", help="Show module status")
+    p_status.set_defaults(func=cmd_status)
+
+    # doctor
+    p_doctor = sub.add_parser("doctor", help="Check installation health")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    # backup / autopilot / cognitive (2.33.1 — module-level register helpers)
+    _register_backup(sub)
+    _register_autopilot(sub)
+    _register_cognitive(sub)
+
+    # audit / pipeline (2.33.1 — module-level register helpers)
+    _register_audit(sub)
+    _register_pipeline(sub)
+
+    # validate
+    p_validate = sub.add_parser("validate", help="Validate handoff files")
+    p_validate.add_argument("path", nargs="?", default="", help="Handoff directory")
+    p_validate.add_argument("--pattern", default="", help="Glob pattern (auto-detect)")
+    p_validate.add_argument("--fix", action="store_true", help="Auto-fix missing frontmatter")
+    p_validate.set_defaults(func=cmd_validate)
+
+    # plugins / aegis / rag (2.33.1 — module-level register helpers)
+    _register_plugins(sub)
+    _register_aegis(sub)
+    _register_rag(sub)
+
+    # cleanup
+    p_clean = sub.add_parser("cleanup", help="Run cleanup (stale files, logs, git gc)")
+    p_clean.add_argument("--handoff-dir", default="", help="Handoff directory to scan")
+    p_clean.add_argument("--log-dir", default="", help="Log directory to rotate")
+    p_clean.add_argument("--dry-run", action="store_true", help="Show what would be cleaned")
+    p_clean.add_argument("--squash", action="store_true", help="Squash old auto-commits")
+    p_clean.add_argument("--gc", action="store_true", help="Run aggressive git gc")
+    p_clean.set_defaults(func=cmd_cleanup)
+
+    # evolve (2.33.1 — module-level register helper)
+    _register_evolve(sub)
+
+    # config — layered user/project/env config for mode, locale, flags
+    from .config_cmd import register as _register_config
+    _register_config(sub)
+
+    # convention — workspace convention engine CLI (2.12.1)
+    from .convention_cmd import register as _register_convention
+    _register_convention(sub)
+
+    # 2.16.0 — session-switches / configure-permissions / publish
+    from .configure_permissions_cmd import register as _register_cfg_perms
+    from .publish_cmd import register as _register_publish
+    from .release_lock_cmd import register as _register_release_lock
+    from .session_switches_cmd import register as _register_switches
+    _register_switches(sub)
+    _register_cfg_perms(sub)
+    _register_publish(sub)
+    _register_release_lock(sub)
+
+    # 2.36.0 — self-update (Tier 2 auto-update, detached helper)
+    from .self_update_cmd import register as _register_self_update
+    _register_self_update(sub)
+
+    # 2.17.0 — new-feature scaffold CLI
+    from .new_feature_cmd import register as _register_new_feature
+    _register_new_feature(sub)
+
+    # 2.37.0 — persona module CLI (Track 1)
+    from .persona_cmd import register as _register_persona
+    _register_persona(sub)
+
+    # 2.30.1 — `concinno skills {new, list, enable, disable, delete}`
+    from .skills_cmd import register as _register_skills
+    _register_skills(sub)
+
+    # narrower-scope v4 — preset cascade CLI
+    from .preset_cmd import register as _register_preset
+    _register_preset(sub)
+
+    # 4.4.0 — L2 SKILL.md frontmatter walker + reverse trigger index
+    from .l2_index_cmd import register as _register_l2_index
+    _register_l2_index(sub)
+
+    # 4.4.0 — HP6 wave-1 approval mode (manual / smart / off)
+    from .approval_mode_cmd import register as _register_approval_mode
+    _register_approval_mode(sub)
+
+    # 4.5.0 — W3 Token Audit Autopilot (per-session overhead audit + ZIQ FTRL archive advisor)
+    from concinno.observability.token_audit.cli import register as _register_token_audit
+    _register_token_audit(sub)
+
+    # 4.6.0 — W4 five-profile starter recommender
+    from .setup_cmd import register as _register_setup
+    _register_setup(sub)
+
     # mcp-server
     p_mcp = sub.add_parser("mcp-server", help="Start MCP server (stdio transport)")
     p_mcp.set_defaults(func=cmd_mcp_server)
+
+    # rules / commands / features / gui (2.33.1 — module-level register helpers)
+    _register_rules(sub)
+    _register_commands(sub)
+    _register_features(sub)
+    _register_gui(sub)
 
     # uninstall
     p_uninstall = sub.add_parser("uninstall", help="Remove concinno hooks and config")

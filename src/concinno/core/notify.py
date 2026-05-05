@@ -4,7 +4,8 @@
 @responsibility Sound playback, toast notifications, session title
     generation, i18n (Win/macOS/Linux)
 @dependencies (none — stdlib only)
-@exports play_sound, show_toast, make_session_title
+@exports play_sound, show_toast, make_session_title,
+    notify_waiting_on_user
 """
 
 import base64
@@ -50,13 +51,40 @@ _STRINGS = {
 
 
 def _get_locale() -> str:
-    """Get locale from Config singleton, default 'en'."""
-    try:
-        from concinno.core.config import get_config
+    """Resolve display locale from layered sources with normalization.
 
-        return get_config().raw("locale", "en") or "en"
-    except Exception:
-        return "en"
+    Order (first non-empty wins): ``CC_UX_LANG`` env → ``concinno.i18n.get_locale``
+    (reads ``~/.concinno/locale.json`` + env) → ``get_config().raw("locale")`` →
+    ``"en"``. Returns a key that keys into ``_STRINGS`` (``en`` / ``zh-TW`` /
+    ``zh-CN`` / ``ja`` / ``ko``) — handles loose forms ``zh_TW``, ``zh-tw``,
+    ``zh``, ``zh-hant`` etc transparently.
+    """
+    raw = ""
+    env = os.environ.get("CC_UX_LANG", "").strip()
+    if env:
+        raw = env
+    if not raw:
+        try:
+            from concinno.i18n import get_locale as _i18n_locale
+            raw = (_i18n_locale() or "").strip()
+        except Exception:
+            pass
+    if not raw:
+        try:
+            from concinno.core.config import get_config
+            raw = (get_config().raw("locale", "") or "").strip()
+        except Exception:
+            pass
+    norm = raw.replace("_", "-").lower()
+    if norm in ("zh-tw", "zh", "zh-hant", "zh-hant-tw"):
+        return "zh-TW"
+    if norm in ("zh-cn", "zh-hans", "zh-hans-cn"):
+        return "zh-CN"
+    if norm.startswith("ja"):
+        return "ja"
+    if norm.startswith("ko"):
+        return "ko"
+    return "en"
 
 
 def _t(key: str, locale: str | None = None) -> str:
@@ -220,6 +248,40 @@ def _xml_escape(s: str) -> str:
     )
 
 
+def _win_toast_winrt(
+    title: str,
+    message: str,
+    app_id: str,
+    tag: str = "concinno",
+    group: str = "concinno",
+    display_name: str = "Visual Studio Code",
+) -> bool:
+    """Windows toast via windows-toasts pip (in-process WinRT, zero disk artefact).
+
+    2.14.0 fix: splits ``display_name`` (UI sender label — goes into the
+    WinRT ``applicationText`` slot) from ``app_id`` (reputation key — the
+    ``notifierAUMID``). Before 2.14.0 this helper passed ``title`` into
+    ``applicationText``, which is why the banner sender label randomly
+    followed the message title.
+
+    Optional dep: ``pip install windows-toasts``. Returns ``False`` when the
+    package is missing so the caller cascades to the legacy xmldoc path.
+    """
+    try:
+        from windows_toasts import InteractableWindowsToaster, Toast, ToastDuration
+    except ImportError:
+        return False
+    try:
+        toaster = InteractableWindowsToaster(display_name, app_id)
+        toast = Toast(text_fields=[title, message], duration=ToastDuration.Long)
+        toast.tag = tag
+        toast.group = group
+        toaster.show_toast(toast)
+        return True
+    except Exception:
+        return False
+
+
 def _win_toast_xmldoc(
     title: str,
     message: str,
@@ -282,6 +344,77 @@ def _win_toast_xmldoc(
         return False
 
 
+def register_aumid(
+    app_id: str = "Concinno.ClaudeCode",
+    display_name: str = "Claude Code",
+    icon_path: str | None = None,
+    icon_background_color: str = "0060A0",
+) -> bool:
+    """Register a custom AUMID in HKCU for stable toast reputation.
+
+    Idempotent. Safe on non-Windows (returns ``False``). Writes
+    ``HKCU\\Software\\Classes\\AppUserModelId\\<app_id>`` with
+    ``DisplayName`` / ``IconUri`` (optional) / ``IconBackgroundColor``.
+
+    Only needed when the caller overrides ``show_toast(app_id=...)`` with a
+    custom AUMID — the VS Code default AUMID already has this registry
+    entry registered by the VS Code installer.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key_path = rf"Software\Classes\AppUserModelId\{app_id}"
+        key = winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+        )
+        try:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, display_name)
+            if icon_path:
+                winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, icon_path)
+            winreg.SetValueEx(
+                key, "IconBackgroundColor", 0, winreg.REG_SZ, icon_background_color
+            )
+            return True
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return False
+
+
+def disable_smart_optout() -> bool:
+    """Disable Win11 Notification Suggestions (SmartOptOut) for the current user.
+
+    Writes ``HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\
+    Settings\\Windows.ActionCenter.SmartOptOut\\Enabled = 0`` (DWORD) so
+    Windows 11 22H2+ stops auto-demoting banners to Action-Center-only
+    based on per-AUMID interaction ratios. This is the single-call answer
+    to "why does my toast silently stop appearing".
+
+    Opt-in because it changes user-visible OS behaviour beyond this
+    library; ``show_toast`` never invokes it implicitly. Safe on
+    non-Windows (returns ``False``).
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        key_path = (
+            r"Software\Microsoft\Windows\CurrentVersion\Notifications"
+            r"\Settings\Windows.ActionCenter.SmartOptOut"
+        )
+        key = winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+        )
+        try:
+            winreg.SetValueEx(key, "Enabled", 0, winreg.REG_DWORD, 0)
+            return True
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return False
+
+
 def _win_toast_balloon(title: str, message: str, timeout_ms: int = 5000) -> bool:
     """Fallback: .NET BalloonTip via NotifyIcon. Fire-and-forget (non-blocking)."""
     ps = (
@@ -316,37 +449,40 @@ def show_toast(
     enabled: bool | None = None,
     tag: str = "concinno",
     group: str = "concinno",
+    display_name: str = "Visual Studio Code",
 ) -> bool:
     """Show a system notification / toast.
 
-    Windows: XmlDocument version (duration=long, no auto-dismiss, system sound).
-    Tag+Group: same tag+group replaces previous toast (anti-stack).
+    2.14.0 fallback chain (Windows, in order):
 
-    Default ``app_id`` is the host IDE (``Microsoft.VisualStudioCode``)
-    so Concinno toasts inherit the IDE's branding and icon in the
-    Windows Action Center — matches the user-facing expectation that
-    Concinno events look like they come from VSCode/Cursor. The
-    trade-off is a shared Windows-notification interaction reputation:
-    if the surrounding IDE toasts have low click-through, Windows 11
-    may demote the whole app_id's banners to Action-Center-only. Keep
-    emission frequency conservative (milestone-only, not per-turn) so
-    the interaction ratio stays healthy, and reset the reputation
-    counter manually via registry when it has been polluted (see
-    ``PeriodicNotificationCount`` under the app_id key).
+    1. **WinRT in-process** (``windows-toasts`` pip, optional extra
+       ``concinno[toast]``) — zero disk, zero subprocess, zero AV surface.
+    2. **XmlDocument via wscript+VBS** (legacy, no pip deps) — CCC 1.12.1
+       baseline. Drops a ``.vbs`` to ``%TEMP%`` which Avast-family AV
+       scans on sight (Surfshark etc).
+    3. **NotifyIcon balloon tip** (last resort) — Win10 legacy style.
+
+    Default ``app_id`` is ``Microsoft.VisualStudioCode`` so Action Center
+    attributes banners to the VS Code host (sender label "Visual Studio
+    Code" + VSC icon). To prevent Win11 SmartOptOut demotion of the shared
+    bucket, call :func:`disable_smart_optout` once at bootstrap.
+
+    Tag + group let the same (tag, group) pair replace an earlier toast
+    instead of stacking.
 
     Args:
-        title: Notification title.
-        message: Notification body text.
-        app_id: Windows AppUserModelId for the toast. Defaults to
-            ``Microsoft.VisualStudioCode`` for IDE branding. Pass a
-            dedicated id (e.g. ``"Concinno.ClaudeCode"``) if you want
-            isolated reputation and don't care about IDE branding.
-        enabled: Override enabled check. None = respect config toast_enabled.
-        tag: Toast tag for replacement (same tag+group replaces previous).
+        title: Notification title (first text line).
+        message: Notification body text (second text line).
+        app_id: AUMID used as reputation key. Pass a custom value +
+            :func:`register_aumid` to isolate from VS Code's bucket.
+        enabled: Override enabled check. None = respect config
+            ``toast_enabled``.
+        tag: Toast tag for replacement.
         group: Toast group for replacement.
+        display_name: UI sender label shown in the banner header.
 
     Returns:
-        True if notification sent successfully.
+        True if any tier succeeded, False otherwise.
     """
     if enabled is False:
         return False
@@ -358,11 +494,20 @@ def show_toast(
                 return False
         except Exception:
             pass
+    # 2.14.0: Tier 1 winrt (zero .vbs, no AV surface) → Tier 2 xmldoc
+    # (legacy fallback when windows-toasts not installed) → Tier 3 balloon
+    # (last resort). Diagnosis: Opus 1 archaeology + Opus 2 WinRT research
+    # + Opus 3 architecture design (session 5a619784, MEMORY #70).
     try:
         if sys.platform == "win32":
-            if not _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
-                return _win_toast_balloon(title, message)
-            return True
+            if _win_toast_winrt(
+                title, message, app_id, tag=tag, group=group,
+                display_name=display_name,
+            ):
+                return True
+            if _win_toast_xmldoc(title, message, app_id, tag=tag, group=group):
+                return True
+            return _win_toast_balloon(title, message)
         elif sys.platform == "darwin":
             subprocess.run(
                 ["osascript", "-e", f'display notification "{message}" with title "{title}"'],
@@ -375,6 +520,87 @@ def show_toast(
                 timeout=5,
                 capture_output=True,
             )
+        return True
+    except Exception:
+        return False
+
+
+# ── Generic "waiting on user" helper (2.21.0) ───────────────────────
+
+_WAITING_TOAST_STRINGS = {
+    "en": "Claude is waiting — input needed",
+    "zh-TW": "Claude 在等你 — 需要回應",
+    "zh-CN": "Claude 在等你 — 需要回应",
+    "ja": "Claude が応答待ち — 入力が必要",
+    "ko": "Claude가 대기 중 — 입력 필요",
+}
+
+
+def notify_waiting_on_user(
+    context: str,
+    *,
+    title: str | None = None,
+    tag: str = "concinno-waiting-on-user",
+    group: str = "concinno-waiting-on-user",
+    async_fire: bool = True,
+) -> bool:
+    """Surface a toast when the agent needs the user to respond / decide.
+
+    Distinct from :func:`show_toast` (low-level) and
+    ``hooks.ask_user_toast.maybe_show_ask_user_toast`` (Claude Code
+    ``AskUserQuestion`` tool only). Call this from any code path that
+    is *about to block* on user input — ``release_authorization``
+    deny branches, destruction-guard confirmation prompts,
+    custom CLI wizards — so the user learns to respond without
+    foreground-watching the terminal.
+
+    Args:
+        context: Short human-readable reason (<=80 chars preferred);
+            e.g. ``"publish concinno 2.21.0 needs 'go publish ...'"``.
+        title: Optional override. Default is the locale-aware
+            ``"Claude is waiting — input needed"`` style title.
+        tag/group: Toast replacement keys — a burst of prompts
+            collapses to ONE toast instead of stacking.
+        async_fire: Fire on a daemon thread (default) so the caller
+            does not block on COM / WinRT cold init. Set False for
+            deterministic testing.
+
+    Returns:
+        ``True`` when a toast was emitted (or queued for async fire),
+        ``False`` on hard error or when toasts are disabled in config.
+    """
+    try:
+        locale = _get_locale()
+    except Exception:
+        locale = "en"
+    resolved_title = (
+        title
+        if title is not None
+        else _WAITING_TOAST_STRINGS.get(locale, _WAITING_TOAST_STRINGS["en"])
+    )
+    message = (context or "").strip()[:120] or resolved_title
+
+    def _fire() -> bool:
+        try:
+            return show_toast(
+                title=resolved_title,
+                message=message,
+                tag=tag,
+                group=group,
+            )
+        except Exception:
+            return False
+
+    if not async_fire:
+        return _fire()
+
+    import threading
+    try:
+        threading.Thread(
+            target=_fire,
+            name="concinno-waiting-on-user-toast",
+            daemon=True,
+        ).start()
         return True
     except Exception:
         return False

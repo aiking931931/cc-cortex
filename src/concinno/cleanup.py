@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import subprocess
 import sys
@@ -18,6 +20,36 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+from concinno.destruction_guard import destruction_gate
+
+
+@contextlib.contextmanager
+def _gate_escape(*flags: str):
+    """Temporarily raise destruction_gate escape env flags.
+
+    Used by the /tidy orchestrator (``run_cleanup``) so the gated cleanup
+    functions pass through their decorator without requiring a reason
+    kwarg from the CLI caller. Inside the with-block, ``CLAUDE_PROJECT_DIR``
+    is also ensured (fall back to CWD) so ``_hook_context_permits`` returns
+    True.
+    """
+    prev = {name: os.environ.get(name) for name in flags}
+    prev_proj = os.environ.get("CLAUDE_PROJECT_DIR")
+    if not prev_proj:
+        os.environ["CLAUDE_PROJECT_DIR"] = os.getcwd()
+    for name in flags:
+        os.environ[name] = "1"
+    try:
+        yield
+    finally:
+        for name, value in prev.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if prev_proj is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
 
 _TZ = timezone(timedelta(hours=8))
 _CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -177,6 +209,191 @@ def count_auto_commits(
     return sum(1 for line in out.splitlines() if pattern in line)
 
 
+def _detect_embedded_nested_repos(cwd: str, max_depth: int = 4) -> list[str]:
+    """Find nested `.git` directories that live under paths tracked by `cwd`.
+
+    Why this exists (2.9.0 治本):
+        Some outer repos intentionally track files that live *inside* another
+        repo's working tree (e.g. `ai-king/.gitignore` has `!projects/concinno/`
+        so the outer repo snapshots Concinno's source). When this outer repo
+        runs `squash_auto_commits`, its rebase replays commits whose tree
+        contains the outer's old snapshot of those paths — **overwriting the
+        inner working tree** with stale content and silently blowing away
+        work-in-progress. Stashed draft `2.9.0-draft-WIP-blocked-by-outer-squash`
+        is evidence of exactly this race.
+
+    Fix: detect this configuration and refuse to squash. Squashing a repo
+    that embeds another repo's working tree is never safe — the outer rebase
+    cannot distinguish "stale snapshot replay" from "user-intended rollback",
+    and the inner repo has no say in the matter.
+
+    Returns list of embedded repo paths (relative to `cwd`) whose contents
+    are tracked by the outer index. Empty list = safe to squash.
+
+    Set `CONCINNO_SKIP_NESTED_REPOS=0` to bypass (not recommended; only for
+    the rare case where the caller is sure outer does not track inner paths).
+    """
+    if os.environ.get("CONCINNO_SKIP_NESTED_REPOS", "1") == "0":
+        return []
+
+    if not os.path.isdir(cwd):
+        return []
+
+    # 2.10.4 治本 (HIGH H1): the previous implementation used
+    # ``Path(cwd).rglob('.git')`` which on CPython <3.12 walks the
+    # ENTIRE tree and only filters by `max_depth` after the fact.
+    # On ai-king this means stat'ing every file under `.venv`,
+    # `node_modules`, `__pycache__`, sibling submodule dirs — tens of
+    # thousands of stats per Stop event. Switch to ``os.walk`` with
+    # explicit depth tracking + subtree pruning.
+    embedded: list[str] = []
+    # Subtrees we never descend into (junk + outer's own .git).
+    _PRUNE_DIRS = frozenset({
+        ".git", ".venv", "venv", "env", "node_modules",
+        "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+        ".hypothesis", ".tox", "dist", "build",
+    })
+    try:
+        cwd_abs = os.path.abspath(cwd)
+        for dirpath, dirnames, _filenames in os.walk(cwd_abs, followlinks=False):
+            # Compute current depth (relative to cwd_abs) and prune in-place.
+            rel_dir = os.path.relpath(dirpath, cwd_abs)
+            depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+            # Stop descending past max_depth-1 (a `.git` at depth N lives
+            # at parent-depth N-1; max_depth=4 → parent depth ≤3).
+            if depth >= max_depth:
+                dirnames[:] = []
+                continue
+            # Prune in place — this is the only way to actually skip the
+            # subtree in os.walk (deleting from dirnames after yield would
+            # be too late).
+            dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
+            # Look for `.git` directly in current dir's children. We need
+            # both real-repo (.git is dir) and worktree (.git is file)
+            # detection, but only real-repos qualify as "embedded with
+            # tracked working tree" — worktree's .git file points at
+            # shared storage, no tracked tree race possible.
+            git_child = os.path.join(dirpath, ".git")
+            if not os.path.isdir(git_child):
+                continue
+            # Skip outer's own .git (depth==0 case already caught by prune,
+            # but guard explicitly).
+            if dirpath == cwd_abs:
+                continue
+            nested_root_rel = os.path.relpath(dirpath, cwd_abs)
+            nested_rel_str = nested_root_rel.replace(os.sep, "/")
+            # Does outer index track paths INSIDE this nested repo?
+            ls = _git(["ls-files", "--", f"{nested_rel_str}/"], cwd)
+            tracked_inside = [
+                ln for ln in (ls or "").splitlines()
+                if ln and ln != nested_rel_str
+                and ln.startswith(f"{nested_rel_str}/")
+            ]
+            if tracked_inside:
+                embedded.append(nested_rel_str)
+            if len(embedded) >= 8:
+                break
+            # Don't descend into a found nested repo's subtree — its own
+            # nested-of-nested is its own problem, not outer's.
+            dirnames[:] = []
+    except OSError:
+        return embedded
+    return embedded
+
+
+def _snapshot_inner_repo(inner_abs: str) -> Optional[dict]:
+    """Snapshot inner repo state so outer squash can safely replay history.
+
+    2.10.2 治本 (direction D): instead of refusing outer squash when it
+    embeds an inner repo, we snapshot the inner's HEAD + stash any
+    uncommitted state, let the outer rebase run (it may temporarily
+    overwrite inner-tracked files with stale snapshots), then
+    ``_restore_inner_repo`` puts the inner back. See MEMORY #77 for the
+    .git bloat this unblocks.
+
+    Returns:
+        Dict with ``head`` (inner HEAD SHA) and ``stashed`` (bool).
+        ``None`` when the inner is in an unsafe state (rebase/merge in
+        progress, unreadable HEAD, or stash failure) — caller must refuse
+        the outer squash to avoid losing inner work.
+    """
+    git_marker = os.path.join(inner_abs, ".git")
+    if not os.path.exists(git_marker):
+        return None
+
+    # 2.10.4 治本 (FATAL F2): worktree's `.git` is a FILE (`gitdir: …`)
+    # pointing at the shared `.git/worktrees/<name>/` administrative dir.
+    # 2.10.3 only checked `isdir`, so worktrees silently returned None and
+    # outer squash refused without telling the operator why. We bail
+    # explicitly with stderr breadcrumb because reset --hard inside a
+    # worktree would touch the SHARED HEAD/refs of the sibling worktree.
+    if not os.path.isdir(git_marker):
+        sys.stderr.write(
+            f"concinno: skipping outer squash — inner at {inner_abs!r} is a "
+            "git worktree (.git is a file, not a directory). reset --hard "
+            "would mutate shared refs of sibling worktrees. Move the embedded "
+            "repo to a non-worktree clone, or set "
+            "CONCINNO_PROTECT_NESTED_REPOS=0 to fall back to refuse mode.\n"
+        )
+        return None
+
+    # Refuse when inner is mid-rebase / mid-merge: a snapshot + reset would
+    # clobber the in-progress operation.
+    for sentinel in ("rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD"):
+        if os.path.exists(os.path.join(git_marker, sentinel)):
+            return None
+
+    head = _git(["rev-parse", "HEAD"], inner_abs)
+    if not head:
+        return None
+
+    stashed = False
+    status = _git(["status", "--porcelain", "-uall"], inner_abs)
+    if status and status.strip():
+        stash_out = _git(
+            ["stash", "push", "-u", "-m", "concinno-outer-squash-protect"],
+            inner_abs,
+            timeout=60,
+        )
+        if stash_out is None:
+            return None
+        stashed = True
+
+    return {"head": head, "stashed": stashed}
+
+
+def _restore_inner_repo(inner_abs: str, snap: Optional[dict]) -> None:
+    """Restore inner repo to snapshotted state after outer squash.
+
+    Best-effort: errors are surfaced to stderr but do not raise, so an
+    outer cleanup that otherwise succeeded is not reported as failed.
+    Callers should treat a missing restore as a signal to inspect the
+    inner repo manually.
+    """
+    if not snap:
+        return
+
+    # `reset --hard` realigns inner working tree to the snapshotted HEAD,
+    # overwriting anything the outer rebase replayed into tracked paths.
+    # Inner-untracked files (not stashed) are left alone — that's the
+    # same semantics as a normal `reset --hard`.
+    if _git(["reset", "--hard", snap["head"]], inner_abs, timeout=60) is None:
+        sys.stderr.write(
+            f"concinno: inner repo at {inner_abs!r} reset --hard failed — "
+            f"manual check required (expected HEAD={snap['head']})\n"
+        )
+        return
+
+    if snap.get("stashed"):
+        if _git(["stash", "pop"], inner_abs, timeout=60) is None:
+            sys.stderr.write(
+                f"concinno: inner repo at {inner_abs!r} stash pop failed — "
+                "WIP preserved under refs/stash, run `git stash list` + "
+                "`git stash pop` manually to recover\n"
+            )
+
+
+@destruction_gate(risk="R3", op_name="squash_auto_commits")
 def squash_auto_commits(
     repo_dir: str | Path = ".",
     keep: int = 3,
@@ -188,6 +405,16 @@ def squash_auto_commits(
     then rebase the last `keep` commits on top of it.
 
     ⚠ DESTRUCTIVE: rewrites git history. Only safe for single-user repos.
+
+    2.10.2 治本 (direction D): outer repos that embed another repo's
+    working tree (e.g. ai-king/.gitignore carve-out for
+    projects/concinno/) used to be refused outright (2.9.0). That
+    protected inner WIP but starved outer squash → unbounded outer
+    .git bloat (MEMORY #77: 7.6GB observed). The new default snapshots
+    each embedded inner repo (HEAD + stash dirty), runs the outer
+    squash, then restores the inner via ``_restore_inner_repo``. Set
+    ``CONCINNO_PROTECT_NESTED_REPOS=0`` to fall back to 2.9.0 refuse
+    behavior.
     """
     result = CleanupResult(action="squash_auto_commits")
     cwd = str(repo_dir)
@@ -205,52 +432,183 @@ def squash_auto_commits(
 
     to_squash = total - keep
     result.items_found = to_squash
+    embedded = _detect_embedded_nested_repos(cwd)
+    protect_mode = os.environ.get("CONCINNO_PROTECT_NESTED_REPOS", "1") != "0"
 
     if dry_run:
+        if embedded and not protect_mode:
+            result.details.append(
+                f"[dry-run] WOULD SKIP (legacy refuse mode): outer repo embeds "
+                f"{len(embedded)} nested repo(s) with tracked paths: "
+                f"{', '.join(embedded[:3])}"
+            )
+            return result
+        if embedded:
+            result.details.append(
+                f"[dry-run] would snapshot+restore {len(embedded)} embedded "
+                f"repo(s): {', '.join(embedded[:3])}"
+            )
         result.details.append(
             f"[dry-run] would squash {to_squash} commits, keeping newest {keep}"
         )
         return result
 
-    # Guard: dirty tree → abort (rebase with uncommitted changes = broken state)
-    status = _git(["status", "--short"], cwd)
-    if status:
-        result.error = "uncommitted changes — stash or commit first"
+    # Legacy opt-out: keep 2.9.0 refuse behavior for operators who want it.
+    if embedded and not protect_mode:
+        result.error = (
+            "nested repo(s) with tracked paths detected — refusing squash "
+            "(CONCINNO_PROTECT_NESTED_REPOS=0): "
+            f"{', '.join(embedded[:3])}"
+        )
         return result
 
-    # Get tree at HEAD~keep
-    tree = _git(["rev-parse", f"HEAD~{keep}^{{tree}}"], cwd)
-    if not tree:
-        result.error = f"failed to parse tree at HEAD~{keep}"
-        return result
+    # Protect mode: snapshot every embedded inner repo up front. Failure to
+    # snapshot any one of them aborts the outer squash — losing inner WIP
+    # is worse than a bloated outer .git.
+    embedded_snapshots: dict[str, dict] = {}
+    if embedded:
+        for nested_rel in embedded:
+            inner_abs = os.path.join(cwd, nested_rel)
+            snap = _snapshot_inner_repo(inner_abs)
+            if snap is None:
+                # Roll back any inner repos we already stashed.
+                for done_rel, done_snap in embedded_snapshots.items():
+                    _restore_inner_repo(
+                        os.path.join(cwd, done_rel), done_snap
+                    )
+                result.error = (
+                    f"inner repo at {nested_rel!r} is unsafe to snapshot "
+                    "(rebase/merge in progress, HEAD unreadable, or stash "
+                    "failed) — resolve inner state first"
+                )
+                return result
+            embedded_snapshots[nested_rel] = snap
 
-    # Create orphan archive commit
-    stamp = datetime.now(_TZ).strftime("%Y%m%d")
-    msg = f"archive: squash {to_squash} commits before {stamp}"
-    archive = _git(["commit-tree", tree, "-m", msg], cwd)
-    if not archive:
-        result.error = "failed to create archive commit"
-        return result
-
-    # Rebase last `keep` commits onto archive
-    rebase = _git(["rebase", "--onto", archive, f"HEAD~{keep}"], cwd, timeout=120)
-    if rebase is None:
-        head = _git(["rev-list", "--count", "HEAD"], cwd)
-        if head and int(head) == keep + 1:
-            pass  # success
-        else:
-            result.error = "rebase failed — run 'git rebase --abort' to recover"
+    # Guard: dirty tree → abort. Inner dirt has been stashed above via
+    # snapshot; only OUTER dirt (paths not inside embedded inners) should
+    # still block. --ignore-submodules=all quiets perpetually-"modified"
+    # submodule markers (e.g. skills/last30days).
+    # Use -z for unambiguous parsing: NUL-separated records, "XY path\0...".
+    # Avoids the pitfall where _git().strip() eats the leading space of the
+    # first status line (" M foo" → "M foo"), breaking ln[3:] offsets.
+    try:
+        status_proc = subprocess.run(
+            ["git", "status", "-z", "--ignore-submodules=all"],
+            cwd=cwd,
+            capture_output=True,
+            timeout=30,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=_CREATE_NO_WINDOW,
+            startupinfo=_hidden_startupinfo(),
+        )
+        status_raw = status_proc.stdout if status_proc.returncode == 0 else ""
+    except Exception:
+        status_raw = ""
+    status_records = [r for r in status_raw.split("\x00") if r]
+    if status_records:
+        outer_dirty_lines: list[str] = []
+        for rec in status_records:
+            # Each record is "XY path" — status is chars [0:2], space at [2],
+            # path starts at [3]. -z guarantees XY both present (including
+            # leading space for unstaged).
+            path = rec[3:] if len(rec) > 3 else ""
+            inside_inner = any(
+                path == nested_rel or path.startswith(nested_rel + "/")
+                for nested_rel in embedded_snapshots
+            )
+            if not inside_inner:
+                outer_dirty_lines.append(rec)
+        if outer_dirty_lines:
+            # Restore inner snapshots before bailing.
+            for nested_rel, snap in embedded_snapshots.items():
+                _restore_inner_repo(os.path.join(cwd, nested_rel), snap)
+            result.error = "uncommitted changes — stash or commit first"
             return result
 
-    # NOTE: reflog expire + gc --aggressive removed from inline path.
-    # These are slow (5+ min on large repos) and block the hook process.
-    # Run them explicitly via /tidy git or scheduled cleanup.
+    try:
+        # Pre-rebase sync: outer WT still shows inner HEAD content for
+        # inner-tracked paths (we stashed inner to its HEAD, not to outer's
+        # HEAD). Reset outer WT for inner paths to outer HEAD so rebase's
+        # cleanliness check passes. Inner's .git is untouched; the finally
+        # block restores inner's WT from the snapshot + stash.
+        for nested_rel in embedded_snapshots:
+            _git(["checkout", "HEAD", "--", nested_rel], cwd, timeout=60)
 
-    result.items_cleaned = to_squash
-    result.details.append(f"squashed {to_squash} commits into 1 archive, kept {keep}")
-    return result
+        # Get tree at HEAD~keep
+        tree = _git(["rev-parse", f"HEAD~{keep}^{{tree}}"], cwd)
+        if not tree:
+            result.error = f"failed to parse tree at HEAD~{keep}"
+            return result
+
+        # Create orphan archive commit
+        stamp = datetime.now(_TZ).strftime("%Y%m%d")
+        msg = f"archive: squash {to_squash} commits before {stamp}"
+        archive = _git(["commit-tree", tree, "-m", msg], cwd)
+        if not archive:
+            result.error = "failed to create archive commit"
+            return result
+
+        # Rebase last `keep` commits onto archive
+        rebase = _git(["rebase", "--onto", archive, f"HEAD~{keep}"], cwd, timeout=120)
+        if rebase is None:
+            head = _git(["rev-list", "--count", "HEAD"], cwd)
+            if head and int(head) == keep + 1:
+                pass  # success
+            else:
+                result.error = "rebase failed — run 'git rebase --abort' to recover"
+                return result
+
+        # gc --auto: git-throttled maintenance. Fast no-op most calls; only
+        # repacks when gc.auto/autoPackLimit thresholds hit. Without this,
+        # squashed commits leave orphan objects/packs that never shrink —
+        # that's why .git keeps growing despite "keep 3 commits" rule.
+        # Aggressive repack + prune=now stays in /tidy git (user-triggered).
+        _git(["gc", "--auto"], cwd, timeout=60)
+
+        result.items_cleaned = to_squash
+        msg_tail = (
+            f" (protected {len(embedded_snapshots)} embedded inner repo(s))"
+            if embedded_snapshots else ""
+        )
+        result.details.append(
+            f"squashed {to_squash} commits into 1 archive, kept {keep}{msg_tail}"
+        )
+        return result
+    finally:
+        # 2.10.4 治本 (HIGH F3): if outer aborted mid-rebase the
+        # `.git/rebase-merge` / `rebase-apply` sentinel directories
+        # remain. Calling `git reset --hard <inner_HEAD>` inside the
+        # inner repo at this moment is safe for inner ITSELF (inner has
+        # no rebase in progress), but it overwrites the outer's working
+        # tree under the inner's path — and outer's index still thinks
+        # it is mid-rebase. Result: outer status shows phantom diffs
+        # against the rebase-stale index and the next session may
+        # trigger MEMORY #67's GitLens Interactive Rebase popup.
+        # Strategy: if outer is mid-rebase, skip restore and surface
+        # via stderr so the operator can finish (`git rebase --continue`)
+        # or abort (`git rebase --abort`) before any inner mutation.
+        # Stash + HEAD SHA remain intact in inner refs/stash for
+        # manual recovery.
+        outer_in_rebase = any(
+            os.path.exists(os.path.join(cwd, ".git", marker))
+            for marker in ("rebase-merge", "rebase-apply")
+        )
+        if outer_in_rebase and embedded_snapshots:
+            sys.stderr.write(
+                "concinno: outer repo left in mid-rebase state — skipping "
+                f"inner-repo restore for {len(embedded_snapshots)} embedded "
+                "inner(s). Inner HEAD + stash preserved (refs/stash). "
+                "Run `git rebase --abort` (or --continue) in outer first, "
+                "then manually `git reset --hard <inner_HEAD>` + "
+                "`git stash pop` inside each inner.\n"
+            )
+            return
+        for nested_rel, snap in embedded_snapshots.items():
+            _restore_inner_repo(os.path.join(cwd, nested_rel), snap)
 
 
+@destruction_gate(risk="R3", op_name="git_gc")
 def git_gc(
     repo_dir: str | Path = ".",
     aggressive: bool = False,
@@ -329,18 +687,20 @@ def detect_large_git_objects(
 
             for line in proc.stdout.splitlines():
                 parts = line.split()
-                if len(parts) >= 3 and parts[1] == "blob":
-                    try:
-                        size = int(parts[2])
-                        if size >= min_bytes:
-                            large.append({
-                                "hash": parts[0][:12],
-                                "size": size,
-                                "size_human": _human_size(size),
-                                "path": hash_to_path.get(parts[0], "unknown"),
-                            })
-                    except ValueError:
-                        pass
+                if len(parts) < 3 or parts[1] != "blob":
+                    continue
+                try:
+                    size = int(parts[2])
+                except ValueError:
+                    continue
+                if size < min_bytes:
+                    continue
+                large.append({
+                    "hash": parts[0][:12],
+                    "size": size,
+                    "size_human": _human_size(size),
+                    "path": hash_to_path.get(parts[0], "unknown"),
+                })
     except Exception:
         pass
 
@@ -352,6 +712,7 @@ def detect_large_git_objects(
 # Stale file cleanup
 # ---------------------------------------------------------------------------
 
+@destruction_gate(risk="R2", op_name="cleanup_stale_files")
 def cleanup_stale_files(
     base_dir: str | Path,
     patterns: list[str] | None = None,
@@ -398,6 +759,7 @@ def cleanup_stale_files(
 # Log rotation
 # ---------------------------------------------------------------------------
 
+@destruction_gate(risk="R2", op_name="rotate_log_files")
 def rotate_log_files(
     log_dir: str | Path,
     max_lines: int = 500,
@@ -460,23 +822,37 @@ def run_cleanup(
     results: list[CleanupResult] = []
     repo = Path(repo_dir)
 
-    # 1. Stale files
-    results.append(cleanup_stale_files(repo, dry_run=dry_run))
+    # /tidy orchestrator is the authorised caller for all gated cleanup
+    # ops. Raise escape flags for the duration of the orchestration so
+    # each decorator passes through without requiring an explicit
+    # reason= kwarg from the CLI user.
+    with _gate_escape(
+        "CONCINNO_STALE_CLEANUP",
+        "CONCINNO_LOG_ROTATE",
+        "CONCINNO_GIT_GC",
+        "CONCINNO_INLINE_SQUASH",
+    ):
+        # 1. Stale files
+        results.append(cleanup_stale_files(repo, dry_run=dry_run))
 
-    # 2. Log rotation
-    if log_dir:
-        results.append(rotate_log_files(log_dir))
+        # 2. Log rotation
+        if log_dir:
+            results.append(rotate_log_files(log_dir))
 
-    # 3. Dead handoffs
-    if handoff_dir:
-        results.append(archive_dead_handoffs(handoff_dir, max_handoff_age_days, dry_run))
+        # 3. Dead handoffs (no gate — archive, not delete)
+        if handoff_dir:
+            results.append(
+                archive_dead_handoffs(handoff_dir, max_handoff_age_days, dry_run)
+            )
 
-    # 4. Git gc (always safe)
-    results.append(git_gc(repo, aggressive=aggressive_gc))
+        # 4. Git gc (always safe)
+        results.append(git_gc(repo, aggressive=aggressive_gc))
 
-    # 5. Git squash (destructive, opt-in)
-    if squash_git:
-        results.append(squash_auto_commits(repo, keep=keep_commits, dry_run=dry_run))
+        # 5. Git squash (destructive, opt-in)
+        if squash_git:
+            results.append(
+                squash_auto_commits(repo, keep=keep_commits, dry_run=dry_run)
+            )
 
     return results
 

@@ -34,7 +34,7 @@ from concinno.cognitive_inject import (
     build_rag_context,
     build_thinking_directives,
 )
-from concinno.field_read import build_field_context
+from concinno.field_read import build_field_context_v2_string
 
 # ── Constants ──────────────────────────────────────────────
 
@@ -160,10 +160,10 @@ class StaticCache:
           4. ``<workspace>/.concinno/l0.md``
           5. ``<workspace>/CLAUDE.md`` (as iron-laws source)
 
-        Red team #3 — the previous author-specific defaults
-        (``projects/concinno/src/concinno/cognitive_anchor.py`` and
-        ``.claude/rules/00-L0.md``) violated CCC hard rule #1 and
-        silently left the cache empty for any non-author workspace.
+        Red team #3 — previous author-specific defaults (an in-tree
+        identity module + ``.claude/rules/00-L0.md``) violated CCC hard
+        rule #1 and silently left the cache empty for any non-author
+        workspace.
         """
         identity_path = os.environ.get("CONCINNO_IDENTITY_PATH", "")
         if not identity_path and workspace:
@@ -343,6 +343,31 @@ class PromptEngine:
             self.static.load(self.workspace)
         self._loaded = True
 
+    @staticmethod
+    def _infer_cbua_complexity(task_prompt: str) -> Optional[str]:
+        """Best-effort C0 complexity classification for FieldRead routing.
+
+        Returns one of ``"simple" | "complicated" | "complex" | "chaotic"``
+        suitable for :func:`concinno.field_read.compress_breakeven_for`,
+        or ``None`` when the cognitive router is unavailable / fails.
+
+        We import lazily so the prompt-engine module stays loadable even
+        if the cognitive subpackage is stripped down or vendored. Any
+        exception falls through to ``None`` — callers treat that as
+        "use the default global breakeven" (back-compat with v1).
+        """
+        if not task_prompt:
+            return None
+        try:
+            from concinno.cognitive.router import classify_complexity
+        except ImportError:
+            return None
+        try:
+            domain, _signals = classify_complexity(task_prompt)
+        except (TypeError, ValueError):
+            return None
+        return domain.value
+
     def build_ftrl_context(
         self,
         learnings_path: str = "",
@@ -396,8 +421,16 @@ class PromptEngine:
                 task_prompt, self.workspace,
             )
             dynamic.delivery = build_delivery_standards(task_prompt)
-            dynamic.handoff_summary = build_field_context(
-                self.workspace, task_prompt,
+            # v2 integration (4.4.0): emit `<system-context-elided/>`
+            # breadcrumb so the LLM is aware of skipped sections and can
+            # call `field_read.expand(path, section_id)` on demand.
+            # Routed through C0 complexity when available so Simple
+            # tasks elide aggressively while Chaotic tasks retain
+            # more context (per ZIQ tunable
+            # `field_read.compress_breakeven_tokens`).
+            cbua_complexity = self._infer_cbua_complexity(task_prompt)
+            dynamic.handoff_summary = build_field_context_v2_string(
+                self.workspace, task_prompt, complexity=cbua_complexity,
             )
 
         # Redteam gate: if C0 classified this as needing red team, inject reminder

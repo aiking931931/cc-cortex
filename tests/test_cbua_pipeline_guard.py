@@ -24,6 +24,7 @@ from concinno.guards.base import GuardContext
 from concinno.guards.cbua_pipeline_guard import (
     CbuaPipelineGuard,
     _is_delivery_command,
+    _is_ship_pipeline_command,
 )
 
 
@@ -171,72 +172,98 @@ class TestCounters:
         assert _state(tmp_path)["edit_count"] == 1
 
 
-# ── 3. Marker detection ───────────────────────────────────────
+# ── 3. Marker detection (2.8.0 — behavioral only) ────────────
 
 
 class TestMarkerDetection:
-    def test_b1_marker_silences_reminder(self, guard, tmp_path):
-        """Text containing '根因.*甜蜜點.*策略' marks b1_shown."""
+    """B1/C1/U1/WIREDO content regex retired 2.8.0 (MEMORY #27).
+
+    These tests now prove the **absence** of text-regex detection:
+    stuffing markers into tool args no longer flips state flags. B1
+    still silences via behavioral silent_ack; dichotomy and A5 still
+    use their Agent-tool-scoped signals.
+    """
+
+    def test_b1_text_regex_removed_does_not_flip_state(
+        self, guard, tmp_path,
+    ):
+        """Stuffing 根因/甜蜜點/策略 into payload no longer sets b1_shown."""
         _preseed_complexity(tmp_path, "complicated")
         payload = "B1 分析：根因=x → 甜蜜點=y → 策略=z"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("b1_shown") is True
+        # Text regex removed — state flag only set via behavioral ack.
+        assert _state(tmp_path).get("b1_shown") is not True
 
-    def test_c1_marker_detected(self, guard, tmp_path):
+    def test_c1_text_regex_removed(self, guard, tmp_path):
+        """我知道/我不知道/我假設 keyword stuffing no longer sets c1_shown."""
         _preseed_complexity(tmp_path, "complex")
         payload = "情報盤點：我知道 X，我不知道 Y，我假設 Z 成立"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("c1_shown") is True
+        assert _state(tmp_path).get("c1_shown") is not True
 
-    def test_u1_marker_detected(self, guard, tmp_path):
+    def test_u1_text_regex_removed(self, guard, tmp_path):
+        """反例/counter-example keyword stuffing no longer sets u1_shown."""
         _preseed_complexity(tmp_path, "complex")
         payload = "反例：當 input 為空時會炸"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("u1_shown") is True
+        assert _state(tmp_path).get("u1_shown") is not True
 
-    def test_wiredo_marker_detected(self, guard, tmp_path):
+    def test_wiredo_table_text_regex_removed(self, guard, tmp_path):
+        """WIREDO table keyword stuffing no longer sets wiredo_shown."""
         _preseed_complexity(tmp_path, "complicated")
         payload = "WIREDO 六維檢查 Wired ✓ Inherited ✓"
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": payload},
         )
-        assert _state(tmp_path).get("wiredo_shown") is True
+        # wiredo fires via delivery-verb Bash command, not content text.
+        assert _state(tmp_path).get("wiredo_shown") is not True
 
-    def test_marker_in_tool_result_is_detected(self, guard, tmp_path):
-        """Scanner must look at tool_result, not just tool_input."""
-        _preseed_complexity(tmp_path, "complex")
+    def test_tool_result_scan_still_fuels_dichotomy(self, guard, tmp_path):
+        """Scanner still reads tool_result for the surviving regexes.
+
+        B1/C1/U1 content regex was removed, but the dichotomy /
+        integrative hardening stays. This test proves
+        ``_get_scannable_text`` continues to pull ``tool_result`` into
+        the scannable surface (regression guard for the rewrite).
+        """
+        _preseed_complexity(tmp_path, "complicated")
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py"},
-            tool_result="我知道 A / 我不知道 B / 我假設 C",
+            tool_result="二選一：保留或改寫 — 沒有第三路",
         )
-        assert _state(tmp_path).get("c1_shown") is True
+        assert _state(tmp_path).get("dichotomy_seen") is True
 
-    def test_scan_text_cap_truncates_not_skips(self, guard, tmp_path):
-        """Long values are truncated to cap, not skipped entirely.
+    def test_scan_text_cap_still_truncates_without_regex(
+        self, guard, tmp_path,
+    ):
+        """Guard runs without OOM or skipping when given a huge edit.
 
-        Regression test: the permanent false-positive where a very long
-        Edit `new_string` made markers invisible — root cause was
-        `len(v) < 2000` skip. Now truncates to _SCAN_TEXT_CAP.
+        Original test proved truncation by watching a B1 marker flip.
+        With the content regex gone we instead prove the guard still
+        **runs to completion** on an oversized payload and records
+        ``edit_count`` — i.e. no silent skip or exception.
         """
         _preseed_complexity(tmp_path, "complicated")
-        prefix = "根因=x → 甜蜜點=y → 策略=z\n"
-        huge = prefix + ("# filler\n" * 2000)
+        huge = "# filler\n" * 2000
         _run(
             guard, tmp_path,
             tool_input={"file_path": "x.py", "new_string": huge},
         )
-        assert _state(tmp_path).get("b1_shown") is True
+        state = _state(tmp_path)
+        assert state.get("edit_count") == 1
+        # b1_shown stays False — no behavioral ack fired from one edit.
+        assert state.get("b1_shown") is not True
 
     def test_dichotomy_detected_chinese(self, guard, tmp_path):
         """二選一 pattern marks dichotomy_seen."""
@@ -368,24 +395,25 @@ class TestReminderGeneration:
         )
         assert reminder is None
 
-    def test_c1_only_in_complex(self):
-        # 5 edits in complicated → no C1
-        reminder = CbuaPipelineGuard._generate_reminder(
-            state={"edit_count": 5, "b1_shown": True, "c1_shown": False},
-            complexity="complicated",
-            redteam_required=False,
-        )
-        assert reminder is None
+    def test_c1_reminder_retired_2_8_0(self):
+        """C1 reminder removed — no behavioral counterpart feeds it.
 
+        MEMORY #27: scanning content for "我知道/我不知道/我假設"
+        was gameable theater. With no regex and no behavioral silent
+        ack, keeping the reminder would fire permanently on every
+        Complex+ session. Reminder retired.
+        """
+        # Complex + 5 edits + c1_shown False would previously fire.
+        # Now only B1 (behavioral) can fire at this shape.
         reminder = CbuaPipelineGuard._generate_reminder(
             state={"edit_count": 5, "b1_shown": True, "c1_shown": False},
             complexity="complex",
             redteam_required=False,
         )
-        assert reminder is not None
-        assert "C1" in reminder.context
+        assert reminder is None
 
-    def test_u1_only_in_complex(self):
+    def test_u1_reminder_retired_2_8_0(self):
+        """U1 reminder removed for the same reason as C1 (MEMORY #27)."""
         reminder = CbuaPipelineGuard._generate_reminder(
             state={
                 "edit_count": 8,
@@ -396,8 +424,7 @@ class TestReminderGeneration:
             complexity="complex",
             redteam_required=False,
         )
-        assert reminder is not None
-        assert "U1" in reminder.context
+        assert reminder is None
 
     def test_dichotomy_reminder_fires(self):
         reminder = CbuaPipelineGuard._generate_reminder(
@@ -489,13 +516,16 @@ class TestReminderGeneration:
         assert r is not None
         assert r.context.startswith("⚠")
 
-        # 3 missing → ⛔
+        # 3 missing (B1 + dichotomy + A5) → ⛔. C1/U1 retired in
+        # 2.8.0 so severity stacking uses the surviving signals.
         r = CbuaPipelineGuard._generate_reminder(
             state={
                 "edit_count": 10,
                 "b1_shown": False,
-                "c1_shown": False,
-                "u1_shown": False,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+                "wiredo_just_fired": True,
+                "redteam_dispatched": False,
             },
             complexity="complex",
             redteam_required=True,
@@ -637,6 +667,184 @@ class TestWiredoOneShot:
 # ── 9. _is_delivery_command ───────────────────────────────────
 
 
+class TestShipPipelineDetector:
+    """W3.x carryover #5 — ship-pipeline turn-shape detector.
+
+    Verifies that two or more ship-shaped Bash commands inside the
+    last 5 calls flip ``ship_pipeline_active`` and that this flag
+    suppresses the Dichotomy + B1 reminders that produced ~25
+    unactionable warnings during the W3 cc_w3_ship cycle.
+    """
+
+    @pytest.mark.parametrize(
+        "cmd,expected",
+        [
+            ("", False),
+            ("ls -la", False),
+            ("cat file.txt", False),
+            # Core delivery verbs (overlap with _is_delivery_command)
+            ("git commit -m 'x'", True),
+            ("git push origin main", True),
+            ("twine upload dist/*", True),
+            ("python -m build", True),
+            # Verification steps (broader than _is_delivery_command)
+            ("git status", True),
+            ("git log --oneline -5", True),
+            ("git diff --stat", True),
+            ("git tag -a v1.0", True),
+            ("git stash", True),
+            ("twine check dist/*", True),
+            ("pytest tests/foo.py -q", True),
+            ("ruff check src/", True),
+            ("ruff format src/", True),
+            ("mypy --strict src/foo.py", True),
+            ("python -m twine upload dist/*", True),
+            ("python -m pytest -q", True),
+            ("hatch build", True),
+            ("gh pr create --fill", True),
+            ("gh release create v1.0", True),
+            ("gh run watch", True),
+            ("npm run build", True),
+            ("npm test", True),
+            ("cargo build", True),
+            ("docker build -t x .", True),
+            ("tail -f deploy.log", True),
+            ("tail -100 build.log", True),
+            # Compound: any segment counts
+            ("pytest && git commit -m 'x'", True),
+            ("ls; git status", True),
+            # Negative: not a ship verb
+            ("python my_script.py", False),
+            ("pip install something", False),
+            ("echo hi", False),
+        ],
+    )
+    def test_ship_pipeline_pattern(self, cmd, expected):
+        assert _is_ship_pipeline_command(cmd) is expected
+
+    def test_active_after_two_ship_commands(self, guard, tmp_path):
+        """Two ship-shaped Bash calls in a row → flag flips on."""
+        _preseed_complexity(tmp_path, "complicated")
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git status"})
+        state = _state(tmp_path)
+        assert state.get("ship_pipeline_active") is False
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git commit -m 'wip'"})
+        state = _state(tmp_path)
+        assert state.get("ship_pipeline_active") is True
+
+    def test_active_resets_when_window_clears(self, guard, tmp_path):
+        """5 non-ship Bash calls evict ship-shaped ones from the window."""
+        _preseed_complexity(tmp_path, "complicated")
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git status"})
+        _run(guard, tmp_path, tool_name="Bash",
+             tool_input={"command": "git commit -m 'wip'"})
+        assert _state(tmp_path).get("ship_pipeline_active") is True
+        # Five non-ship Bash calls evict both ship commands from
+        # the 5-deep window.
+        for cmd in ("ls -la", "echo a", "echo b", "echo c", "echo d"):
+            _run(guard, tmp_path, tool_name="Bash",
+                 tool_input={"command": cmd})
+        assert _state(tmp_path).get("ship_pipeline_active") is False
+
+    def test_b1_suppressed_when_ship_active(self):
+        """B1 ``結構思考未見`` reminder must not fire mid-ship."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 3,
+                "b1_shown": False,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        # No B1 missing → no reminder at all in this minimal state.
+        assert reminder is None
+
+    def test_b1_fires_when_ship_inactive_baseline(self):
+        """Sanity check: B1 still fires when ship_pipeline_active is False
+        — the suppression must be conditional, not a permanent silence."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 3,
+                "b1_shown": False,
+                "ship_pipeline_active": False,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "B1" in reminder.context
+
+    def test_dichotomy_suppressed_when_ship_active(self):
+        """Dichotomy 框架偵測 must not fire mid-ship even when the
+        ``dichotomy_seen`` flag was set earlier (e.g. commit message
+        body contained binary-choice phrasing)."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 5,
+                "b1_shown": True,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is None
+
+    def test_dichotomy_fires_when_ship_inactive_baseline(self):
+        """Sanity: Dichotomy reminder still fires outside ship pipelines."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 5,
+                "b1_shown": True,
+                "dichotomy_seen": True,
+                "integrative_shown": False,
+                "ship_pipeline_active": False,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "Dichotomy" in reminder.context
+
+    def test_a5_redteam_still_fires_during_ship(self):
+        """A5 red-team-not-dispatched is a *safety* signal and must NOT
+        be suppressed by ship-pipeline activity. The agent could be
+        shipping the very thing that needs red-team review."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 10,
+                "b1_shown": True,
+                "redteam_dispatched": False,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=True,
+        )
+        assert reminder is not None
+        assert "A5" in reminder.context
+
+    def test_wiredo_still_fires_during_ship(self):
+        """WIREDO is a delivery reminder — ship pipeline is exactly
+        when it should fire. Suppression would defeat the purpose."""
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={
+                "edit_count": 5,
+                "b1_shown": True,
+                "wiredo_just_fired": True,
+                "ship_pipeline_active": True,
+            },
+            complexity="complicated",
+            redteam_required=False,
+        )
+        assert reminder is not None
+        assert "WIREDO" in reminder.context
+
+
 class TestIsDeliveryCommand:
     @pytest.mark.parametrize(
         "cmd,expected",
@@ -684,7 +892,141 @@ class TestSessionIsolation:
         assert _state(tmp_path, "sess-b")["edit_count"] == 1
 
 
-# ── 11. Competition Mode Bypass ───────────────────────────────
+# ── 11. RedBlueGreen U-stage wire-up (opt-in) ─────────────────
+
+
+class TestRedBlueGreenUStageWire:
+    """Verify the RBG dispatch wire-up is gated, additive, and crash-safe.
+
+    Wire-up is gated behind
+    ``cfg.feature("redblue_green_review", "wire_into_u_stage")`` and
+    only fires for >= Complicated tasks where ``redteam_required`` is
+    True. The default-OFF state must produce zero behavior change.
+    """
+
+    def test_flag_off_default_preserves_a5_text_unchanged(self):
+        """Wire-up flag default is False → A5 reminder text byte-equal to legacy."""
+        # Drive the same A5 path the legacy reminder fires on.
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={"edit_count": 10, "b1_shown": True},
+            complexity="complex",
+            redteam_required=True,
+        )
+        assert reminder is not None
+        # Default rbg_hint="" → message ends exactly at "未派出".
+        assert "A5 紅隊未派出" in reminder.context
+        assert "RBG dispatch" not in reminder.context
+        assert "RedBlueGreenDispatchGuard" not in reminder.context
+
+    def test_flag_on_simple_task_no_rbg_hint(self, monkeypatch):
+        """Simple radius escape preserved even with flag ON."""
+        monkeypatch.setattr(
+            "concinno.guards.cbua_pipeline_guard.CbuaPipelineGuard."
+            "_maybe_get_rbg_hint",
+            staticmethod(
+                lambda complexity, redteam_required: ""
+                if complexity == "simple"
+                else "WIRED_HINT",
+            ),
+        )
+        # Simple complexity — _maybe_get_rbg_hint returns "" by contract.
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("simple", True)
+        assert hint == ""
+
+    def test_flag_on_complicated_dispatches_rbg(self, monkeypatch):
+        """Flag ON + Complicated + redteam_required → hint appended."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("complicated", True)
+        assert hint != ""
+        assert "RBG dispatch" in hint
+        assert "RedBlueGreenDispatchGuard" in hint
+
+    def test_flag_on_complex_dispatches_rbg_with_5_axis(self, monkeypatch):
+        """Flag ON + Complex + redteam_required → hint mentions 5-axis."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("complex", True)
+        assert "5-axis" in hint
+        # Reminder text concatenates hint after legacy message.
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={"edit_count": 10, "b1_shown": True},
+            complexity="complex",
+            redteam_required=True,
+            rbg_hint=hint,
+        )
+        assert reminder is not None
+        assert "A5 紅隊未派出" in reminder.context
+        assert "RBG dispatch" in reminder.context
+
+    def test_rbg_import_failure_falls_back_gracefully(self, monkeypatch):
+        """If RBG guard raises on instantiation, hint becomes "" (no crash)."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        # Force RedBlueGreenDispatchGuard.__init__ to raise.
+        import concinno.guards.redblue_green_dispatch_guard as rbg_mod
+
+        def _boom(self, *_a, **_kw):
+            raise RuntimeError("synthetic failure")
+
+        monkeypatch.setattr(
+            rbg_mod.RedBlueGreenDispatchGuard, "__init__", _boom,
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint("complex", True)
+        assert hint == ""
+        # Pipeline still produces the legacy reminder (not None, not crash).
+        reminder = CbuaPipelineGuard._generate_reminder(
+            state={"edit_count": 10, "b1_shown": True},
+            complexity="complex",
+            redteam_required=True,
+            rbg_hint=hint,
+        )
+        assert reminder is not None
+        assert "A5 紅隊未派出" in reminder.context
+
+    def test_flag_on_redteam_not_required_no_hint(self, monkeypatch):
+        """Wire-up only fires when redteam_required=True (avoid noise)."""
+        from concinno.core import config as core_config
+
+        cfg = core_config.get_config()
+        monkeypatch.setattr(
+            cfg, "feature",
+            lambda name, key="enabled": (
+                True if (name == "redblue_green_review"
+                         and key == "wire_into_u_stage") else False
+            ),
+        )
+        hint = CbuaPipelineGuard._maybe_get_rbg_hint(
+            "complex", redteam_required=False,
+        )
+        assert hint == ""
+
+
+# ── 12. Competition Mode Bypass ───────────────────────────────
 
 
 class TestCompetitionMode:

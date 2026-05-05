@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "name": "aiking",
+    "description": "AI King personal workspace convention — handoff/patent/feedback layout under _AI_BRAIN/ with numeric-prefixed subdirs."
+  },
+  "naming": {
+    "patent":           "PAT-{seq:03d}_{name}_{variant}.md",
+    "handoff":          "handoff_{project}.md",
+    "handoff_summary":  "handoff_{project}_summary.md",
+    "handoff_archive":  "handoff_{project}_archive.md",
+    "feedback":         "feedback_{topic}.md",
+    "planning":         "{project}_{topic}.md",
+    "session":          "session_{date}_{topic}.md",
+    "task_pool":        "task-pool.md"
+  },
+  "placement": [
+    {"match": "^PAT-|patent",         "dir": "_AI_BRAIN/07_Patents/"},
+    {"match": "^handoff_|^交接_",     "dir": "_AI_BRAIN/06_Handoffs/{project}/"},
+    {"match": "^feedback_",           "dir": "memory/"},
+    {"match": "^session_",            "dir": "_AI_BRAIN/06_Handoffs/{project}/"},
+    {"match": "task-pool",            "dir": "_AI_BRAIN/06_Handoffs/{project}/"},
+    {"match": "^project_|^user_|^reference_", "dir": "memory/"},
+    {"match": "_plan\\.md$|_planning\\.md$",  "dir": "_AI_BRAIN/05_Planning/"}
+  ]
+}

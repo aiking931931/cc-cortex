@@ -36,6 +36,13 @@ from typing import Any, Literal, Sequence, cast
 
 from concinno.core.state_store import StateStore
 
+# Hystrix-grade rate-limit + circuit-breaker (4.4.0). Imported eagerly
+# because the import chain is stdlib-only — no extra dependency cost
+# for callers who don't opt in via the FEATURE_META gate.
+from concinno.security.circuit_breaker_guard import CircuitBreakerGuard
+from concinno.ziq_outcome_bus import Outcome
+from concinno.ziq_outcome_bus import get_bus as _get_ziq_bus
+
 # ── Public constants ────────────────────────────────────────
 
 EscalationTier = Literal["gemma", "haiku", "sonnet", "opus"]
@@ -161,6 +168,7 @@ class LLMEscalator:
         per_tier_timeout_s: float = 60.0,
         circuit_threshold: int = 5,
         circuit_cooldown_s: float = 120.0,
+        circuit_breaker_guard: CircuitBreakerGuard | None = None,
     ) -> None:
         for t in chain:
             if t not in _VALID_TIERS:
@@ -180,6 +188,63 @@ class LLMEscalator:
             t: {"calls": 0, "successes": 0, "failures": 0} for t in _VALID_TIERS
         }
 
+        # 4.4.0 — opt-in Hystrix-grade rate-limit + half-open probe
+        # gating on top of the legacy file-backed breaker. When the
+        # FEATURE_META gate ``circuit_breaker_guard.enabled`` is True
+        # (default OFF per 4.0.0 default-off-gates SEMVER baseline) and
+        # the caller did not pass an explicit guard, build one whose
+        # cooldown / failure-threshold mirror the legacy parameters so
+        # behaviour stays consistent across the two breaker layers. A
+        # caller that wants several escalators to converge on a single
+        # circuit state for the same logical resource pool can pass
+        # ``circuit_breaker_guard=shared_guard`` (where ``shared_guard``
+        # was constructed once and is shared across instances — its
+        # internal ``_BreakerStateRegistry`` is what gets shared by
+        # reference, mirroring ``CircuitBreakerGuard.share_state_with``).
+        self._cb_guard: CircuitBreakerGuard | None = circuit_breaker_guard
+        if self._cb_guard is None and self._gate_enabled():
+            # Auto-construct a guard whose cooldown / threshold come
+            # from the escalator's own constructor args so behaviour
+            # is consistent with the legacy breaker layer. We also
+            # match ``backoff_base_s`` to the configured ``cooldown_s``
+            # so the operator-supplied cooldown is honoured even on
+            # the first open (the guard's ``_open_breaker`` clamps to
+            # ``max(initial_cooldown_s, backoff_base_s)`` which would
+            # otherwise round a 0.01 s test cooldown up to the 1.0 s
+            # default backoff base).
+            self._cb_guard = CircuitBreakerGuard(
+                failure_threshold=self._circuit_threshold,
+                cooldown_s=self._circuit_cooldown_s,
+                backoff_base_s=min(
+                    self._circuit_cooldown_s, 1.0
+                ),
+                backoff_max_s=max(
+                    self._circuit_cooldown_s, 60.0
+                ),
+                # Disable the rate-limit window — the legacy breaker
+                # does not enforce one and we don't want the upgrade
+                # to introduce a new failure mode.
+                max_calls=0,
+            )
+
+    @staticmethod
+    def _gate_enabled() -> bool:
+        """Return True when FEATURE_META gates ``circuit_breaker_guard`` on.
+
+        Resolved through :class:`concinno.core.config.Config` so the
+        full 6-source chain (FEATURE_META default → cc_config.json →
+        ``~/.concinno`` overrides → env) is honoured. Failures fall
+        back to the documented OFF default — never raise — because the
+        escalator must keep working when the config plumbing is absent
+        (e.g. unit tests in a stripped environment).
+        """
+        try:
+            from concinno.core.config import get_config
+
+            return bool(get_config().feature("circuit_breaker_guard"))
+        except Exception:
+            return False
+
     # ── Circuit breaker ────────────────────────────────────
 
     def _load_breakers(self) -> dict[str, dict[str, Any]]:
@@ -190,6 +255,54 @@ class LLMEscalator:
 
     def _save_breakers(self, data: dict[str, dict[str, Any]]) -> None:
         self._store.write_flat(_NS, _BREAKER_FILE, data)
+
+    def _cb_guard_record(
+        self,
+        tier: str,
+        outcome: Literal["success", "failure", "timeout", "unknown"],
+    ) -> None:
+        """Mirror a tier outcome into the opt-in CircuitBreakerGuard.
+
+        Best-effort — never raises. Keeps the guard state machine
+        synchronised with the legacy file-backed breaker so a tier that
+        legacy-trips also Hystrix-trips and vice-versa, without callers
+        having to plumb both layers themselves.
+        """
+        if self._cb_guard is None:
+            return
+        try:
+            self._cb_guard.evaluate(
+                {
+                    "resource": f"escalation.tier.{tier}",
+                    "outcome": outcome,
+                }
+            )
+        except Exception:
+            pass
+
+    @classmethod
+    def with_shared_circuit_breaker(
+        cls,
+        guard: CircuitBreakerGuard,
+        **kwargs: Any,
+    ) -> "LLMEscalator":
+        """Build an escalator that shares ``guard`` with siblings.
+
+        Convenience factory for the cross-instance share-state pattern:
+        construct a single :class:`CircuitBreakerGuard` once, then hand
+        it to every escalator that should converge on the same per-
+        resource state. Mirrors :meth:`CircuitBreakerGuard.share_state_with`
+        — both spellings end up sharing the same ``_BreakerStateRegistry``
+        by reference.
+
+        Example::
+
+            shared = CircuitBreakerGuard(failure_threshold=3)
+            esc_a = LLMEscalator.with_shared_circuit_breaker(shared)
+            esc_b = LLMEscalator.with_shared_circuit_breaker(shared)
+            # esc_a's failures count toward esc_b's breaker state.
+        """
+        return cls(circuit_breaker_guard=guard, **kwargs)
 
     def _breaker_state(self, tier: str) -> str:
         data = self._load_breakers()
@@ -221,11 +334,42 @@ class LLMEscalator:
         else:
             fails = int(entry.get("consecutive_failures", 0)) + 1
             entry["consecutive_failures"] = fails
-            if fails >= self._circuit_threshold:
+            tripped = fails >= self._circuit_threshold
+            if tripped:
                 entry["state"] = _CB_OPEN
                 entry["opened_at"] = time.time()
             else:
                 entry["state"] = _CB_CLOSED
+            # ZIQ outcome: emit a low-reward signal when the threshold
+            # trips early ("too sensitive") and a moderate signal when
+            # we accumulate failures without tripping ("too patient").
+            # Tripping reward decays linearly toward 0 the lower the
+            # threshold; sub-threshold reward grows with consumed budget.
+            try:
+                if tripped:
+                    # Lower threshold = more aggressive trip = worse signal.
+                    # Reward in [0.0, 0.5]; threshold=20 → 0.5, threshold=2 → 0.05.
+                    reward = max(0.0, min(0.5, self._circuit_threshold / 40.0))
+                else:
+                    # Sub-threshold reward grows toward 1.0 as threshold
+                    # provides "headroom" without unnecessary trips.
+                    used_ratio = fails / max(1, self._circuit_threshold)
+                    reward = max(0.5, 1.0 - used_ratio * 0.5)
+                _get_ziq_bus().emit(
+                    Outcome(
+                        tunable="escalation.circuit_threshold",
+                        value=self._circuit_threshold,
+                        reward=reward,
+                        source="concinno.escalation.LLMEscalator",
+                        metadata={
+                            "tier": tier,
+                            "consecutive_failures": fails,
+                            "tripped": tripped,
+                        },
+                    )
+                )
+            except Exception:
+                pass
         data[tier] = entry
         self._save_breakers(data)
 
@@ -234,11 +378,33 @@ class LLMEscalator:
         entry = data.get(tier, {})
         if not isinstance(entry, dict):
             entry = {}
+        prev_failures = int(entry.get("consecutive_failures", 0))
         entry["state"] = _CB_CLOSED
         entry["consecutive_failures"] = 0
         entry["opened_at"] = 0.0
         data[tier] = entry
         self._save_breakers(data)
+        # ZIQ outcome: success after some failures = the threshold gave
+        # the tier room to recover. Reward = 1.0 if no prior failures
+        # (threshold not exercised) or scaled by recovery margin.
+        try:
+            if prev_failures > 0:
+                # Recovery — proves threshold wasn't too tight.
+                reward = 1.0
+                _get_ziq_bus().emit(
+                    Outcome(
+                        tunable="escalation.circuit_threshold",
+                        value=self._circuit_threshold,
+                        reward=reward,
+                        source="concinno.escalation.LLMEscalator",
+                        metadata={
+                            "tier": tier,
+                            "recovered_after": prev_failures,
+                        },
+                    )
+                )
+        except Exception:
+            pass
 
     # ── Public API ─────────────────────────────────────────
 
@@ -293,11 +459,32 @@ class LLMEscalator:
                 failures.append((tier, "ANTHROPIC_API_KEY not set"))
                 continue
 
-            # Check circuit breaker
+            # Check circuit breaker (legacy file-backed layer).
             cb_state = self._breaker_state(tier)
             if cb_state == _CB_OPEN:
                 failures.append((tier, "circuit_open"))
                 continue
+
+            # Check the opt-in Hystrix-grade guard (4.4.0). Pre-call
+            # probe — passes the resource without an outcome so the
+            # guard only consults state (admit / deny) and does not
+            # mutate the failure counter. We inspect ``findings``
+            # rather than ``decision`` because the operator-configured
+            # fail mode (silent / warn / warn+log / hard_deny) controls
+            # how the **rest of the platform** reacts; for the
+            # escalator's own routing we always want to fall through to
+            # the next tier on any ``circuit_open`` finding regardless
+            # of fail mode (silent should not silently waste an
+            # upstream call we already know will fail).
+            if self._cb_guard is not None:
+                resource = f"escalation.tier.{tier}"
+                cb_result = self._cb_guard.evaluate({"resource": resource})
+                if any(
+                    f.type in ("circuit_open", "rate_limit_exceeded")
+                    for f in cb_result.findings
+                ):
+                    failures.append((tier, "circuit_open_guard"))
+                    continue
 
             try:
                 result = self._call_tier(
@@ -310,6 +497,10 @@ class LLMEscalator:
                 self._run_stats[tier]["calls"] += 1
                 self._run_stats[tier]["failures"] += 1
                 self._breaker_record_failure(tier)
+                # Mirror the failure into the opt-in guard so its
+                # state machine also trips (preserves the contract
+                # that both layers see the same observation stream).
+                self._cb_guard_record(tier, "failure")
                 failed = TierResult(
                     tier=tier,
                     text="",
@@ -320,12 +511,55 @@ class LLMEscalator:
                 )
                 attempts.append(failed)
                 failures.append((tier, f"{type(exc).__name__}: {exc}"))
+                # ZIQ pilot: emit failure outcome (reward = 0.0) so the
+                # FTRL learner sees that this max_retries setting did
+                # not save the call. Best-effort — never break the
+                # escalator on bus errors.
+                try:
+                    _get_ziq_bus().emit(
+                        Outcome(
+                            tunable="escalation.max_retries_per_tier",
+                            value=self._max_retries,
+                            reward=0.0,
+                            source="concinno.escalation.LLMEscalator",
+                            metadata={
+                                "tier": tier,
+                                "error_class": type(exc).__name__,
+                            },
+                        )
+                    )
+                except Exception:
+                    pass
                 continue
 
             self._run_stats[tier]["calls"] += 1
             self._run_stats[tier]["successes"] += 1
             self._breaker_record_success(tier)
+            self._cb_guard_record(tier, "success")
             attempts.append(result)
+            # ZIQ pilot: emit success outcome. Reward decays with the
+            # number of retries actually consumed — a setting that
+            # required 0 retries scores 1.0; one that needed all
+            # configured retries scores 1/(1+max_retries). This gives
+            # FTRL a smooth signal to lower max_retries when the chain
+            # generally succeeds without retrying.
+            try:
+                denom = 1.0 + float(result.retries)
+                reward = 1.0 / denom if denom > 0.0 else 1.0
+                _get_ziq_bus().emit(
+                    Outcome(
+                        tunable="escalation.max_retries_per_tier",
+                        value=self._max_retries,
+                        reward=reward,
+                        source="concinno.escalation.LLMEscalator",
+                        metadata={
+                            "tier": tier,
+                            "retries_used": int(result.retries),
+                        },
+                    )
+                )
+            except Exception:
+                pass
             return EscalationResult(final=result, attempts=attempts, chain=chain)
 
         raise EscalationExhausted(failures)
@@ -491,16 +725,28 @@ class LLMEscalator:
                 continue
             chat.append({"role": role, "content": content})
 
+        # Mark the escalation prompt cacheable so repeat steps in a
+        # chain (Gemma→Haiku→Sonnet→Opus) re-use the prefix instead of
+        # paying full input cost each tier. Legacy strategy caches the
+        # first user turn; system block goes through a cache wrapper
+        # so the static instructions stay stable across escalations.
+        from concinno.cache.anthropic_helpers import (
+            system_with_cache,
+            with_cache_control,
+        )
+
+        cached_chat = with_cache_control(chat, strategy="legacy")
+
         t0 = _now_ms()
         kwargs: dict[str, Any] = {
             "model": model_id,
             "max_tokens": max_tokens,
-            "messages": chat,
+            "messages": cached_chat,
         }
         if not _is_opus_4_7_plus(model_id):
             kwargs["temperature"] = temperature
         if system_txt:
-            kwargs["system"] = system_txt
+            kwargs["system"] = system_with_cache(system_txt)
         resp = client.messages.create(**kwargs)
         latency = _now_ms() - t0
 

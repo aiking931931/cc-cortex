@@ -230,6 +230,18 @@ class ThinkInjectGuard(BaseGuard):
         Returns:
             GuardResult.allow with prompt as context, or None.
         """
+        # F8 (2.7.1): gate behind ux_injection. Three-layer-thinking
+        # nudges and Read-before-Edit coaching are pure UX; ship default
+        # for anonymous PyPI downloaders is off. Safety guards (destruction,
+        # butterfly, exfil, secret-scan) run on different channels and are
+        # never gated here.
+        try:
+            from concinno.cache.ux_gate import is_ux_enabled
+            if not is_ux_enabled():
+                return None
+        except Exception:
+            pass
+
         if not ctx.cache_dir:
             return None
 
@@ -246,7 +258,10 @@ class ThinkInjectGuard(BaseGuard):
             or ctx.tool_name == "Bash"
         )
         if is_write:
-            # Dedup with cognitive_anchor
+            # Historic dedup namespace was ``cognitive_anchor`` — feature
+            # removed in 4.6.0 KILL 10 cleanup wave; the read still works
+            # against an empty default so legacy state-store entries are
+            # tolerated without crashing on missing namespace.
             path = ctx.tool_input.get("file_path", "") or ""
             anchor = store.read(
                 "cognitive_anchor", "state", default={},

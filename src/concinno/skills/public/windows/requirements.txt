@@ -1,0 +1,21 @@
+# Core (required)
+pyautogui>=0.9.54
+pyperclip>=1.8
+mss>=9.0
+Pillow>=10.0
+psutil>=5.9
+httpx>=0.27
+pywin32>=306
+
+# Optional — snapshot/UIA
+uiautomation>=2.0
+
+# Optional — scrape quality
+trafilatura>=1.8
+markdownify>=0.12
+
+# Optional — toast notification
+win11toast>=0.35
+
+# Optional — virtual desktop (Win11 24H2+ may COMError)
+pyvda>=0.5

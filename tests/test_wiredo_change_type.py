@@ -10,7 +10,6 @@ from concinno.wiredo_change_type import (
     detect_from_path,
 )
 
-
 # ── detect_from_path ─────────────────────────────────────────────
 
 

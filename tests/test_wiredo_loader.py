@@ -137,10 +137,11 @@ def test_build_budget_shrinks_to_core(loader):
 
 
 def test_build_budget_keeps_dims_drops_recipes(loader):
-    # Actual sizes: core ~841t, routing ~359t, dims ~628t, all_recipes ~1150t.
-    # Budget 2000t → core+routing+dims (1828t) fits but +recipes (~2978t) doesn't.
+    # Post-2.11.0 sizes: core ~1053t (route schema added), routing ~408t,
+    # dims ~607t, all_recipes ~1150t.
+    # Budget 2200t → core+routing+dims (~2068t) fits but +recipes (~3218t) doesn't.
     # Expected: recipes dropped, dims kept.
-    p = loader.build_prompt(change_type=None, alpha_t=0.95, max_tokens=2000)
+    p = loader.build_prompt(change_type=None, alpha_t=0.95, max_tokens=2200)
     assert "W (Wired)" in p  # dims kept
     assert "frontend (web UI / React / HTML)" not in p  # recipes dropped
 

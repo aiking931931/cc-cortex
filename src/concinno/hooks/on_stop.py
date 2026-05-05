@@ -185,25 +185,14 @@ def _build_stop_guard(hook_data: dict) -> Callable[[], str | None]:
 
 def _build_auto_delivery(hook_data: dict) -> Callable[[], str | None]:
     def _run() -> str | None:
+        from concinno.core.config import get_config
         from concinno.delivery import auto_delivery_gate
+        # ``/hook delivery_gate off`` skips the WIREDO auto-checker
+        # so teams that don't want delivery nagging can opt out.
+        if not get_config().feature("delivery_gate", "enabled"):
+            return None
         sid = hook_data.get("session_id", "")
         return auto_delivery_gate(session_id=sid)
-    return _run
-
-
-def _build_excuse_scanner(hook_data: dict) -> Callable[[], str | None]:
-    """Scan conversation for unresolved 'not my fault' excuses — block stop."""
-    def _run() -> str | None:
-        from concinno.excuse_scanner import on_stop as excuse_stop
-        return excuse_stop(hook_data)
-    return _run
-
-
-def _build_sedimentation_gate(hook_data: dict) -> Callable[[], str | None]:
-    """CBUA Law #5: block stop when corrections exist but not sedimented."""
-    def _run() -> str | None:
-        from concinno.sedimentation_gate import on_stop as sed_stop
-        return sed_stop(hook_data)
     return _run
 
 
@@ -283,28 +272,63 @@ def _build_notify(hook_data: dict) -> Callable[[], None]:
     return _run
 
 
+def _build_token_audit(hook_data: dict) -> Callable[[], None]:
+    """Flush per-session token audit jsonl on Stop.
+
+    Default-OFF per 4.0.0 opt-in. Honours
+    ``token_audit_autopilot.enabled``. Best-effort — disk failures /
+    feature off both no-op silently.
+    """
+    def _run() -> None:
+        try:
+            from concinno.core.config import get_config
+            from concinno.observability.token_audit.audit import get_audit
+
+            cfg = get_config()
+            if not cfg.feature("token_audit_autopilot", "enabled"):
+                return
+            sid = hook_data.get("session_id", "")
+            audit = get_audit(session_id=sid or None)
+            audit.end_session()
+        except Exception:
+            return
+    return _run
+
+
+def _build_sweep_guard(hook_data: dict) -> Callable[[], str | None]:
+    """Warn (or block) when .git residual state is present at stop.
+
+    Residuals = interrupted git operations (rebase/merge/cherry-pick/
+    revert/bisect) left unfinished. Silent inheritance by the next
+    session is the typical bleed path. WARN by default; upgradable to
+    BLOCK via ``feature_config.sweep_guard.block = true``.
+    """
+    def _run() -> str | None:
+        from concinno.sweep_guard import on_stop as sweep_stop
+        return sweep_stop(hook_data)
+    return _run
+
+
 # ── Main Entry Point ────────────────────────────────────────
 
 
 _BLOCK_PREFIXES = {
     "stop_guard": "STOP_BLOCK:",
-    "excuse_scanner": "EXCUSE_BLOCK:",
     "wiredo_block": "WIREDO_BLOCK:",
-    "sedimentation_gate": "SEDIMENTATION_BLOCK:",
     "handoff_claim": "HANDOFF_CLAIM_BLOCK:",
     "handoff_required": "HANDOFF_REQUIRED_BLOCK:",
+    "sweep_guard": "SWEEP_BLOCK:",
 }
 
 _BLOCK_REASONS = {
     "STOP_BLOCK": lambda reason: reason,
-    "EXCUSE_BLOCK": lambda reason: reason,
-    "SEDIMENTATION_BLOCK": lambda reason: reason,
     "WIREDO_BLOCK": lambda dims: (
         f"WIREDO verification failed: {dims}. "
         f"Fix failed dimensions before stopping."
     ),
     "HANDOFF_CLAIM_BLOCK": lambda reason: reason,
     "HANDOFF_REQUIRED_BLOCK": lambda reason: reason,
+    "SWEEP_BLOCK": lambda reason: reason,
 }
 
 
@@ -339,7 +363,18 @@ def _emit_stderr_outputs(modules: list[_StopModule]) -> None:
         # Skip block results (already handled by _check_block_decisions)
         if any(result_str.startswith(p) for p in _BLOCK_PREFIXES.values()):
             continue
-        if mod.name in ("stop_guard", "auto_delivery"):
+        # Whitelist modules whose result is a user-facing status/warning.
+        # auto_commit + its inline-squash log go here so silent git failures
+        # (dirty tree, stale rebase-merge, lock contention, squash aborts)
+        # actually surface — previously they went to /dev/null via
+        # asyncio.to_thread, making "keep 3 commits" rule a no-op for months.
+        if mod.name in (
+            "stop_guard",
+            "auto_delivery",
+            "auto_commit",
+            "inline_squash",
+            "sweep_guard",
+        ):
             print(result_str, file=sys.stderr)
 
 
@@ -375,7 +410,7 @@ def main(hook_data: dict | None = None) -> None:
             _StopModule("multi_instance", _build_multi_instance(), timeout_s=5.0),
             _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
             _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
-            _StopModule("notify", _build_notify(hook_data), timeout_s=5.0),
+            _StopModule("notify", _build_notify(hook_data), timeout_s=15.0),
         ]
         try:
             asyncio.run(_run_pipeline(cleanup_only))
@@ -389,15 +424,15 @@ def main(hook_data: dict | None = None) -> None:
         _StopModule("multi_instance", _build_multi_instance(), timeout_s=5.0),
         _StopModule("stop_guard", _build_stop_guard(hook_data), timeout_s=5.0),
         _StopModule("auto_delivery", _build_auto_delivery(hook_data), timeout_s=10.0),
-        _StopModule("excuse_scanner", _build_excuse_scanner(hook_data), timeout_s=5.0),
-        _StopModule("sedimentation_gate", _build_sedimentation_gate(hook_data), timeout_s=5.0),
         _StopModule("wiredo_block", _build_wiredo_block(hook_data), timeout_s=15.0),
         _StopModule("handoff_claim", _build_handoff_claim(hook_data), timeout_s=5.0),
         _StopModule("handoff_required", _build_handoff_required(hook_data), timeout_s=5.0),
+        _StopModule("sweep_guard", _build_sweep_guard(hook_data), timeout_s=5.0),
         _StopModule("mcp_cleanup", _build_mcp_cleanup(), timeout_s=10.0),
         _StopModule("orphan_scan", _build_orphan_scan(hook_data), timeout_s=15.0),
+        _StopModule("token_audit", _build_token_audit(hook_data), timeout_s=5.0),
         _StopModule("session_summary", _build_session_summary(hook_data), timeout_s=5.0),
-        _StopModule("notify", _build_notify(hook_data), timeout_s=5.0),
+        _StopModule("notify", _build_notify(hook_data), timeout_s=15.0),
     ]
 
     try:
@@ -408,6 +443,51 @@ def main(hook_data: dict | None = None) -> None:
 
     _check_block_decisions(modules)
     _emit_stderr_outputs(modules)
+
+    # --- Optional: concinno-skills-memory lifecycle (0.2.0+) ---
+    # Two-step: ``on_stop`` evaluates pending candidate snippets (default
+    # defer = no auto-write), then ``on_session_end`` prunes stale rows
+    # past the 90-day retention window. CC has no native ``SessionEnd``
+    # hook event, so the prune step rides Stop with the standard
+    # try/except wrapper. Either side raising ImportError or any runtime
+    # error is silently swallowed so a hook subscriber bug cannot crash
+    # the host pipeline.
+    _memory_lifecycle_stop(hook_data)
+    _memory_lifecycle_session_end(hook_data)
+
+
+def _memory_lifecycle_stop(hook_data: dict) -> None:
+    """Optional concinno-skills-memory wiring; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
+            on_stop as _memory_on_stop,
+        )
+
+        _memory_on_stop(
+            _MemoryCtx(session_id=hook_data.get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
+
+
+def _memory_lifecycle_session_end(hook_data: dict) -> None:
+    """Optional concinno-skills-memory retention prune; absence is silent."""
+    try:
+        from concinno_skills_memory.lifecycle import (
+            LifecycleContext as _MemoryCtx,
+        )
+        from concinno_skills_memory.lifecycle import (
+            on_session_end as _memory_on_session_end,
+        )
+
+        _memory_on_session_end(
+            _MemoryCtx(session_id=hook_data.get("session_id", ""))
+        )
+    except (ImportError, Exception):
+        pass
 
 
 def _fallback_sequential(hook_data: dict) -> None:
@@ -539,10 +619,22 @@ def _orphan_scan(hook_data: dict) -> None:
 
 
 def _session_summary(hook_data: dict) -> None:
-    """Output visual session summary to stderr (user-visible). <10ms."""
+    """Output visual session summary to stderr (user-visible). <10ms.
+
+    Respects ``/hook session_summary off`` — users who find the
+    end-of-session recap noisy can silence it without touching hook
+    registration.
+    """
     session_id = hook_data.get("session_id", "")
     if not session_id:
         return
+
+    try:
+        from concinno.core.config import get_config
+        if not get_config().feature("session_summary", "enabled"):
+            return
+    except Exception:  # noqa: BLE001 — fail-open
+        pass
 
     streak = 0
     try:
@@ -607,7 +699,24 @@ def _resolve_session_info(
 
 
 def _notify_stop(hook_data: dict) -> None:
-    """Show toast: session name + task + git status, locale-aware."""
+    """Show toast: session name + task + git status, locale-aware.
+
+    Toast-first pipeline (2.14.0 fix): the 2-line core (session + task +
+    response_ready) fires immediately in a daemon thread so the banner
+    always appears within ~100ms regardless of how long git_assist takes.
+    Once auto_commit + generate_report finish, a second toast with the
+    same tag+group *replaces* the first with the full 5-line spec.
+
+    Before this split, git operations (auto_commit on a large working
+    tree, generate_report on a stale index) routinely pushed the entire
+    notify module past its 5s async timeout, tripping the circuit breaker
+    after 3 consecutive failures — the user-visible symptom was "hook
+    fires but no banner appears" even though the toast code itself was
+    fine. See MEMORY #70 (feedback_toast_3opus_triangulation) +
+    feedback_toast_module_timeout.md.
+    """
+    import threading
+
     from concinno.core.notify import _get_locale, _t, show_toast
 
     locale = _get_locale()
@@ -617,27 +726,52 @@ def _notify_stop(hook_data: dict) -> None:
     line1, task = _resolve_session_info(session_id, project_dir)
     line2 = f"{task[:40]} — {_t('response_ready')}" if task else _t("response_ready")
 
-    git_line = ""
-    try:
-        from concinno.git_assist import auto_commit, generate_report
-        committed = auto_commit(cwd=project_dir or None)
-        if committed:
-            git_line = f"✅ {committed}"
-        else:
+    def _fire(body: str) -> None:
+        try:
+            show_toast(
+                "Claude Code", body,
+                enabled=True, tag="claude-stop", group="claude-code",
+            )
+        except Exception:
+            pass
+
+    def _git_then_full_toast() -> None:
+        """Compute git info then fire the 5-line replacement toast.
+
+        Runs off the pipeline's critical path so ``auto_commit`` /
+        ``generate_report`` delays never trip the notify module's async
+        timeout. Same tag+group as the core toast → Windows replaces the
+        earlier 2-line banner with this full version.
+        """
+        git_lines: list[str] = []
+        try:
+            from concinno.git_assist import auto_commit, generate_report
+            committed = auto_commit(cwd=project_dir or None)
+            if committed:
+                git_lines.append(f"✅ {committed}")
             report = generate_report(cwd=project_dir or None, locale=locale)
             if report:
-                git_line = "\n".join(report.splitlines()[:2])
-    except Exception:
-        pass
+                git_lines.extend(report.splitlines()[:2])
+        except Exception:
+            return
+        if git_lines:
+            full_body = f"{line1}\n{line2}\n" + "\n".join(git_lines)
+            _fire(full_body)
 
-    body = f"{line1}\n{line2}"
-    if git_line:
-        body += f"\n{git_line}"
+    # Fire the core 2-line toast immediately — user sees it within ~100ms.
+    core_body = f"{line1}\n{line2}"
+    threading.Thread(
+        target=_fire, args=(core_body,),
+        name="concinno-stop-toast-core", daemon=True,
+    ).start()
 
-    show_toast(
-        "Claude Code", body,
-        enabled=True, tag="claude-stop", group="claude-code",
-    )
+    # Off-load git_assist (slow, can exceed any module timeout in a
+    # rebase-stuck state) onto a second daemon thread. _notify_stop
+    # itself returns in <200 ms so the notify module never times out.
+    threading.Thread(
+        target=_git_then_full_toast,
+        name="concinno-stop-toast-git", daemon=True,
+    ).start()
 
 
 def _find_claude_cli_pid(proc_map: dict[int, dict]) -> int:

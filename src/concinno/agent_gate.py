@@ -352,6 +352,7 @@ class AgentGateGuard(BaseGuard):
     """Execution agent spawn cap with research/execution classification."""
 
     name = "agent_gate"
+    feature_name = "agent_cap"
     category = GuardCategory.QUALITY
     step_back_reason = "agent spawn limit exceeded"
 

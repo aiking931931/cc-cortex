@@ -29,14 +29,21 @@ import time
 from typing import Optional
 
 from concinno.constants import make_deny
+from concinno.hooks.relay_helpers import with_feature_prefix
 
 # ── Step-Back Prompt Templates ─────────────────────────────────
+#
+# Templates carry a ``{verbatim}`` placeholder filled at format time
+# by :func:`with_feature_prefix` so the relay layer can self-brand
+# the visible message with ``[Concinno: <gate>]`` (or strip it
+# under verbose / silent / off modes). The non-visible body above
+# the blank line is internal LLM guidance and stays unbranded.
 
 _STEP_BACK_TEMPLATE = (
     "⚠ [{gate}] {reason}\n"
     "Stop. Change direction and retry. Next identical trigger will hard-deny.\n"
     "\n"
-    "[SHOW USER VERBATIM] ⚠ {gate}: {reason} — paused, changing approach"
+    "{verbatim}"
 )
 
 _HARD_DENY_TEMPLATE = (
@@ -47,7 +54,7 @@ _HARD_DENY_TEMPLATE = (
     "💡 Two consecutive failures detected — run /compact or /clear to reset context.\n"
     "Polluted context causes cascading failures. Fresh start almost always works better.\n"
     "\n"
-    "[SHOW USER VERBATIM] ⛔ Blocked: {reason} — awaiting your direction"
+    "{verbatim}"
 )
 
 _HARD_DENY_IMMEDIATE_TEMPLATE = (
@@ -56,8 +63,46 @@ _HARD_DENY_IMMEDIATE_TEMPLATE = (
     "Reason: {reason}\n"
     "Execution stopped. Change direction, switch tools, or ask for next step.\n"
     "\n"
-    "[SHOW USER VERBATIM] ⛔ Blocked: {reason} — awaiting your direction"
+    "{verbatim}"
 )
+
+
+def _render_step_back(gate: str, reason: str, session_id: str = "") -> str:
+    """Render the visible step-back relay line through the brand layer.
+
+    Step-back / hard-deny renders are *gate fires*, not habituated
+    noise: every fire is a real direction-change event. We therefore
+    bypass 軌 B 件 1 dedup (which would silently swallow the second
+    fire and break the two-tier behaviour) but still feed the FTRL
+    learner via :func:`record_emit` so the learner sees gate-fire
+    patterns alongside hook warnings.
+    """
+    msg = f"⚠ {gate}: {reason} — paused, changing approach"
+    out = with_feature_prefix(gate, msg)
+    _record_gate_emit(gate, session_id)
+    return out
+
+
+def _render_hard_deny(gate: str, reason: str, session_id: str = "") -> str:
+    """Render the visible hard-deny relay line through the brand layer.
+
+    Same rationale as :func:`_render_step_back` — gate fires bypass
+    軌 B 件 1 dedup but still emit to the FTRL ignore-rate learner.
+    """
+    msg = f"⛔ Blocked: {reason} — awaiting your direction"
+    out = with_feature_prefix(gate, msg)
+    _record_gate_emit(gate, session_id)
+    return out
+
+
+def _record_gate_emit(gate: str, session_id: str) -> None:
+    """Best-effort FTRL pending-verdict registration for a gate fire."""
+    try:
+        from concinno.ziq_hook_ignore_rate import record_emit
+
+        record_emit(gate, session_id=session_id)
+    except Exception:
+        pass
 
 # Valid modes
 MODES = ("step_back_first", "hard_deny", "off")
@@ -186,6 +231,7 @@ def wrap_gate(
     if mode == "hard_deny":
         ctx = _HARD_DENY_IMMEDIATE_TEMPLATE.format(
             gate=gate_name, reason=msg,
+            verbatim=_render_hard_deny(gate_name, msg, session_id),
         )
         _emit_hard_deny_stderr(gate_name, msg)
         original_reason = deny_result.get("reason", gate_name)
@@ -205,6 +251,7 @@ def wrap_gate(
         # Second consecutive same-gate trigger → hard deny
         deny_ctx = _HARD_DENY_TEMPLATE.format(
             gate=gate_name, reason=msg,
+            verbatim=_render_hard_deny(gate_name, msg, session_id),
         )
         _emit_hard_deny_stderr(gate_name, msg)
         # Clear same-gate state after deny (reset for next cycle)
@@ -232,6 +279,12 @@ def wrap_gate(
 
     # Global 2+ failures across any gates → add compact suggestion
     if global_count >= 2:
+        compact_visible = with_feature_prefix(
+            gate_name,
+            f"⚠ {gate_name}: {msg} "
+            f"— {global_count} consecutive failures, consider /compact",
+        )
+        _record_gate_emit(gate_name, session_id)
         compact_ctx = (
             f"⚠ [{gate_name}] {msg}\n"
             "Stop. Change direction and retry.\n"
@@ -241,8 +294,7 @@ def wrap_gate(
             "Polluted context causes cascading failures. "
             "Fresh start almost always works better.\n"
             "\n"
-            f"[SHOW USER VERBATIM] ⚠ {gate_name}: {msg} "
-            f"— {global_count} consecutive failures, consider /compact"
+            f"{compact_visible}"
         )
         _emit_step_back_stderr(gate_name, msg)
         original_reason = deny_result.get("reason", gate_name)
@@ -253,6 +305,7 @@ def wrap_gate(
 
     step_ctx = _STEP_BACK_TEMPLATE.format(
         gate=gate_name, reason=msg,
+        verbatim=_render_step_back(gate_name, msg, session_id),
     )
     _emit_step_back_stderr(gate_name, msg)
     original_reason = deny_result.get("reason", gate_name)

@@ -52,14 +52,11 @@ def patched_meta(monkeypatch):
         "prompt_guard": {"category": "quality"},
         "sentinel_gate": {"category": "quality"},
         "code_guard": {"category": "quality"},
-        "cognitive_anchor": {"category": "cognitive"},
         "consecutive_fail_gate": {"category": "cognitive"},
         "clarity_gate": {"category": "cognitive"},
         "hijack_gate": {"category": "cognitive"},
         "delivery_gate": {"category": "delivery"},
         "ui_verify": {"category": "delivery"},
-        "proposal_guard": {"category": "delivery"},
-        "whitepaper_guard": {"category": "delivery"},
         "design_theory": {"category": "delivery"},
         "insight_engine": {"category": "delivery"},
         # explicit policies
@@ -102,7 +99,7 @@ def test_simple_tier_minimal_features(patched_meta):
     assert "read_first_gate" in decision.enabled_features
     # Higher tiers OFF
     assert "structural_guard" in decision.disabled_features
-    assert "cognitive_anchor" in decision.disabled_features
+    assert "consecutive_fail_gate" in decision.disabled_features
     assert "delivery_gate" in decision.disabled_features
 
 
@@ -118,14 +115,14 @@ def test_complicated_tier_adds_quality(patched_meta):
     assert "prompt_guard" in decision.enabled_features
     assert "code_guard" in decision.enabled_features
     # cognitive layer still off
-    assert "cognitive_anchor" in decision.disabled_features
+    assert "consecutive_fail_gate" in decision.disabled_features
 
 
 def test_complex_tier_adds_arbiter(patched_meta):
     """0.55 ≤ alpha_t < 0.90 → simple + quality + cognitive layer.
 
-    The historical 'arbiter' feature maps to cognitive_anchor +
-    consecutive_fail_gate in the in-tree FEATURE_META.
+    The historical 'arbiter' feature maps to consecutive_fail_gate
+    in the in-tree FEATURE_META (post-4.6.0 cognitive_anchor removal).
     """
     ziq = _mk_ziq(breadth=3)  # alpha_t ≈ 0.70
     router = ZIQFeatureRouter(ziq, _mk_config())
@@ -133,7 +130,6 @@ def test_complex_tier_adds_arbiter(patched_meta):
 
     assert decision.tier == "complex"
     assert ALPHA_COMPLICATED_MAX <= decision.alpha_t < ALPHA_COMPLEX_MAX
-    assert "cognitive_anchor" in decision.enabled_features
     assert "consecutive_fail_gate" in decision.enabled_features
     assert "structural_guard" in decision.enabled_features  # inherited
     # delivery layer still off
@@ -158,7 +154,7 @@ def test_chaotic_tier_all_on(patched_meta):
 
 
 def test_ctx_forces_field_read(patched_meta):
-    """ctx_tokens > 80% of yellow zone → forces cognitive_anchor on."""
+    """ctx_tokens > 80% of yellow zone → forces CTX_FORCED_FEATURE on."""
     ziq = _mk_ziq(breadth=1)  # would normally be simple → cognitive off
     router = ZIQFeatureRouter(
         ziq, _mk_config(), yellow_zone_tokens=200_000,

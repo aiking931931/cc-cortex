@@ -2,20 +2,27 @@
 
 > *Previously known as CC Cortex (CCC)*
 
-**The Cognitive Layer for Claude Code**
+**A hook-based governance toolkit compatible with Anthropic's Claude Code CLI**
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-red.svg)](LICENSE)
+[![Commercial License Available](https://img.shields.io/badge/Commercial_License-Available-green.svg)](COMMERCIAL_LICENSE.md)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#zero-dependency-philosophy)
-[![Tests: 3430](https://img.shields.io/badge/tests-3430-brightgreen.svg)](#architecture)
-[![Guards: 55+](https://img.shields.io/badge/guards-55%2B-orange.svg)](#guard-pipeline--eslint-for-ai-behavior)
 [![PyPI](https://img.shields.io/pypi/v/concinno.svg)](https://pypi.org/project/concinno/)
-[![A2A](https://img.shields.io/badge/A2A-v1.0-blue.svg)](#why-concinno)
-[![Skills: 66](https://img.shields.io/badge/skills-66-blueviolet.svg)](#modules)
-[![Agents: 36](https://img.shields.io/badge/agents-36-blue.svg)](#modules)
-[![NIST AI RMF](https://img.shields.io/badge/NIST_AI_RMF-aligned-blue.svg)](#enterprise-governance)
+[![Tests](https://github.com/aiking931931/concinno/actions/workflows/ci.yml/badge.svg)](https://github.com/aiking931931/concinno/actions/workflows/ci.yml)
 
-> **concinno** is a modular hook toolkit for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). It gives your AI coding assistant safety guardrails, memory, multi-instance coordination, and autonomous self-improvement — all through a zero-dependency, drop-in Python package.
+**Disclosure**: see [DISCLOSURE.md](DISCLOSURE.md) for the 2.21–2.23
+GAIA artifact cleanup notice.
+
+> **concinno** is a modular hook toolkit that plugs into
+> [Anthropic's Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
+> It adds opt-in dev-time scaffolding — guardrails against destructive
+> commands, session memory, multi-instance coordination, and structured
+> handoffs — through a drop-in Python package.
+>
+> Concinno is a complementary add-on, **not** a replacement for Claude Code
+> or Anthropic's managed safety features. It interoperates with the
+> official hook contract documented at
+> <https://docs.anthropic.com/en/docs/claude-code/hooks>.
 
 ---
 
@@ -252,6 +259,66 @@ Concinno ships ~40 modules organized into 5 layers:
 
 ---
 
+
+
+## Feature Switches
+
+<!-- BEGIN: feature-index -->
+<!-- Auto-generated from FEATURE_META. Run `concinno features sync-readme` to refresh. -->
+
+| Feature | Category | Effect scope | ZIQ-tunable | Description |
+|---------|----------|--------------|-------------|-------------|
+| `intent_anchor` | behavioral | immediate |  | CBUA Stage 0 / B4 anchoring: re-inject the user's original intent every N write-tools to prevent scope drift, redteam tangents, and direction-loss in long sessions. |
+| `insight_engine` | cognitive | immediate |  | Proactive knowledge injection when user prompt matches blind-spot rules |
+| `binary_extractor` | context | immediate |  | Inline-extract xlsx/csv/tsv attachments into the prompt (bypasses weak-model tool-use discipline) |
+| `cognitive_anchor` | context | session_restart | ✓ | Inject solid-state language red-team prompts before high-risk operations (architecture edits, large deletions, new modules, deploys) |
+| `gaia_music_image_upscale` | context | immediate |  | Pre-inference 4× LANCZOS upscale gate for music notation image questions. Small (<800px) staff-notation images are upscaled before being fed to the local vision encoder, which underperforms on sub-pixel notehead detail at native resolution. Pure preprocess — no prompt injection. Renamed from legacy `bassclef_wordreverse` (2026-04-26) to remove task-specific naming; back-compat alias preserved one minor version. |
+| `gaia_music_procedure_anchor` | context | immediate |  | L1 domain-typed anchor: inject music-notation procedure (clef line/space mnemonics + common time-units) for any question referencing musical staff / clef / noteheads. Generic textbook knowledge, no GAIA answer paths. |
+| `gaia_polygon_area_procedure_anchor` | context | immediate |  | L1 domain-typed anchor: inject orthogonal-polygon area procedure (label-vs-decoration / boundary walk / closure check / decompose / sum / sanity check) for area-of-polygon questions. Generic geometry, no GAIA answer paths. |
+| `gaia_polygon_image_upscale` | context | immediate |  | Pre-inference 4× LANCZOS upscale gate for orthogonal-polygon image questions. Small (<800px) polygon-with-labels images are upscaled before being fed to the local vision encoder, which loses small numeric labels at native resolution. Pure preprocess — no prompt injection. Renamed from legacy `polygon_counting_hint` (2026-04-26) to remove task-specific naming; back-compat alias preserved one minor version. |
+| `gaia_tool_router` | context | immediate |  | Route GAIA questions by the Annotator-Metadata Tools field (ground-truth tool list) instead of self-regex heuristic |
+| `gaia_web_only_procedure_anchor` | context | immediate |  | L1 domain-typed anchor: inject web-research procedure (call web_search / multi-hop strategy / Wayback fallback) for questions with no attachment + temporal/named-entity cues. Generic research strategy, no GAIA answer paths. |
+| `gemma4_vision` | context | immediate |  | Enable Gemma 4 native vision handler (Gemma4VisionChatHandler) in place of Qwen2.5-VL fallback |
+| `image_upscale_4x` | context | immediate |  | Auto 4× LANCZOS upscale for small (<800 px) images before vision inference — music notation / compact tables benefit |
+| `language_enforce` | context | session_restart |  | Inject language enforcement on every tool call — forces thinking + responses in configured language |
+| `ocr_fallback` | context | immediate |  | Route text-heavy images through OCR + text-LLM reasoning (charts / headstones / documents) before vision |
+| `pipeline_mode` | context | immediate |  | Toggle between Dynamic (Guard Pipeline + learning loop) and Static (pure prompt pipeline, no guards) mode. Dynamic is a strict superset of Static |
+| `session_switches` | context | session_restart |  | SessionStart summary of non-default switches — ensures the agent reads user opt-outs before primacy-bias kicks in |
+| `unified_inprocess` | context | immediate |  | Use a single in-process Llama instance for both text and vision (KV cache shared, no HTTP :9000 hop) |
+| `plugins_enabled` | core | immediate |  | Master switch for entry-points plugin discovery (concinno.features + concinno.skills). Off = ignore all installed concinno-skills-* packages. Off via env CONCINNO_PLUGINS_ENABLED=0 or allowlist restrictions via CONCINNO_PLUGINS_ALLOWLIST=pkg-a,pkg-b. Same trust model as pytest/flask/mkdocs plugins -- pip install is the trust boundary. |
+| `agent_cap` | hard_gate | immediate | ✓ | Block execution-type Agent spawn after N times per session. Research agents (Explore/Plan/read-only) are uncapped. |
+| `bash_background_gate` | hard_gate | immediate |  | Block long-running Bash commands without run_in_background |
+| `boundary_guard` | hard_gate | immediate |  | Hook/library boundary violation detection (PreToolUse DENY) |
+| `butterfly_guard` | hard_gate | immediate | ✓ | Butterfly Effect: discover issue → must fix before continuing. Tracks issues in a session-scoped ledger, denies non-fix operations |
+| `clarity_gate` | hard_gate | immediate | ✓ | Block ambiguous prompts combined with irreversible operations |
+| `consecutive_fail_gate` | hard_gate | immediate | ✓ | Block after N consecutive tool failures (stuck detection) |
+| `delivery_gate` | hard_gate | immediate | ✓ | Enterprise delivery verification — block submission of unverified work |
+| `handoff_required_guard` | hard_gate | immediate |  | Block session stop when work was done but no handoff file updated |
+| `hijack_gate` | hard_gate | immediate | ✓ | TADS four-level circuit breaker based on hijack_score (L0→L2→L3→L4) |
+| `identity_guard` | hard_gate | immediate |  | Block Agent from modifying identity configs (CLAUDE.md, .claude/rules/, settings.json, hook configs) |
+| `prompt_guard` | hard_gate | session_restart | ✓ | Clarity gate + multi-question detection for UserPromptSubmit |
+| `proposal_guard` | hard_gate | immediate |  | Block new proposals in planning files without side-effect analysis |
+| `publish_scan` | hard_gate | immediate |  | Pre-publish artifact scan for secrets, keys, and personal paths |
+| `python_c_gate` | hard_gate | immediate |  | Block complex python -c one-liners (>5 lines) |
+| `read_first_gate` | hard_gate | immediate |  | Block Edit/Write on existing files not yet Read this session |
+| `sentinel_gate` | hard_gate | immediate | ✓ | Block repeated Edit on same file N+ times (with lint exception) |
+| `token_gate` | hard_gate | immediate | ✓ | Block Agent spawn when context tokens exceed threshold |
+| `ui_verify` | hard_gate | immediate |  | Lock after deploy with UI changes until screenshot verification |
+| `whitepaper_guard` | hard_gate | immediate |  | Block whitepaper IP keywords from leaking to external paths |
+| `code_guard` | hard_quality | immediate |  | Python(ruff) / Rust(cargo) / Go(vet) static analysis |
+| `design_theory` | hard_quality | immediate | ✓ | Enforce design principles: Vertical Slice traceability on planning files, Deep Module ratio check on code files |
+| `handoff_format` | hard_quality | immediate |  | Validate handoff file structure on write |
+| `linting` | hard_quality | immediate |  | ESLint for JavaScript files |
+| `structural_guard` | hard_quality | immediate | ✓ | Structural analysis (func length / nesting / TODO debt / file size) |
+| `typescript` | hard_quality | immediate |  | tsc --noEmit type checking with SHA256 cache |
+| `memory_relief` | optional_optimization | immediate |  | Windows-only RAM cleanup with before/after stats and per-process trim list. SAFE tier needs no admin; STANDBY/AGGRESSIVE/DESTRUCTIVE require elevated token. Auto-fires as wave 4 of process_guard chain when wave 3 leaves RAM above threshold. |
+| `configure_permissions` | utility | immediate |  | One-shot allowlist bootstrap — add ~100 safe Bash patterns (pytest/ruff/git/pip) to ~/.claude/settings.json so the agent stops being prompted for routine ops |
+| `deny_marker` | ux | session_restart |  | Red ANSI counter on every deny (✖ 阻擋 #N) |
+| `session_summary` | ux | session_restart |  | Visual session end summary (token/streak/files box) |
+| `streak_ux` | ux | session_restart |  | Clean edit streak celebrations (🔥x5, ✅ fixed, etc.) |
+| `token_display` | ux | session_restart |  | Append real token usage to CRITICAL/MILESTONE UX messages |
+
+<!-- END: feature-index -->
 ## CLI
 
 ### `concinno status`
@@ -314,22 +381,49 @@ Concinno uses a single `cc_config.json` file:
 
 See [examples/cc_config_example.jsonc](examples/cc_config_example.jsonc) for a fully annotated configuration.
 
+### Upgrade Safety (2.16.0+)
+
+**Guarantee**: `pip install --upgrade concinno` never resets user-set values
+in `~/.concinno/*.json` or `~/.claude/*.json`. Your opt-outs survive.
+
+How it works:
+
+- User-tunable values live in `~/.concinno/<feature>.json` — the package
+  install process touches `site-packages/` only, never your home directory.
+- When a new Concinno version ships with different defaults for an existing
+  key (e.g. `release_auth.disabled=False` → user still sees their set
+  `True`), `concinno.config_preservation.preserve_user_values` merges the
+  two dicts with **user scalar always wins**. New keys from the upgrade
+  are added; existing keys keep their user values.
+- `safe_write_config` is atomic (temp-file + `os.replace`) with rotating
+  backups (`.bak.1` / `.bak.2` / `.bak.3`).
+- Corrupted JSON files are **never** silently overwritten — the package
+  emits a stderr warning and falls back to in-memory defaults, leaving
+  the user's file untouched.
+
+Regression test: `tests/test_config_survives_upgrade.py` locks this
+invariant with 25 pytest cases — CI fails if a future PR breaks the
+guarantee.
+
 ---
 
-## Enterprise Governance
+## Observability & Audit Logs
 
-Concinno provides built-in alignment with enterprise AI governance standards:
+Concinno is an **observability / monitoring layer** for Claude Code tool
+calls. It emits structured evidence that the *deployer* can map to whatever
+governance framework their organisation follows. Concinno itself is not
+audited, certified, or endorsed by any standards body, and makes no claim
+to confer compliance on downstream systems.
 
-| Standard | Alignment | Concinno Feature |
-|----------|-----------|-------------------|
-| **NIST AI RMF** (Govern/Map/Measure/Manage) | Measure + Manage | Guard audit logs (JSONL) + gate deny enforcement |
-| **NIST AI Agent Standards** (2026) | Auth + Privilege Control | Identity guard + agent gate + confidence gate |
-| **ISO/IEC 42001** | AI Management System | Feature config + delivery gate + structured handoffs |
-| **EU AI Act** | Human Oversight + Audit Trail | Destruction guard confirm flow + immutable audit log |
-
-**Audit trail**: Every guard deny is logged to `~/.claude/destruction_audit.log` (JSONL, immutable append-only).
-
-**Delivery gate**: `delivery.py` enforces binary pass/fail exit criteria, mechanical verification, and three-state reporting (pass/partial/fail with evidence).
+- **Audit trail**: every guard deny is appended to
+  `~/.claude/destruction_audit.log` (JSONL, append-only).
+- **Delivery gate**: `delivery.py` enforces binary pass/fail exit
+  criteria with mechanical verification and three-state reporting.
+- **Deployer responsibility**: if your use-case falls under NIST AI RMF,
+  ISO/IEC 42001, or EU AI Act Annex III, the deployer is solely
+  responsible for mapping Concinno's logs onto those frameworks. See
+  [docs/ai_act_compliance.md](docs/ai_act_compliance.md) for the
+  disclaimer Concinno itself operates under.
 
 ---
 
@@ -387,13 +481,86 @@ We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before 
 
 ---
 
-## License
+## Positioning
 
-Apache-2.0 License. See [LICENSE](LICENSE) for details.
+**What Concinno is**
+
+- Dev-time scaffolding for the Claude Code CLI.
+- An individual-developer / small-team tool for guardrails, session
+  memory, multi-instance coordination, and structured handoffs.
+- A zero-API-cost add-on (it runs inside the user's Claude Code
+  subscription; no additional tokens are billed by Concinno itself).
+- Opinionated primitives you can override — every guard is subclassable,
+  every feature can be disabled through `cc_config.json`.
+
+**What Concinno is NOT**
+
+- A cloud SaaS governance platform (that is the territory of
+  managed agent offerings such as Anthropic's managed agents and
+  NeMo Guardrails).
+- A safety circumvention tool. Concinno guards are observability
+  and dev-time guardrails; they do not bypass Anthropic's own safety
+  systems or the Claude Code CLI's built-in policies.
+- A certified compliance product. Alignment claims map onto the
+  deployer, not onto Concinno (see *Observability & Audit Logs* above).
+- An "AI system" within the meaning of EU AI Act Art 3(1) — it ships
+  no model weights and makes no autonomous decisions. See
+  [docs/ai_act_compliance.md](docs/ai_act_compliance.md).
+
+---
+
+## Security
+
+Security-sensitive questions, including historical disclosure of
+secrets in prior releases, are documented in
+[SECURITY.md](SECURITY.md). PyPI uploads for Concinno use Trusted
+Publishers with WebAuthn 2FA; no long-lived API tokens are stored in
+CI.
+
+---
+
+## Export Control Notice
+
+This software is subject to the U.S. Export Administration Regulations
+(EAR). Users are responsible for compliance. Concinno is not for use
+by entities on the U.S. Specially Designated Nationals (SDN) list or
+in embargoed jurisdictions (Cuba, Iran, North Korea, Syria, or the
+Crimea region of Ukraine).
+
+---
+
+## License & Trademarks
+
+**Concinno is dual-licensed** under:
+
+1. **GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)** —
+   the default. Use, modify, and redistribute freely, including over a
+   network, **provided** you comply with §13 (network-use disclosure of
+   complete corresponding source). See [LICENSE](LICENSE).
+2. **Commercial License** — for organizations that cannot or will not
+   comply with AGPL §13 (most commercial SaaS deployments) or whose
+   internal policy bans AGPL-licensed dependencies. See
+   [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) for tiers, pricing,
+   and contact.
+
+**Trademarks.** "Concinno", "Sancio", "Cerno", "ZIQ", "FieldRead",
+"PSYCHE", and "TACB" are trademarks of Chen Syuan Wang (王晨宣 /
+AI King). The AGPL grant does not include trademark rights —
+forks must rename before public distribution under a different mark.
+
+**Sole copyright.** All Concinno copyright is held by Chen Syuan
+Wang as sole author. For acquisition or strategic partnership
+discussions: <me@ai-king.dev>.
+
+Claude Code is a trademark of Anthropic PBC. Concinno is an
+independent open-source project and is **not affiliated with,
+endorsed by, or sponsored by Anthropic PBC**. References to Claude
+Code are made solely for interoperability and identification
+purposes.
 
 ---
 
 <p align="center">
-  <strong>Concinno</strong> — The Cognitive Layer for Claude Code<br>
-  <em>Stop re-explaining. Start remembering.</em>
+  <strong>Concinno</strong> — hook-based governance for Claude Code<br>
+  <em>Observable, local, opinionated.</em>
 </p>

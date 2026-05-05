@@ -394,14 +394,26 @@ class TestFormatFunctionBlock:
 
 
 class TestDefaultRegistry:
-    def test_default_has_5_core_and_1_deferred(self):
+    def test_default_has_5_core_and_6_deferred(self):
+        # 5 core = Read/Write/Edit/Glob/Grep (always in prompt).
+        # 6 deferred = Shell + 5 optional built-in tools
+        # (PdfRead/PdfExtract/HtmlToText/DuckDbQuery/RssFetch, lazy-loaded
+        # behind optional extras pdf/html/data/rss).
         reg = get_default_registry()
         assert len(reg.list_core()) == 5
-        assert len(reg.list_deferred()) == 1
+        assert len(reg.list_deferred()) == 6
 
-    def test_default_deferred_is_shell(self):
+    def test_default_deferred_includes_shell_and_optionals(self):
         reg = get_default_registry()
-        assert reg.list_deferred() == ["Shell"]
+        deferred = set(reg.list_deferred())
+        assert deferred == {
+            "Shell",
+            "PdfRead",
+            "PdfExtract",
+            "HtmlToText",
+            "DuckDbQuery",
+            "RssFetch",
+        }
 
     def test_default_core_includes_file_tools(self):
         reg = get_default_registry()

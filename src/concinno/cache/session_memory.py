@@ -444,7 +444,21 @@ class SessionMemory:
 
         No time / token component — callers that want a time gate
         should wrap this in their own debounce.
+
+        2.7.2 Gap 4: user-facing ``memory_file_enabled`` kill switch.
+        :func:`concinno.config.get("memory_file_enabled")` is False when
+        the operator ran ``concinno config set memory_file_enabled false``
+        (or set ``CONCINNO_MEMORY_FILE_ENABLED=0``). We return False
+        unconditionally so :meth:`update` short-circuits before any
+        distillation sink is invoked. Fail-soft: any config error keeps
+        the existing behaviour (enabled).
         """
+        try:
+            from concinno.config import get as _cfg_get
+            if _cfg_get("memory_file_enabled") is False:
+                return False
+        except Exception:
+            pass
         if not self.md_path().exists():
             return self._state.tool_count_total >= self._init_threshold
         delta = self._state.tool_count_total - self._state.tool_count_at_last_update

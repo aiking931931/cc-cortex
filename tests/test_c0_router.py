@@ -203,3 +203,125 @@ class TestNoDowngrade:
     def test_complex_not_downgraded_by_few_files(self):
         r = _router().classify("探索新架構，不確定", file_paths=["a.py"])
         assert r.complexity == "complex"
+
+
+# ── Hysteresis — ratchet against self-downgrade Goodhart ──
+
+
+class TestHysteresis:
+    """classify_with_hysteresis blocks Goodhart FATAL-2 self-downgrade.
+
+    Once a session is classified above Simple, later prompts that
+    look Simple cannot drop the session back to Simple guards. The
+    upgrade path (toward stricter guards) stays open.
+    """
+
+    def test_fresh_session_persists_and_locks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            r = _router().classify_with_hysteresis(
+                "探索新架構，不確定",
+                cache_dir=tmpdir,
+                session_id="sess-A",
+            )
+            assert r.complexity == "complex"
+            assert r.hysteresis_locked is True
+
+            # Verify persistence round-trip preserves the lock.
+            loaded = _router().load(tmpdir, "sess-A")
+            assert loaded is not None
+            assert loaded.hysteresis_locked is True
+            assert loaded.complexity == "complex"
+
+    def test_simple_prompt_cannot_downgrade_complex_session(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            router = _router()
+            first = router.classify_with_hysteresis(
+                "探索新架構，不確定",
+                cache_dir=tmpdir,
+                session_id="sess-B",
+            )
+            assert first.complexity == "complex"
+
+            # A later Simple-looking prompt must NOT drop us back.
+            held = router.classify_with_hysteresis(
+                "fix typo",
+                cache_dir=tmpdir,
+                session_id="sess-B",
+            )
+            assert held.complexity == "complex"
+            assert held.hysteresis_locked is True
+            assert "hysteresis" in held.escalation_reason
+            assert held.signals.get("hysteresis_held_from") == "simple"
+
+    def test_upgrade_to_chaotic_always_accepted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            router = _router()
+            router.classify_with_hysteresis(
+                "改幾個檔",
+                cache_dir=tmpdir,
+                session_id="sess-C",
+            )
+            # Upgrade signal: emergency chaotic language.
+            up = router.classify_with_hysteresis(
+                "緊急！伺服器崩潰了",
+                cache_dir=tmpdir,
+                session_id="sess-C",
+            )
+            assert up.complexity == "chaotic"
+            assert up.hysteresis_locked is True
+            assert "upgrade" in up.escalation_reason
+
+    def test_upgrade_once_cannot_be_used_as_downgrade_backdoor(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            router = _router()
+            router.classify_with_hysteresis(
+                "探索新架構，不確定",
+                cache_dir=tmpdir,
+                session_id="sess-D",
+            )
+            out = router.classify_with_hysteresis(
+                "fix typo",
+                cache_dir=tmpdir,
+                session_id="sess-D",
+                upgrade_once=True,
+            )
+            # upgrade_once is NOT a downgrade permit.
+            assert out.complexity == "complex"
+            assert out.signals.get("upgrade_once_consumed_no_op") is True
+
+    def test_same_rank_refresh_keeps_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            router = _router()
+            router.classify_with_hysteresis(
+                "先讀交接檔，然後修改 API，接著更新測試，最後部署",
+                cache_dir=tmpdir,
+                session_id="sess-E",
+            )
+            # Another complicated prompt → same rank, refreshed signals.
+            refreshed = router.classify_with_hysteresis(
+                "讀 README 然後改 imports 然後跑測試",
+                cache_dir=tmpdir,
+                session_id="sess-E",
+            )
+            assert refreshed.complexity == "complicated"
+            assert refreshed.hysteresis_locked is True
+
+    def test_redteam_required_carried_forward(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            router = _router()
+            first = router.classify_with_hysteresis(
+                "探索新架構，不確定，要 release 開源",
+                cache_dir=tmpdir,
+                session_id="sess-F",
+                file_paths=["a.py", "b.py", "c.py", "d.py", "e.py", "f.py"],
+            )
+            # First call set redteam_required=True via release keyword
+            assert first.complexity in ("complex", "chaotic")
+            # Now a fresh Simple prompt arrives — hysteresis holds and
+            # the redteam requirement must stay latched.
+            held = router.classify_with_hysteresis(
+                "fix typo",
+                cache_dir=tmpdir,
+                session_id="sess-F",
+            )
+            assert held.redteam_required == first.redteam_required

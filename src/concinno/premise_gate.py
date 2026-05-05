@@ -131,7 +131,22 @@ class PremiseGate(BaseGuard):
     step_back_reason = "external constraints detected but premises not verified"
 
     def check(self, ctx: GuardContext) -> Optional[GuardResult]:
-        """Deny first write when external constraints or ceiling claim unverified."""
+        """Deny first write when external constraints or ceiling claim unverified.
+
+        Honours ``CONCINNO_PREMISE_GATE=0`` env var as a process-wide kill
+        switch (documented in ``rules/official/L1/switches.md`` row #10 since
+        well before the implementation existed — fixed 2026-04-26 as part of
+        the doc-vs-code wiring audit). Setting any of ``0`` / ``false`` /
+        ``no`` / ``off`` (case-insensitive) opts out for the current process.
+        Pipeline-level ``cfg.feature('premise_gate', 'enabled')=False`` still
+        works as the persisted toggle; this env var is the per-shell escape.
+        """
+        import os as _os
+
+        env_off = _os.environ.get("CONCINNO_PREMISE_GATE", "").strip().lower()
+        if env_off in {"0", "false", "no", "off"}:
+            return None
+
         # Only trigger on write tools
         if ctx.tool_name not in WRITE_TOOLS_EXT and ctx.tool_name != "Bash":
             return None

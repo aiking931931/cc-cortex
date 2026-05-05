@@ -15,7 +15,9 @@ Usage:
 import json
 import logging
 import os
+import sys
 from datetime import timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 _DEFAULTS = {
@@ -72,68 +74,81 @@ _DEFAULTS = {
         "streak_fmt": "\U0001f525x{streak} clean edits",
         "fix_fmt": "\u2705 {fname} fixed {fixed}/{total} | \U0001f525x{streak} clean edits",
     },
-    # ── Feature toggles (all default ON, all configurable) ──
+    # ── Feature toggles ──
+    #
+    # 4.0.0: ``enabled`` key intentionally absent from ship-level
+    # defaults. The runtime read path (:meth:`Config.feature` with
+    # ``key="enabled"``) falls through to
+    # :func:`concinno.feature_config.meta_enabled_default` which is
+    # the single source of truth for ship-level on/off (see
+    # ``DEFAULT_OFF_4_0_0`` frozenset there).
+    #
+    # Param defaults (mode / thresholds / etc.) DO live here — they
+    # don't gate the feature, just pre-fill its tuning knobs when
+    # the user edits cc_config.json.
     "features": {
         # Hard gates (PreToolUse deny)
         "token_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "agent_threshold": 140000,
             "critical_threshold": 160000,
         },
         "read_first_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "min_lines": 50,
         },
         "agent_cap": {
-            "enabled": True,
             "mode": "step_back_first",
             "max_spawns": 5,
         },
         "sentinel_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "max_repeats": 5,
             "lint_exception": True,
         },
         "consecutive_fail_gate": {
-            "enabled": True,
             "mode": "step_back_first",
             "max_fails": 3,
         },
         "hijack_gate": {
-            "enabled": True,
             "mode": "hard_deny",
             "l2_threshold": 0.3,
             "l3_threshold": 0.6,
             "l4_threshold": 0.8,
         },
-        "identity_guard": {"enabled": True, "mode": "hard_deny"},
-        "publish_scan": {"enabled": True, "mode": "hard_deny"},
-        "delivery_gate": {"enabled": True, "mode": "hard_deny", "max_iterations": 5},
-        "bash_background_gate": {"enabled": True, "mode": "step_back_first"},
-        "python_c_gate": {"enabled": True, "mode": "step_back_first"},
-        "whitepaper_guard": {"enabled": True, "mode": "hard_deny"},
-        "clarity_gate": {"enabled": True, "mode": "step_back_first", "min_clarity": 0.4},
-        # Hard quality (PostToolUse lint-level)
-        "code_guard": {"enabled": True},
-        "typescript": {"enabled": True},
-        "linting": {"enabled": True},
-        "handoff_format": {"enabled": True},
+        "identity_guard": {"mode": "hard_deny"},
+        "publish_scan": {"mode": "hard_deny"},
+        "delivery_gate": {"mode": "hard_deny", "max_iterations": 5},
+        "bash_background_gate": {"mode": "step_back_first"},
+        "python_c_gate": {"mode": "step_back_first"},
+        "clarity_gate": {"mode": "step_back_first", "min_clarity": 0.4},
+        # Hard quality (PostToolUse lint-level) — params only; no
+        # ``enabled`` key (ship-level default decided by
+        # meta_enabled_default → DEFAULT_OFF_4_0_0).
+        "code_guard": {},
+        "typescript": {},
+        "linting": {},
+        "handoff_format": {},
         # UX (user-visible)
         "streak_ux": {
-            "enabled": True,
             "milestone_interval": 5,
         },
-        "session_summary": {"enabled": True},
-        "deny_marker": {"enabled": True},
-        # Boundary guard (hard gate)
-        "boundary_guard": {"enabled": True},
+        "session_summary": {},
+        "deny_marker": {},
+        "boundary_guard": {},
         # Language enforcement
         "language_enforce": {
-            "enabled": True,
             "language": "English",
+        },
+        # 2.16.0 — SessionStart switch summary
+        "session_switches": {
+            "top_n": 10,
+            "hook_format_compact": True,
+        },
+        # 2.16.0 — one-shot safe allowlist bootstrap
+        "configure_permissions": {
+            "publish_opt_in": False,
+            "preserve_destructive": True,
         },
     },
     "deny_stderr": True,
@@ -152,6 +167,104 @@ _DEFAULTS = {
 }
 
 
+# ── Legacy feature alias helpers ──────────────────────────────────
+#
+# Lazy import of feature_config inside the function body so this
+# module stays importable during the feature_config import (avoid
+# circular import at module load time).
+
+_WARNED_LEGACY_ALIASES: set[str] = set()
+
+
+def _legacy_aliases() -> dict[str, str]:
+    """Return the {old_name: canonical_name} alias map.
+
+    Lazy + failure-tolerant: if ``concinno.feature_config`` cannot be
+    imported (very early in bootstrap or partial install), the map is
+    empty and no alias resolution happens — callers see whatever name
+    they passed in, identical to pre-alias behavior.
+    """
+    try:
+        from concinno.feature_config import LEGACY_ALIASES
+        return LEGACY_ALIASES
+    except Exception:
+        return {}
+
+
+def _resolve_feature_alias(name: str) -> str:
+    """Map a legacy feature name to its canonical replacement, or
+    return ``name`` unchanged when no alias exists."""
+    return _legacy_aliases().get(name, name)
+
+
+def _coerce_env_value(raw: str, key: str) -> Any:
+    """Coerce an env-var string to the appropriate Python type.
+
+    Bool keys (``enabled`` or any key ending in ``_enabled``):
+      ``1`` / ``true`` / ``yes`` / ``on`` → True
+      ``0`` / ``false`` / ``no`` / ``off`` → False
+      anything else → None (skip override, treat as absent)
+
+    Int / float: tried in order; fall back to raw str.
+    """
+    if key == "enabled" or key.endswith("_enabled"):
+        low = raw.strip().lower()
+        if low in ("1", "true", "yes", "on"):
+            return True
+        if low in ("0", "false", "no", "off"):
+            return False
+        return None  # malformed → don't override
+
+    # Try int first, then float, then str
+    stripped = raw.strip()
+    try:
+        return int(stripped)
+    except ValueError:
+        pass
+    try:
+        return float(stripped)
+    except ValueError:
+        pass
+    return stripped
+
+
+def _env_feature_override(feature: str, key: str) -> Any:
+    """Return the env-var override for (feature, key), or None if absent.
+
+    Naming: ``CONCINNO_<FEATURE_UPPER>_<KEY_UPPER>``
+    where feature is the canonical snake_case name and key is the param key.
+
+    Examples::
+        CONCINNO_AGENT_CAP_ENABLED=false
+        CONCINNO_AGENT_CAP_MAX_SPAWNS=8
+        CONCINNO_TOKEN_GATE_AGENT_THRESHOLD=100000
+        CONCINNO_CONSECUTIVE_FAIL_GATE_MAX_FAILS=2
+        CONCINNO_POLLING_WATCHER_ENABLED=0
+    """
+    env_name = f"CONCINNO_{feature.upper()}_{key.upper()}"
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return None
+    return _coerce_env_value(raw, key)
+
+
+def _warn_legacy_alias(legacy: str, canonical: str) -> None:
+    """Emit a one-time-per-process stderr deprecation warning.
+
+    Format: ``concinno: feature '<legacy>' renamed to '<canonical>'
+    (drops 2026-07)``. Idempotent — second call for the same legacy
+    name in the same process is a no-op so logs don't fill up.
+    """
+    if legacy in _WARNED_LEGACY_ALIASES:
+        return
+    _WARNED_LEGACY_ALIASES.add(legacy)
+    print(
+        f"concinno: feature '{legacy}' renamed to '{canonical}' "
+        f"(drops 2026-07)",
+        file=sys.stderr,
+    )
+
+
 class Config:
     """Lazy-loaded, cached configuration from cc_config.json."""
 
@@ -167,6 +280,17 @@ class Config:
         config_file = self._config_path or (
             os.path.join(self._hooks_dir, "cc_config.json") if self._hooks_dir else ""
         )
+        # 2.17.1 fallback: hook subprocesses spawn a fresh Python without
+        # any hooks_dir pre-init, so get_config() there yields a blank
+        # singleton that never reads cc_config.json. Look at the default
+        # ~/.claude/hooks/cc_config.json before giving up so toast_enabled
+        # and similar notification switches actually take effect.
+        if not config_file or not os.path.isfile(config_file):
+            fallback = os.path.join(
+                os.path.expanduser("~"), ".claude", "hooks", "cc_config.json"
+            )
+            if os.path.isfile(fallback):
+                config_file = fallback
         if config_file and os.path.isfile(config_file):
             try:
                 with open(config_file, "r", encoding="utf-8") as f:
@@ -178,6 +302,107 @@ class Config:
                         self._data[k] = v
             except Exception:
                 pass
+
+        # Source #4 of 6-source chain (v5.5.1 W1B audit F5 fix):
+        # ``~/.concinno/cc_config.json`` (main user-level overlay) +
+        # ``~/.concinno/<feature>.json`` (per-feature overlay schema
+        # ``{"features": {"<name>": {...}}}``). Previously the chain comment
+        # at :meth:`feature` line ~421 said "future" — every switches.md entry
+        # documenting ``~/.concinno/<feature>.json`` opt-out paths silently
+        # swallowed user config. This was the root-cause class behind user's
+        # repeated "明明關閉還是擋" reports across multiple switches.
+        # Special-case files (release_auth.json, locale.json,
+        # governance_tier.json) keep their own dedicated loaders.
+        self._apply_user_level_overlay()
+
+    def _apply_user_level_overlay(self) -> None:
+        """Merge ~/.concinno/cc_config.json + per-feature *.json overlays.
+
+        Source #4 of the documented 6-source chain. Special-case JSON files
+        with their own dedicated loaders are skipped here so we do not double-
+        interpret them. Failures (missing dir, malformed JSON, permission
+        errors) are silent — they fall back to whatever Source #3 produced.
+        """
+        if self._data is None:  # defensive — _load() initialises _data first
+            return
+        user_dir = Path.home() / ".concinno"
+        if not user_dir.is_dir():
+            return
+
+        # Files with their own dedicated loaders elsewhere — skip to avoid
+        # double-applying or interpreting their schema as feature overlays.
+        special_cases = {
+            "cc_config.json",
+            "release_auth.json",
+            "locale.json",
+            "governance_tier.json",
+            "session_switches.json",
+        }
+
+        # Step A: main user-level cc_config.json (full schema overlay,
+        # mirrors how project cc_config above merges into _DEFAULTS).
+        self._merge_user_main_cfg(user_dir / "cc_config.json")
+
+        # Step B: per-feature override files ~/.concinno/<feature>.json.
+        # Schema: {"features": {"<name>": {"enabled": ..., "<param>": ...}}}.
+        for jf in sorted(user_dir.glob("*.json")):
+            if jf.name in special_cases:
+                continue
+            self._merge_user_feature_overlay(jf)
+
+    def _merge_user_main_cfg(self, path: Path) -> None:
+        """Apply ~/.concinno/cc_config.json overlay (deep-merge top-level dicts)."""
+        if not path.is_file() or self._data is None:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(overlay, dict):
+            return
+        for k, v in overlay.items():
+            if isinstance(v, dict) and isinstance(self._data.get(k), dict):
+                self._data[k] = self._deep_merge_dict(self._data[k], v)
+            else:
+                self._data[k] = v
+
+    def _merge_user_feature_overlay(self, path: Path) -> None:
+        """Apply per-feature ~/.concinno/<name>.json overlay onto features dict."""
+        if self._data is None:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(overlay, dict):
+            return
+        feats = overlay.get("features")
+        if not isinstance(feats, dict):
+            return
+        features_root = self._data.setdefault("features", {})
+        if not isinstance(features_root, dict):
+            features_root = {}
+            self._data["features"] = features_root
+        for fname, fcfg in feats.items():
+            if not isinstance(fcfg, dict):
+                continue
+            existing = features_root.get(fname) or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            features_root[fname] = {**existing, **fcfg}
+
+    @staticmethod
+    def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+        """One-level deep merge (sub-dict values get merged, others get replaced)."""
+        merged = {**base}
+        for sk, sv in overlay.items():
+            if isinstance(sv, dict) and isinstance(merged.get(sk), dict):
+                merged[sk] = {**merged[sk], **sv}
+            else:
+                merged[sk] = sv
+        return merged
 
     @property
     def workspace(self) -> str:
@@ -289,26 +514,122 @@ class Config:
         )
 
     def feature(self, name: str, key: str = "enabled") -> Any:
-        """Get a feature config value. e.g. feature("agent_cap", "max_spawns")."""
+        """Get a feature config value. e.g. feature("agent_cap", "max_spawns").
+
+        Resolution order (later overrides earlier — 6-source chain):
+          1. Rule-hardcoded / FEATURE_META default
+          2. _DEFAULTS["features"] param defaults
+          3. Per-project cc_config.json (or ~/.claude/hooks/cc_config.json)
+          4. User-level ~/.concinno/cc_config.json + ~/.concinno/<feature>.json
+             (loaded above by ``_apply_user_level_overlay`` — v5.5.1)
+          5. Env var ``CONCINNO_<FEATURE>_<PARAM>`` (upper-snake of name_key)
+          6. User明示 (session-level; handled by callers, not this layer)
+
+        Env var naming convention:
+          ``CONCINNO_<FEATURE_UPPER>_<PARAM_UPPER>``
+          Examples:
+            CONCINNO_AGENT_CAP_ENABLED=false
+            CONCINNO_AGENT_CAP_MAX_SPAWNS=8
+            CONCINNO_TOKEN_GATE_AGENT_THRESHOLD=100000
+            CONCINNO_CONSECUTIVE_FAIL_GATE_MAX_FAILS=2
+
+        Type coercion: bool keys (``enabled``) accept 1/0/true/false/yes/no
+        (case-insensitive). Int keys coerced to int when the value is all
+        digits. Float keys coerced to float when parseable. Other keys: str.
+
+        Honors :data:`concinno.feature_config.LEGACY_ALIASES` — when a
+        caller asks for the canonical (new) name and the cc_config.json
+        only has the legacy (old) name set, we transparently read the
+        legacy entry and emit a one-time stderr deprecation warning per
+        alias. Symmetric: if a caller asks for the legacy name we
+        forward to the canonical lookup so existing call-sites keep
+        working until the alias is dropped.
+        """
         self._load()
-        feat = self._data.get("features", {}).get(name, {})
+        canonical = _resolve_feature_alias(name)
+        features = self._data.get("features", {})
+        # Always warn when the caller used the legacy name — they
+        # need to migrate even if they also have the canonical key
+        # set on disk.
+        if canonical != name:
+            _warn_legacy_alias(name, canonical)
+        feat = features.get(canonical) or {}
+        # Fallback path: caller asked by legacy name but only canonical
+        # is on disk (already handled above by .get(canonical)). Now
+        # cover the inverse — caller asked by either name and only the
+        # legacy entry exists on disk.
+        if not feat:
+            if canonical != name and name in features:
+                # Legacy caller, legacy entry on disk.
+                feat = features[name]
+            else:
+                # Canonical (or any) caller, only legacy entry on disk.
+                for legacy, target in _legacy_aliases().items():
+                    if target == canonical and legacy in features:
+                        feat = features[legacy]
+                        _warn_legacy_alias(legacy, canonical)
+                        break
         if key == "enabled":
-            return feat.get("enabled", True)
-        return feat.get(key)
+            if "enabled" in feat:
+                base = feat["enabled"]
+            else:
+                # Fall through to FEATURE_META ship-level default. Lazy
+                # import to avoid concinno.core.config ↔ concinno.feature_config
+                # circular dependency at module load.
+                try:
+                    from concinno.feature_config import meta_enabled_default
+                    base = meta_enabled_default(canonical)
+                except Exception:
+                    base = True
+            # Source 5: env var override (highest priority before user明示)
+            env_val = _env_feature_override(canonical, key)
+            if env_val is not None:
+                return env_val
+            return base
+
+        # Non-enabled key: get from feat dict, then check env override
+        base = feat.get(key)
+        env_val = _env_feature_override(canonical, key)
+        if env_val is not None:
+            return env_val
+        return base
 
     def feature_all(self, name: str) -> dict:
-        """Get full feature config dict."""
+        """Get full feature config dict.
+
+        Same alias semantics as :meth:`feature`.
+        """
         self._load()
-        return dict(self._data.get("features", {}).get(name, {}))
+        canonical = _resolve_feature_alias(name)
+        features = self._data.get("features", {})
+        if canonical != name:
+            _warn_legacy_alias(name, canonical)
+        feat = features.get(canonical)
+        if feat is not None:
+            return dict(feat)
+        # Fallback: legacy entry on disk.
+        if canonical != name and name in features:
+            return dict(features[name])
+        for legacy, target in _legacy_aliases().items():
+            if target == canonical and legacy in features:
+                if name == canonical:
+                    _warn_legacy_alias(legacy, canonical)
+                return dict(features[legacy])
+        return {}
 
     def set_feature(self, name: str, key: str, value: Any) -> None:
         """Update a feature config value and persist to disk.
 
-        Use feature_config.validate() first for risk warnings.
+        Use feature_config.validate() first for risk warnings. Writes
+        always go to the canonical name even if the caller used a
+        legacy alias (keeps the on-disk config clean).
         """
         self._load()
+        canonical = _resolve_feature_alias(name)
+        if canonical != name:
+            _warn_legacy_alias(name, canonical)
         features = self._data.setdefault("features", {})
-        feat = features.setdefault(name, {})
+        feat = features.setdefault(canonical, {})
         feat[key] = value
         self.update_file("features", features)
 

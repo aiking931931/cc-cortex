@@ -840,7 +840,7 @@ class PermissionDecisionReason:
     detail: str = ""
     rule_id: Optional[str] = None
     classifier_score: Optional[float] = None
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Enforce CC's contract: OTHER variant MUST carry a detail string

@@ -12,10 +12,14 @@ Exports:
         (file_io); ShellSecurityError, ShellDestructionError, ShellTimeoutError
         (shell).
     EXCLUDED_DIRS — shared exclude set for search tools.
+    DspyOptimizer — DSPy MIPROv2 prompt optimizer for CBUA stage prompts
+        (opt-in, feature-gated; dspy is an optional dependency).
 """
 
 from __future__ import annotations
 
+from .date_calc import DateCalcTool
+from .dspy_optimizer import DspyOptimizer
 from .file_io import (
     BinaryFileError,
     FileEdit,
@@ -24,6 +28,12 @@ from .file_io import (
     MultipleMatchesError,
     ReadBeforeWriteError,
 )
+from .html import HtmlToolError, HtmlToText
+from .memory_relief import MemoryReliefTool
+from .pdf import PdfExtract, PdfRead, PdfToolError
+from .python_exec import PythonExecError, PythonExecTool
+from .read_attachment import ReadAttachmentError, ReadAttachmentTool
+from .rss import RssFetch, RssToolError
 from .search import EXCLUDED_DIRS, FileGlob, FileGrep
 from .shell import (
     Shell,
@@ -31,6 +41,10 @@ from .shell import (
     ShellSecurityError,
     ShellTimeoutError,
 )
+from .sql import DuckDbQuery, SqlToolError
+from .web import FetchUrlTool, WebSearchTool, strip_html
+from .web_fetch_full import WebFetchFullTool, web_fetch_full
+from .wiki import FetchWikipediaSectionTool
 
 __all__ = [
     # file_io
@@ -49,4 +63,38 @@ __all__ = [
     "EXCLUDED_DIRS",
     "FileGlob",
     "FileGrep",
+    # date_calc
+    "DateCalcTool",
+    # python_exec
+    "PythonExecError",
+    "PythonExecTool",
+    # read_attachment
+    "ReadAttachmentError",
+    "ReadAttachmentTool",
+    # pdf
+    "PdfExtract",
+    "PdfRead",
+    "PdfToolError",
+    # html
+    "HtmlToText",
+    "HtmlToolError",
+    # memory_relief
+    "MemoryReliefTool",
+    # sql
+    "DuckDbQuery",
+    "SqlToolError",
+    # rss
+    "RssFetch",
+    "RssToolError",
+    # wiki
+    "FetchWikipediaSectionTool",
+    # web
+    "FetchUrlTool",
+    "WebSearchTool",
+    "strip_html",
+    # web_fetch_full
+    "WebFetchFullTool",
+    "web_fetch_full",
+    # dspy_optimizer (opt-in; dspy is an optional dep)
+    "DspyOptimizer",
 ]

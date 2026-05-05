@@ -27,7 +27,6 @@
 ## Cognitive Guards (inject only, never deny)
 
 - `cognitive.py` — session analysis + decision journal + adaptive thresholds
-- `cognitive_anchor.py` — **red-team anchoring with solid-state language** (NEW)
 - `confidence_gate.py` — uncertainty detection + irreversible operation gate
 - `hypothesis_tracker.py` — failed approach tracking + avoidance injection
 - `think_inject.py` — think-tool reasoning injection on high-risk ops

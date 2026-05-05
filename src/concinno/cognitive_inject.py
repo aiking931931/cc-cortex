@@ -49,17 +49,20 @@ import json
 import os
 import re
 
+from concinno.hooks.relay_helpers import with_feature_prefix
+
 # ── 1. Thinking Directives — Layered ──────────────────────
 
 # ── Prompt engineering constraints ────────────────────────
 # All injected text MUST follow:
 #   1. Token cap: L0 ≤60t | L1 ≤80t | L2 ≤200t | Delivery ≤80t
 #   2. U-shape attention: most important at FIRST and LAST line
-#   3. Gas-state → cognitive_anchor.py ONLY. Here = pure imperative.
+#   3. Gas-state lived in cognitive_anchor.py (removed in 4.6.0 KILL 10
+#      cleanup); this module remains pure imperative regardless.
 #   4. Line cap: L0 ≤5 | L1 ≤7 | L2 ≤10 | Delivery ≤7 (hard max)
 
 # L0: Unhardnable process rules (~40t, ≤4 lines). Pure imperative.
-# Gas-state lives in cognitive_anchor.py (identity). Here = operations.
+# Historic gas-state lived in cognitive_anchor.py (removed); operations only.
 _L0_HARD_RULES = """\
 - Fix all errors you see now. ✅done ⏸half(where+why).
 - Unsure → look it up. Don't guess.
@@ -214,7 +217,12 @@ def _build_summaries(
         count = it.get("count", 0)
         text = it.get("correction_text", "")[:80]
         lines.append(f"  - [{count}x|{key}] {text}")
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    # 4.6.0 verbatim_relay: brand the cognitive correction summary so
+    # the user recognises the warning as Concinno output rather than a
+    # CC platform anomaly. Helper resolves mode (prefix / silent / off
+    # / verbose) internally; empty return = caller drops the chunk.
+    return with_feature_prefix("cognitive_inject", body)
 
 
 def _load_skill_index(workspace: str) -> list[dict]:
@@ -403,6 +411,18 @@ def build_cognitive_context(
         agent_type: Subagent type (empty for parent session).
         cognition_depth: Override from subagent identity assignment.
     """
+    # F8 (2.7.1): gate behind ux_injection. This is the router for the
+    # thinking-directives + RAG + delivery UX block that lands in a
+    # subagent's primacy slot; it is NOT safety. Anonymous PyPI users
+    # (ship default: ux_injection=false) see an empty string here and
+    # the subagent starts with only the workspace ctx block.
+    try:
+        from concinno.cache.ux_gate import is_ux_enabled
+        if not is_ux_enabled():
+            return ""
+    except Exception:
+        pass
+
     sections: list[str] = []
 
     # Determine complexity: identity-driven > agent_type > C0Router > parent

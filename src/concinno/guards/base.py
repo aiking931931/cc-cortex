@@ -300,6 +300,13 @@ class BaseGuard(ABC):
     category: GuardCategory = GuardCategory.QUALITY
     step_back_reason: str = ""
     path_scope: list[str] = []  # glob patterns, empty = always active
+    # ``feature_name`` bridges a guard's class identity to a key in
+    # ``feature_config.FEATURE_META`` so ``concinno config set <name>
+    # enabled=false`` takes effect at the pipeline level WITHOUT the
+    # guard body having to read the config itself. Empty string =
+    # fall back to :attr:`name`. Override when the two diverge (e.g.
+    # ``read_first`` guard ↔ ``read_first_gate`` feature).
+    feature_name: str = ""
 
     def matches_path_scope(self, ctx: GuardContext) -> bool:
         """Check if this guard should run for the given context.
