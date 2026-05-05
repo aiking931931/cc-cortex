@@ -40,33 +40,31 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from lyceum.governance.smart_approval_ziq import (  # noqa: F401 — public API
+from concinno._lyceum_vendor.governance.smart_approval_ziq import (  # noqa: F401 — public API  # noqa: F401 — test introspection
     BLAST_RADIUS_HIGH,
     BLAST_RADIUS_LOW,
     BLAST_RADIUS_MEDIUM,
-    DEFAULT_THRESHOLD as _DEFAULT_THRESHOLD,
+    DEFAULT_THRESHOLD,
     ApprovalConfig,
     ApprovalDecision,
     ApprovalMode,
     ApprovalState,
+    _bucket_key,
     compute_sps_score,
 )
-from lyceum.governance.smart_approval_ziq import (  # noqa: F401 — test introspection
-    _bucket_key,
-)
-from lyceum.governance.smart_approval_ziq import (
+from concinno._lyceum_vendor.governance.smart_approval_ziq import (
     decide_with_config as _lyceum_decide,
 )
-from lyceum.governance.smart_approval_ziq import (
+from concinno._lyceum_vendor.governance.smart_approval_ziq import (
     describe_current_config as _lyceum_describe,
 )
-from lyceum.governance.smart_approval_ziq import (
+from concinno._lyceum_vendor.governance.smart_approval_ziq import (
     load_config as _lyceum_load,
 )
-from lyceum.governance.smart_approval_ziq import (
+from concinno._lyceum_vendor.governance.smart_approval_ziq import (
     record_outcome_with_config as _lyceum_record,
 )
-from lyceum.governance.smart_approval_ziq import (
+from concinno._lyceum_vendor.governance.smart_approval_ziq import (
     save_config as _lyceum_save,
 )
 
@@ -85,6 +83,11 @@ _MODE_ENV = "CONCINNO_APPROVAL_MODE"
 # ``LYCEUM_APPROVAL_THRESHOLD`` post-Wave-2.7-H. The shim itself does
 # not double-read.
 _THRESHOLD_ENV = "LYCEUM_APPROVAL_THRESHOLD"
+
+# Pre-Wave-2.7-H private alias retained for downstream callers / tests
+# that imported ``concinno.approval_mode._DEFAULT_THRESHOLD``. The
+# canonical name is ``DEFAULT_THRESHOLD`` (Lyceum substrate convention).
+_DEFAULT_THRESHOLD = DEFAULT_THRESHOLD
 
 
 # ── Concinno-shaped public API (delegates to Lyceum substrate) ─────

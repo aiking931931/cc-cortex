@@ -1,30 +1,28 @@
-"""concinno.guards — Unified guard pipeline for Claude Code hooks.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Deprecated alias. Use aiking.governance.guards instead.
 
-@module guards
-@responsibility Three-layer guard architecture (Security / Quality /
-    Cognitive) re-exported for convenience
-@dependencies concinno.guards.base, .pipeline, .registry
-@exports BaseGuard, GuardAction, GuardCategory, GuardContext,
-    GuardResult, GuardPipeline, create_default_pipeline
+Removal in concinno 6.0.0 (~2026-11-01).
 """
+import warnings
 
-from concinno.guards.base import (
-    BaseGuard,
-    GuardAction,
-    GuardCategory,
-    GuardContext,
-    GuardResult,
+from aiking.governance.guards import *  # noqa: F401, F403
+
+try:
+    from aiking.governance.guards import __all__  # noqa: F401
+except ImportError:
+    __all__ = []
+
+warnings.warn(
+    "concinno.guards is deprecated; use aiking.governance.guards. "
+    "Removal in concinno 6.0.0 (~2026-11-01).",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from concinno.guards.pipeline import GuardPipeline
-from concinno.guards.registry import create_default_pipeline, create_extended_pipeline
 
-__all__ = [
-    "BaseGuard",
-    "GuardAction",
-    "GuardCategory",
-    "GuardContext",
-    "GuardPipeline",
-    "GuardResult",
-    "create_default_pipeline",
-    "create_extended_pipeline",
-]
+
+def __getattr__(name):
+    # PEP 562: handle `from concinno.guards import X` for X not in __all__.
+    import importlib
+
+    mod = importlib.import_module("aiking.governance.guards")
+    return getattr(mod, name)

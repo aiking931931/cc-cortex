@@ -604,8 +604,9 @@ def test_feature_meta_registered() -> None:
     assert "circuit_breaker_guard" in FEATURE_META
     meta = FEATURE_META["circuit_breaker_guard"]
     assert meta["category"] == "security"
-    # 4.0.0 default-off-gates SEMVER baseline.
-    assert meta["enabled"] is False
+    # 5.0.0 BREAKING — D-class promoted default-on per 8-axis audit
+    # (2026-04-29). Removed from DEFAULT_OFF_4_0_0 frozenset.
+    assert meta["enabled"] is True
     assert meta["ziq_autotunable"] is True
     assert meta["cosmetic"] is False
     for param in (
@@ -616,9 +617,14 @@ def test_feature_meta_registered() -> None:
 
 
 def test_feature_meta_in_default_off() -> None:
+    """5.0.0 BREAKING — circuit_breaker_guard removed from
+    DEFAULT_OFF_4_0_0 frozenset per 8-axis audit (2026-04-29).
+    The D-class promotion is asserted here so future regressions
+    that add it back are caught.
+    """
     from concinno.feature_config import DEFAULT_OFF_4_0_0
 
-    assert "circuit_breaker_guard" in DEFAULT_OFF_4_0_0
+    assert "circuit_breaker_guard" not in DEFAULT_OFF_4_0_0
 
 
 def test_feature_meta_strict_profile_hard_deny() -> None:

@@ -123,6 +123,16 @@ escalates.
     Confidence < 70% → escalate B1 / B2 but still decide. "Should
     I …?" / "A or B?" are violations *unless* the user explicitly
     said "ask me" / "list options".
+  - **Suppress meta-commentary on transient hook output** — when a
+    hook stderr line, system reminder, or post-tool annotation
+    reports a false positive, a stale wait, or a signal already
+    handled, ignore it silently. Lines such as "this hook is a
+    false positive", "I am not being hijacked", or "continuing the
+    main task" are pure overhead — each costs roughly 50 tokens,
+    multiplies across many hooks per turn, and conveys nothing the
+    user has to read. Hook output is metadata addressed to the
+    agent, not narration owed to the user. Address the underlying
+    signal if real; otherwise, silence.
 - **A5 Protection** (always on) — destruction, butterfly,
   confidence, budget, WIREDO guards.
 

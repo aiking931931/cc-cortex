@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.7.0] - 2026-05-05 — substrate consolidation + AGPL forwarding shims + hook meta-commentary rule
+
+### Added — substrate vendor + ZIQ subpackage
+
+- `concinno._lyceum_vendor/` — vendored MIT primitives that back the
+  K3 / K4 / K7 substrate-port shims (governance, sandbox, security
+  primitives copied in at 5.2.0; previously untracked, now shipped
+  so the shims resolve at install time).
+- `concinno.ziq/` — canonical subpackage that the 11 deprecated
+  top-level `concinno.ziq_*` modules forward to via shim. Gives
+  downstreams a stable import path and isolates the upcoming move
+  to `aiking_core.ziq`.
+- `core/config.py` — Source #4 user-level JSON config (per the
+  6-source resolution chain described in the Switch Index). Reads
+  `~/.concinno/<feature>.json` so user opt-out preferences survive
+  `pip install --upgrade concinno`. Closes the W1B audit gap where
+  the user-level config layer was documented as supported but had
+  never been wired to a reader.
+- `tests/test_governance_ladder.py` (33 tests) and
+  `tests/test_w1b_audit_fixes.py` (11 tests) — regression coverage
+  for the governance ladder behavior and the W1B audit fixes.
+
+### Changed — AGPL forwarding shims for the aiking namespace
+
+- `concinno.{c0_router, field_read, hooks, guards}` now forward to
+  `aiking.governance.*` / `aiking_core.*`. Public APIs unchanged;
+  the shims preserve `from concinno.X import Y` for existing
+  importers while the canonical implementation lives under
+  `aiking*`. Net diff: ~6,200 LoC removed, ~1,200 LoC added.
+- K3 / K4 / K7 substrate kill series finishing — `destruction_guard`,
+  `security/ssrf_guard`, and `approval_mode` are gate / audit shims
+  retained for the public API; the substrate moved to
+  `_lyceum_vendor/`.
+- `LICENSE` — full AGPL-3.0-or-later text restored (the previous
+  26-line stub was insufficient for license-scanner compliance);
+  author name romanization aligned with `pyproject.toml`.
+
+### Added — governance rule (CBUA L1, A4 stage)
+
+- `src/concinno/rules/official/L1/cbua.md` — A4 sub-bullet **"Suppress
+  meta-commentary on transient hook output"**. Sedimented from the
+  recurring pattern where a hook stderr or system-reminder false
+  positive elicits a 50-token "I am ignoring this and continuing"
+  narration. Hook output is metadata addressed to the agent, not
+  narration owed to the user. The rule directs silent handling
+  unless the underlying signal is real.
+
+### Fixed — test-suite regressions surfaced by the 5.0.0 → 5.7.0 path
+
+- `tests/test_approval_mode.py::test_threshold_bad_env_falls_back_to_default`
+  — re-exported `_DEFAULT_THRESHOLD` (private alias) on the K7
+  `approval_mode` shim. Wave 2.7-H rename to canonical
+  `DEFAULT_THRESHOLD` left the private alias unbound; the shim
+  now retains the legacy underscore-prefixed name for callers
+  / tests that imported it pre-K7.
+- `tests/security/test_circuit_breaker_guard.py::test_feature_meta_registered`
+  + `::test_feature_meta_in_default_off` — assertions flipped
+  to match the 5.0.0 BREAKING D-class promotion.
+- `tests/security/test_http_client_guard.py::test_feature_meta_registered`
+  + `::test_default_off_4_0_0_membership` + renamed
+  `test_meta_enabled_default_false` → `test_meta_enabled_default_true`
+  — same 5.0.0 promotion alignment.
+
+### Known carryover from 5.6.0 (not introduced by 5.7.0)
+
+- `tests/test_a2a_attacks.py` — 11 attack-scenario tests (PiBench
+  / NAAMSE / AVER / A2A protocol) fail at the 5.6.0 baseline.
+  Tracked separately; out of scope for the substrate consolidation
+  wave.
+- `tests/test_d_class_5_0_0.py::test_d_class_5_0_0_size_27` —
+  asserts the D-class frozenset cardinality at 27; off-by-one
+  drift since 5.0.0. Tracked separately.
+- `tests/test_prompt_hooks_time_steward.py::TestConcurrentWriteSafety::test_parallel_upserts_do_not_corrupt_registry`
+  — timing-sensitive concurrent test, intermittent flake.
+
+### Notes
+
+- Behavior-compatible release for downstreams that import from
+  `concinno.{guards, hooks, c0_router, ziq, field_read}`. The shims
+  keep existing imports working; only the implementation has moved.
+- Tests on the 5.7.0 surface: 5 regressions fixed, 44 new tests
+  added (44/44 passing). Pre-existing carryover documented above.
+
 ## [5.6.0] - 2026-05-03 — `concinno.fieldread/` 5-namespace governance core (Cigito v3 patent moat axis 3)
 
 ### Added — patent-moat surface (governance side)

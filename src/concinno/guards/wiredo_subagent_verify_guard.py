@@ -312,27 +312,37 @@ Output JSON exactly:
 
 
 def _feature_enabled() -> bool:
-    """Honour ``FEATURE_META.wiredo_subagent_verify.enabled``."""
-    try:
-        from concinno.feature_config import FEATURE_META
+    """Honour user override via cc_config.json + env, fall back to FEATURE_META default.
 
-        meta = FEATURE_META.get("wiredo_subagent_verify", {})
-        return bool(meta.get("enabled", False))
+    Bug fix v5.5.1 (W1B audit F1): previously read FEATURE_META hardcoded default
+    only, so documented opt-in via
+    ``cfg.feature('wiredo_subagent_verify','enabled')=True`` silently had no
+    effect. Now reads through the 6-source chain via ``get_config().feature()``.
+    """
+    try:
+        from concinno.core.config import get_config
+
+        return bool(get_config().feature("wiredo_subagent_verify", "enabled"))
     except Exception:
         return False
 
 
 def _feature_param(name: str, default: Any) -> Any:
-    """Read a param value from FEATURE_META, falling back to ``default``."""
-    try:
-        from concinno.feature_config import FEATURE_META
+    """Read a param value through the 6-source chain, falling back to ``default``.
 
-        meta = FEATURE_META.get("wiredo_subagent_verify", {})
-        params = meta.get("params", {}) or {}
-        value = params.get(name)
+    Bug fix v5.5.1 (W1B audit F1): previously read FEATURE_META hardcoded
+    params only, ignoring user overrides in cc_config.json / env. Now uses
+    ``get_config().feature()`` for parity with ``_feature_enabled``.
+    """
+    try:
+        from concinno.core.config import get_config
+
+        value = get_config().feature("wiredo_subagent_verify", name)
+        if value is None:
+            return default
         if isinstance(value, dict):
-            value = value.get("default", default)
-        return default if value is None else value
+            return value.get("default", default)
+        return value
     except Exception:
         return default
 

@@ -29,7 +29,7 @@ Wave 2.7-G (2026-05-02) — port note:
 
 from __future__ import annotations
 
-from lyceum.security.ssrf_guard import (  # noqa: F401 — public API
+from concinno._lyceum_vendor.security.ssrf_guard import (  # noqa: F401 — public API
     CLOUD_METADATA_HOSTS,
     CLOUD_METADATA_IPS,
     DEFAULT_ALLOWED_SCHEMES,

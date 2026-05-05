@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 from datetime import timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 _DEFAULTS = {
@@ -302,6 +303,107 @@ class Config:
             except Exception:
                 pass
 
+        # Source #4 of 6-source chain (v5.5.1 W1B audit F5 fix):
+        # ``~/.concinno/cc_config.json`` (main user-level overlay) +
+        # ``~/.concinno/<feature>.json`` (per-feature overlay schema
+        # ``{"features": {"<name>": {...}}}``). Previously the chain comment
+        # at :meth:`feature` line ~421 said "future" — every switches.md entry
+        # documenting ``~/.concinno/<feature>.json`` opt-out paths silently
+        # swallowed user config. This was the root-cause class behind user's
+        # repeated "明明關閉還是擋" reports across multiple switches.
+        # Special-case files (release_auth.json, locale.json,
+        # governance_tier.json) keep their own dedicated loaders.
+        self._apply_user_level_overlay()
+
+    def _apply_user_level_overlay(self) -> None:
+        """Merge ~/.concinno/cc_config.json + per-feature *.json overlays.
+
+        Source #4 of the documented 6-source chain. Special-case JSON files
+        with their own dedicated loaders are skipped here so we do not double-
+        interpret them. Failures (missing dir, malformed JSON, permission
+        errors) are silent — they fall back to whatever Source #3 produced.
+        """
+        if self._data is None:  # defensive — _load() initialises _data first
+            return
+        user_dir = Path.home() / ".concinno"
+        if not user_dir.is_dir():
+            return
+
+        # Files with their own dedicated loaders elsewhere — skip to avoid
+        # double-applying or interpreting their schema as feature overlays.
+        special_cases = {
+            "cc_config.json",
+            "release_auth.json",
+            "locale.json",
+            "governance_tier.json",
+            "session_switches.json",
+        }
+
+        # Step A: main user-level cc_config.json (full schema overlay,
+        # mirrors how project cc_config above merges into _DEFAULTS).
+        self._merge_user_main_cfg(user_dir / "cc_config.json")
+
+        # Step B: per-feature override files ~/.concinno/<feature>.json.
+        # Schema: {"features": {"<name>": {"enabled": ..., "<param>": ...}}}.
+        for jf in sorted(user_dir.glob("*.json")):
+            if jf.name in special_cases:
+                continue
+            self._merge_user_feature_overlay(jf)
+
+    def _merge_user_main_cfg(self, path: Path) -> None:
+        """Apply ~/.concinno/cc_config.json overlay (deep-merge top-level dicts)."""
+        if not path.is_file() or self._data is None:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(overlay, dict):
+            return
+        for k, v in overlay.items():
+            if isinstance(v, dict) and isinstance(self._data.get(k), dict):
+                self._data[k] = self._deep_merge_dict(self._data[k], v)
+            else:
+                self._data[k] = v
+
+    def _merge_user_feature_overlay(self, path: Path) -> None:
+        """Apply per-feature ~/.concinno/<name>.json overlay onto features dict."""
+        if self._data is None:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(overlay, dict):
+            return
+        feats = overlay.get("features")
+        if not isinstance(feats, dict):
+            return
+        features_root = self._data.setdefault("features", {})
+        if not isinstance(features_root, dict):
+            features_root = {}
+            self._data["features"] = features_root
+        for fname, fcfg in feats.items():
+            if not isinstance(fcfg, dict):
+                continue
+            existing = features_root.get(fname) or {}
+            if not isinstance(existing, dict):
+                existing = {}
+            features_root[fname] = {**existing, **fcfg}
+
+    @staticmethod
+    def _deep_merge_dict(base: dict, overlay: dict) -> dict:
+        """One-level deep merge (sub-dict values get merged, others get replaced)."""
+        merged = {**base}
+        for sk, sv in overlay.items():
+            if isinstance(sv, dict) and isinstance(merged.get(sk), dict):
+                merged[sk] = {**merged[sk], **sv}
+            else:
+                merged[sk] = sv
+        return merged
+
     @property
     def workspace(self) -> str:
         self._load()
@@ -418,7 +520,8 @@ class Config:
           1. Rule-hardcoded / FEATURE_META default
           2. _DEFAULTS["features"] param defaults
           3. Per-project cc_config.json (or ~/.claude/hooks/cc_config.json)
-          4. User-level ~/.concinno/*.json (not implemented here; future)
+          4. User-level ~/.concinno/cc_config.json + ~/.concinno/<feature>.json
+             (loaded above by ``_apply_user_level_overlay`` — v5.5.1)
           5. Env var ``CONCINNO_<FEATURE>_<PARAM>`` (upper-snake of name_key)
           6. User明示 (session-level; handled by callers, not this layer)
 

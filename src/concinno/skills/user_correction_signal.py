@@ -105,7 +105,8 @@ def record_prompt(user_prompt: str) -> None:
 def is_active(*, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> bool:
     """Return True if the latest prompt within TTL was a correction.
 
-    Called from :func:`concinno.hooks.on_post_tool._run_skill_emergence`.
+    Public helper exported via ``__all__``; consumers should call this
+    after :func:`record_prompt` has stored a recent correction signal.
     Stale records (older than ``ttl_seconds``) and missing / corrupted
     files all return False — the trigger is opt-in, not load-bearing.
     """

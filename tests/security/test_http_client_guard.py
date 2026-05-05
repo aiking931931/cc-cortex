@@ -506,11 +506,15 @@ def test_scan_unknown_payload_clean(audit_tmp: Path) -> None:
 
 
 def test_feature_meta_registered() -> None:
+    """5.0.0 BREAKING — http_client_guard promoted default-on per the
+    D-class 8-axis audit (2026-04-29). FEATURE_META.enabled flipped
+    from False → True; this test mirrors that promotion.
+    """
     from concinno.feature_config import FEATURE_META
 
     assert "http_client_guard" in FEATURE_META
     meta = FEATURE_META["http_client_guard"]
-    assert meta["enabled"] is False
+    assert meta["enabled"] is True
     assert meta["category"] == "security"
     # The 6-DoD enforcement keys
     assert "ziq_autotunable" in meta
@@ -519,15 +523,21 @@ def test_feature_meta_registered() -> None:
 
 
 def test_default_off_4_0_0_membership() -> None:
+    """5.0.0 BREAKING — http_client_guard removed from
+    DEFAULT_OFF_4_0_0 frozenset per the D-class promotion above.
+    """
     from concinno.feature_config import DEFAULT_OFF_4_0_0
 
-    assert "http_client_guard" in DEFAULT_OFF_4_0_0
+    assert "http_client_guard" not in DEFAULT_OFF_4_0_0
 
 
-def test_meta_enabled_default_false() -> None:
+def test_meta_enabled_default_true() -> None:
+    """5.0.0 BREAKING — meta_enabled_default reflects the FEATURE_META
+    flip from False → True for http_client_guard.
+    """
     from concinno.feature_config import meta_enabled_default
 
-    assert meta_enabled_default("http_client_guard") is False
+    assert meta_enabled_default("http_client_guard") is True
 
 
 # ════════════════════════════════════════════════════════════════

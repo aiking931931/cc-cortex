@@ -41,14 +41,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-# ─── Substrate re-exports (Lyceum) ───────────────────────────────
+# ─── Substrate re-exports (vendored Lyceum, since 5.2.0) ─────────
 # These names form the public API surface that callers across Concinno
 # (cli, hooks, tools, tests) import from this module. They live in
-# ``lyceum.sandbox.destruction_guard`` since Wave 2.7-F so Lyceum
-# standalone harnesses can use the SOTA classification kernel without
-# pulling Concinno governance code. The re-export keeps every existing
-# ``from concinno.destruction_guard import X`` callsite working.
-from lyceum.sandbox.destruction_guard import (  # noqa: F401 — public API
+# ``concinno._lyceum_vendor.sandbox.destruction_guard`` — a frozen copy
+# of the Lyceum substrate primitive (see CHANGELOG 5.2.0). The vendor
+# was added because the upstream import name ``lyceum`` is squatted on
+# PyPI by an unrelated educational package, so we cannot make
+# ``lyceum-agent`` a runtime dependency of Concinno. The re-export keeps
+# every existing ``from concinno.destruction_guard import X`` callsite
+# working byte-for-byte.
+from concinno._lyceum_vendor.sandbox.destruction_guard import (  # noqa: F401 — public API
     R0,
     R1,
     R2,
@@ -65,8 +68,8 @@ from lyceum.sandbox.destruction_guard import (  # noqa: F401 — public API
     is_reason_valid_r4,
     suggest_safer_alternative,
 )
-from lyceum.sandbox.destruction_guard import evaluate as _lyceum_evaluate
-from lyceum.sandbox.destruction_patterns import (  # noqa: F401 — public API
+from concinno._lyceum_vendor.sandbox.destruction_guard import evaluate as _lyceum_evaluate
+from concinno._lyceum_vendor.sandbox.destruction_patterns import (  # noqa: F401 — public API
     R0_PATTERNS,
     R1_PATTERNS,
     R2_PATTERNS,
@@ -77,7 +80,6 @@ from lyceum.sandbox.destruction_patterns import (  # noqa: F401 — public API
     check_destroy_confirmed,
     split_commands,
 )
-
 from concinno.guards.base import BaseGuard, GuardCategory, GuardContext, GuardResult
 
 
