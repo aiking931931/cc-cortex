@@ -233,6 +233,12 @@
     "rule_trigger.cbua": ["decision", "architecture", "trade-off", "choose", "complex"],
     "rule_trigger.wiredo": ["verify", "deliver", "deploy", "ship", "wiredo", "screenshot"],
     "rule_trigger.commands": ["command", "skill", "slash command"],
-    "rule_trigger.autonomous": ["autonomous", "judgment", "should i continue"]
+    "rule_trigger.autonomous": ["autonomous", "judgment", "should i continue"],
+    "rule_trigger.task_execution": ["new task", "start task", "take over", "intent drift", "task pipeline", "Form A", "Form B", "9 phase"],
+    "rule_trigger.redteam": ["red team", "blue team", "redteam", "major decision", "irreversible", "architecture-level"],
+    "rule_trigger.release_coord": ["release", "publish", "twine", "npm publish", "cargo publish", "pypi", "version bump", "git tag"],
+    "rule_trigger.rag_sop": ["RAG", "knowledge base", "memory grep", "feedback", "kb_", "intelligence gap", "premise verify"],
+    "rule_trigger.multilingual_triggers": ["multilingual", "semantic trigger", "cross-language", "trigger mapping"],
+    "rule_trigger.dispatch_policy": ["dispatch", "dispatch task", "Anthropic API", "CLI channel", "subagent brief", "dispatch_policy"]
   }
 }

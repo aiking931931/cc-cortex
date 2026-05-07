@@ -234,6 +234,12 @@
     "rule_trigger.cbua": ["決策", "架構", "選擇", "分析", "trade-off", "三層", "複雜"],
     "rule_trigger.wiredo": ["驗證", "交付", "部署", "上線", "截圖", "wiredo"],
     "rule_trigger.commands": ["指令", "skill", "技能"],
-    "rule_trigger.autonomous": ["自主", "判斷", "要繼續嗎"]
+    "rule_trigger.autonomous": ["自主", "判斷", "要繼續嗎"],
+    "rule_trigger.task_execution": ["新任務", "開始任務", "接手", "意圖漂移", "任務流程", "Form A", "Form B"],
+    "rule_trigger.redteam": ["紅隊", "藍隊", "重大決策", "不可逆", "架構級", "紅藍 CBUA"],
+    "rule_trigger.release_coord": ["release", "publish", "twine", "npm publish", "cargo publish", "PyPI", "version bump", "git tag", "上架", "發布"],
+    "rule_trigger.rag_sop": ["RAG", "知識庫", "memory grep", "feedback", "kb_", "情報缺口", "前提驗證"],
+    "rule_trigger.multilingual_triggers": ["語意觸發", "multilingual", "跨語言", "翻譯觸發", "trigger 對應"],
+    "rule_trigger.dispatch_policy": ["派任務", "派子代理", "CLI 通道", "Anthropic API", "dispatch_policy", "派遣"]
   }
 }
