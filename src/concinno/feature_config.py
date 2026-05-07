@@ -3832,6 +3832,47 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         },
         "recommended": True,
     },
+    # ── 4.7.0 W2 Option B — skill_usage_counter PreToolUse telemetry
+    #
+    # Per AI King 6.0 W2 Option B (2026-05-07 user directive 「做一個計數功能
+    # 之後就知道哪些用到哪些用不到」). PreToolUse hook intercepts Skill /
+    # Read tool calls, increments per-skill counter at
+    # ~/.concinno/state/skill_usage_counter.json. After 1-2 weeks of telemetry
+    # accumulation, enables data-driven informed-retire decisions for
+    # protected-tier skills (28 user / 22 core / 19 plugin per SA-W2 §5.1).
+    #
+    # Default ON (cosmetic-light: raw counter, ~3KB JSON, no learning loop).
+    # Per L0 鐵律 #6 cosmetic example — manual counter, ZIQ 不調.
+    "skill_usage_counter": {
+        "category": "context",
+        "enabled": True,
+        "ziq_autotunable": False,
+        "cosmetic": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "無 W2 Option B informed-retire telemetry，後續 protected-tier "
+            "skill retire 仍只能靠 grep handoff 一次性 baseline，不能累積 "
+            "forward usage data"
+        ),
+        "consequences_if_off_en": (
+            "No W2 Option B informed-retire telemetry; future protected-tier "
+            "retire decisions limited to one-shot grep baseline, no forward "
+            "usage accumulation."
+        ),
+        "description": (
+            "PreToolUse hook counts Skill tool invocations + Read tool against "
+            "skills/<name>/ paths. Output ~/.concinno/state/skill_usage_counter.json "
+            "{name: {invoked, read, last_seen}}. Enables data-driven retire "
+            "decision after 1-2 weeks of telemetry accumulation."
+        ),
+        "description_zh": (
+            "PreToolUse 鉤子記錄 Skill tool 呼叫 + Read tool 對 skills/<name>/ "
+            "路徑的存取，累積到 ~/.concinno/state/skill_usage_counter.json，"
+            "1-2 週後可作 informed-retire 決策依據"
+        ),
+        "params": {},
+        "recommended": True,
+    },
     # ── 4.7.0 W5 — notebooklm_hint UserPromptSubmit cosmetic stderr inject
     #
     # Detects ≥N (PDF / URL) sources or research-distill keywords in user
