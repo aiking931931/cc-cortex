@@ -3832,6 +3832,53 @@ FEATURE_META: dict[str, dict[str, Any]] = {
         },
         "recommended": True,
     },
+    # ── 4.7.0 W5 — notebooklm_hint UserPromptSubmit cosmetic stderr inject
+    #
+    # Detects ≥N (PDF / URL) sources or research-distill keywords in user
+    # prompt → suggests yt-search → video-transcript → notebooklm chain
+    # pipeline. Default OFF (opt-in per L0 鐵律 #6 + MEMORY #4s). Cosmetic
+    # stderr nudge only — never deny, never block. Hook lives at
+    # ~/.claude/hooks/notebooklm_hint.py wired in
+    # ~/.claude/settings.json::hooks.UserPromptSubmit.
+    #
+    # Threshold tunable: min_sources_for_hint (3-10). ZIQ-autotunable by
+    # downstream signal: hook fired count vs user actually invoking
+    # /notebooklm afterward (FTRL learns when hint correlates with action).
+    "notebooklm_hint": {
+        "category": "behavioral",
+        "enabled": False,  # opt-in per L0 #6 + MEMORY #4s
+        "ziq_autotunable": True,
+        "cosmetic": False,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "user 給 ≥3 PDF/URL 時主代理可能 manually summarise 而非 chain "
+            "yt-search → video-transcript → notebooklm 走 source-grounded 流程"
+        ),
+        "consequences_if_off_en": (
+            "When user provides ≥3 PDF/URL sources, main agent may "
+            "manually summarise instead of chaining yt-search → "
+            "video-transcript → notebooklm for source-grounded distill."
+        ),
+        "description": (
+            "UserPromptSubmit hint when ≥N sources detected — suggests "
+            "yt-search → video-transcript → notebooklm chain pipeline. "
+            "Cosmetic stderr inject, never deny."
+        ),
+        "description_zh": (
+            "UserPromptSubmit 鉤子在偵測到 ≥N PDF/URL/research keyword 時 "
+            "stderr 提示 chain pipeline。預設 OFF，opt-in 啟用。"
+        ),
+        "params": {
+            "min_sources_for_hint": {
+                "type": "int",
+                "default": 3,
+                "min": 2,
+                "max": 10,
+                "recommended": 3,
+            },
+        },
+        "recommended": False,
+    },
 }
 
 
