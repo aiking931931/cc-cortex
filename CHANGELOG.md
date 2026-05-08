@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Wave 13 NET-α speed-modular (commits 1e16dbb + 0a2b92b + d5a9088)
+
+- `concinno.feature_config` — 6 new FEATURE_META rows for the
+  Wave 13 NET-α A2A axis flags: `net_alpha.axis.{mtls, jwt,
+  capability, sig_replay, rate_limit, audit}`. All six default
+  `enabled=True`, `cosmetic=False`, `ziq_autotunable=False`. Five
+  carry `severity_if_off="major"`; `sig_replay` is the lone
+  `"critical"` (forging+replay risk) but remains user-controllable
+  per the open-source warn-don't-deny rule (MEMORY 4zn). User
+  opt-out path: `cfg.feature('net_alpha.axis.<name>', 'enabled',
+  False)` or env `A2A_AXIS_<NAME>=0`. OFF emits a stderr WARN
+  startup-once and skips enforcement; never raises, never blocks.
+- The wiring + transport implementation (`aiohttp_transport.py`,
+  `axis_flags.py`, sweep measurement script) lives in the `sancio`
+  repo (commit `6a6080c`) since it depends on the persona-api
+  network layer; this `concinno` commit ships only the registry
+  side.
+
+### Changed — feature_config split refactor (maintenance, commit 0a2b92b)
+
+- `src/concinno/feature_config.py` (6169 LoC monolith) →
+  `src/concinno/feature_config/` package (8 files, 6308 LoC,
+  each <1500 lines / nesting <5). Pre-existing carryover that
+  accumulated across W1+W2+W5+Wave 11+Wave 13 (each adding rows
+  without splitting).
+- Layout: `__init__.py` (1349 — aggregates + helpers + profiles)
+  / `_meta_part1_gates.py` (884 — hard_gate / hard_quality /
+  cognitive / ux) / `_meta_part2_security.py` (622) /
+  `_meta_part3_release_gaia.py` (1056) / `_meta_part4_core_behav.py`
+  (824) / `_meta_part5_observ.py` (612) / `_meta_part6_hooks.py`
+  (265) / `_meta_part7_universal.py` (696).
+- API 0 break (HIGH confidence): all 30 public + private names
+  resolve through `__init__.py` (FEATURE_META / FEATURE_TOGGLE_PROFILES
+  / PROFILES / DEFAULT_OFF_4_0_0 / D_CLASS_5_0_0 / LEGACY_ALIASES /
+  FailMode / ROUTING_POLICY_VALUES / 16 public funcs + 6 private
+  helpers). FEATURE_META count = 116 unchanged before/after (key-set
+  diff verified).
+- Cross-pkg verification: sancio 83/83 PASS + aiking 666/666 PASS
+  + ruff clean.
+
+### Fixed — 7 pre-existing test failures (maintenance, commit d5a9088)
+
+- `tests/test_d_class_5_0_0.py::test_d_class_5_0_0_size_27` →
+  renamed to `test_d_class_5_0_0_size_26` and assertion adjusted
+  to match actual frozenset content (9 security + 10 CBUA + 2
+  skill audit + 5 operational = 26). Reconciles the off-by-one
+  drift documented in `CHANGELOG.md` 5.7.0 §"Known carryover"
+  without changing the default-on guard set users rely on.
+- `shell.curator_hook` `severity_if_off` `"moderate"` (illegal
+  per the `none|minor|major|critical` ladder) → `"major"`.
+- Three `consequences_if_off_en` strings trimmed below the
+  240-character budget: `shell.emergence_hook` 277→174,
+  `shell.invariants_hook` 269→154, `universal_skill_schema`
+  298→213. Chinese (`consequences_if_off`) keeps original detail.
+- `_merge_feature_meta` — added `_safe_params()` helper that
+  coerces non-dict params at any layer to `{}` so a third-party
+  plugin shipping malformed `params` (string / None / list-of-
+  tuples) degrades gracefully instead of crashing the entire
+  `FEATURE_META` lookup chain. Strict rejection remains the
+  responsibility of `test_feature_meta_schema_v2_36`.
+- 16/16 target tests now PASS
+  (`test_feature_config` + `test_d_class_5_0_0` +
+  `test_feature_meta_schema_v2_36`).
+
+### Notes
+
+- These are unreleased changes accumulated since 5.7.0. The next
+  release that bundles them should bump to 5.8.0 (minor — feature
+  add: 6 NET-α axis FEATURE_META rows, plus split + fix).
+- Pre-existing carryover NOT in this batch: outer-monorepo
+  `_AI_BRAIN/` working tree contains 6+ months of multi-wave
+  module deliverables (Wave 2/3/4/6/7 universal skill schema +
+  observability dashboard + skill universal validators) that ship
+  in the outer ai-king tree but have not been synced upstream to
+  this concinno repo. Tracking separately for a proper
+  concinno-release-prep wave with per-wave attribution + version
+  bump.
+
 ## [5.7.0] - 2026-05-05 — substrate consolidation + AGPL forwarding shims + hook meta-commentary rule
 
 ### Added — substrate vendor + ZIQ subpackage
