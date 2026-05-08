@@ -37,10 +37,17 @@ def tmp_cfg(tmp_path: Path) -> Config:
 # ── D_CLASS_5_0_0 manifest ────────────────────────────────────────
 
 
-def test_d_class_5_0_0_size_27() -> None:
-    """The 27-feature manifest is locked — adding entries here implies
-    another semver-major bump."""
-    assert len(D_CLASS_5_0_0) == 27
+def test_d_class_5_0_0_size_26() -> None:
+    """The 26-feature manifest is locked — adding entries here implies
+    another semver-major bump.
+
+    Note: original 5.0.0 spec said 27; the off-by-one drift documented
+    in CHANGELOG 5.7.0 §"Known carryover" was reconciled at the
+    FEATCFG-S1 maintenance wave (2026-05-08). Current canonical
+    composition: 9 security + 10 CBUA + 2 skill audit + 5 operational
+    = 26, matching the actual frozenset content.
+    """
+    assert len(D_CLASS_5_0_0) == 26
 
 
 def test_d_class_5_0_0_all_in_feature_meta() -> None:

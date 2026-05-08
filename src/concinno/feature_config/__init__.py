@@ -392,9 +392,28 @@ def _merge_feature_meta(
     merged["enabled"] = enabled
 
     # params per-param merge.
-    shipped_params = dict(shipped.get("params", {})) if shipped else {}
-    plugin_params = dict(plugin.get("params", {})) if plugin else {}
-    user_params = dict(user.get("params", {})) if user else {}
+    #
+    # Defensive: any layer may ship a malformed `params` value (string
+    # shorthand, None, list-of-tuples — third-party plugins are the
+    # main offender). Coerce non-dict params to {} so the merge does
+    # not crash the whole FEATURE_META lookup chain. The validator
+    # layer (test_feature_meta_schema_v2_36) flags the bad row
+    # separately; here the goal is graceful degradation, not strict
+    # rejection.
+    def _safe_params(layer: dict[str, Any] | None) -> dict[str, Any]:
+        if layer is None:
+            return {}
+        raw = layer.get("params", {})
+        if not isinstance(raw, dict):
+            return {}
+        clean: dict[str, Any] = {}
+        for k, v in raw.items():
+            clean[k] = v if isinstance(v, dict) else {}
+        return clean
+
+    shipped_params = _safe_params(shipped)
+    plugin_params = _safe_params(plugin)
+    user_params = _safe_params(user)
     merged_params: dict[str, Any] = {}
     all_param_names = set(shipped_params) | set(plugin_params) | set(user_params)
     for pname in sorted(all_param_names):

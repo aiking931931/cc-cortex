@@ -507,9 +507,7 @@ _FEATURE_META_PART_5: dict[str, dict[str, Any]] = {
         "consequences_if_off_en": (
             "aiking shell stops feeding tool-call telemetry into the "
             "concinno-king 5-trigger emergence detector. 22-dim parity "
-            "matrix dim 3 stays at 0 outside-fork production callers. "
-            "Manual concinno-king observe() invocations still work but "
-            "shell sessions no longer auto-trigger emergence."
+            "dim 3 stays at 0 outside-fork. Manual observe() still works."
         ),
         "description": (
             "Wave 1.1 wrapper of concinno-king/skills/emergence.py (T1-T5 "
@@ -559,7 +557,7 @@ _FEATURE_META_PART_5: dict[str, dict[str, Any]] = {
         "enabled": True,
         "ziq_autotunable": False,
         "cosmetic": False,
-        "severity_if_off": "moderate",
+        "severity_if_off": "major",
         "consequences_if_off": (
             "AI King 6.0 22-dim parity matrix dim 4 退回 0 outside-fork "
             "production caller，skill curation 只能靠 concinno-king CLI 手動跑"

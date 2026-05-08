@@ -39,11 +39,9 @@ _FEATURE_META_PART_7: dict[str, dict[str, Any]] = {
         ),
         "consequences_if_off_en": (
             "universal schema validator / registry / dedup detector "
-            "stay dormant; skills keep running on substrate-native "
-            "frontmatter only and cross-marketplace install fails. "
-            "Wave 3 UNI-B converters and Wave 8 HUB-CLI install/publish "
-            "depend on this feature; disabling freezes the entire "
-            "universal-schema track."
+            "stay dormant; skills keep substrate-native frontmatter only "
+            "and cross-marketplace install fails. Wave 3 UNI-B + Wave 8 "
+            "HUB-CLI install/publish depend on this."
         ),
         "description": (
             "Wave 2 UNI-A — universal .skill.yaml v0.1 EXPERIMENTAL "

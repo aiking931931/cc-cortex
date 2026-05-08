@@ -148,10 +148,8 @@ _FEATURE_META_PART_6: dict[str, dict[str, Any]] = {
         ),
         "consequences_if_off_en": (
             "Aiking shell stops recording three-invariants validation "
-            "(separation/fusion/autonomy) on fusion-design events; "
-            "downstream OBS loses the audit trail. 22-dim parity dim 13 "
-            "stays at 0 outside-fork production caller; the concinno-king "
-            "post_step_check entry stays an island."
+            "on fusion-design events; OBS loses the audit trail. "
+            "22-dim parity dim 13 stays at 0 outside-fork."
         ),
         "description": (
             "Wave 1.5 — wrap concinno-king three-invariants validator "
