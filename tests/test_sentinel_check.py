@@ -525,3 +525,157 @@ def test_three_strikes_bash_python_sig(tmp_path):
     result = gate_consecutive_fail(sid, d, max_fails=3)
     assert result is not None
     assert "TypeError" in result["reason"]
+
+
+# ── record_outcome edited_files tracking (MEMORY 2h P3-b fix) ──
+#
+# These tests pin the behaviour that PostToolUse callers
+# (``hooks.on_post_tool._run_sentinel``) populate the ``edited_files``
+# list — the same list ``WiredoEnforcementGuard._session_has_code_edits``
+# reads to decide whether to dispatch the sub-agent verifier. Before
+# 2026-05-14 only ``check()`` populated this list and no hook called
+# ``check()`` → 4 days of empty ``wiredo_verify_outcomes.jsonl``.
+
+
+def _read_state(tmp_path, sid):
+    from concinno.core.state_store import StateStore
+    return StateStore(str(tmp_path)).read("sentinel", sid, default={})
+
+
+def test_record_outcome_populates_edited_files_on_write(tmp_path):
+    """Write success → file appears in ``edited_files``."""
+    sid = "ro_ef_write"
+    record_outcome(
+        sid, "Write", {"file_path": "/proj/a.py"}, str(tmp_path),
+        success=True,
+    )
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files") == ["/proj/a.py"]
+
+
+def test_record_outcome_populates_edited_files_on_edit(tmp_path):
+    """Edit success → file appears in ``edited_files``."""
+    sid = "ro_ef_edit"
+    record_outcome(
+        sid, "Edit", {"file_path": "/proj/b.ts"}, str(tmp_path),
+        success=True,
+    )
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files") == ["/proj/b.ts"]
+
+
+def test_record_outcome_dedupes_edited_files(tmp_path):
+    """Same file edited twice → only one entry."""
+    sid = "ro_ef_dedup"
+    d = str(tmp_path)
+    record_outcome(sid, "Edit", {"file_path": "/proj/c.py"}, d, success=True)
+    record_outcome(sid, "Edit", {"file_path": "/proj/c.py"}, d, success=True)
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files") == ["/proj/c.py"]
+
+
+def test_record_outcome_appends_multiple_files(tmp_path):
+    """Distinct files → ordered append."""
+    sid = "ro_ef_multi"
+    d = str(tmp_path)
+    record_outcome(sid, "Write", {"file_path": "/proj/d.py"}, d, success=True)
+    record_outcome(sid, "Edit", {"file_path": "/proj/e.ts"}, d, success=True)
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files") == ["/proj/d.py", "/proj/e.ts"]
+
+
+def test_record_outcome_skips_edited_files_on_failure(tmp_path):
+    """Failed Write/Edit must NOT pollute ``edited_files``."""
+    sid = "ro_ef_fail"
+    record_outcome(
+        sid, "Edit", {"file_path": "/proj/f.py"}, str(tmp_path),
+        success=False,
+        tool_result="old_string not found in file",
+    )
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files", []) == []
+
+
+def test_record_outcome_unknown_success_still_tracks(tmp_path):
+    """``success=None`` (unknown) still counts — same as legacy ``check()``."""
+    sid = "ro_ef_unknown"
+    record_outcome(
+        sid, "Edit", {"file_path": "/proj/g.py"}, str(tmp_path),
+        success=None,
+    )
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files") == ["/proj/g.py"]
+
+
+def test_record_outcome_skips_edited_files_on_bash(tmp_path):
+    """Bash runs are NOT code edits — must not pollute ``edited_files``."""
+    sid = "ro_ef_bash"
+    record_outcome(
+        sid, "Bash", {"command": "ls"}, str(tmp_path),
+        success=True, tool_result="a.py\nb.py\n",
+    )
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files", []) == []
+
+
+def test_record_outcome_skips_empty_file_path(tmp_path):
+    """No ``file_path`` extractable → no edited_files mutation."""
+    sid = "ro_ef_nopath"
+    record_outcome(
+        sid, "Write", {}, str(tmp_path),
+        success=True,
+    )
+    state = _read_state(tmp_path, sid)
+    assert state.get("edited_files", []) == []
+
+
+def test_record_outcome_cap_enforced(tmp_path):
+    """``_MAX_EDITED_FILES`` cap enforced — never grows unbounded."""
+    from concinno.sentinel import _MAX_EDITED_FILES
+    sid = "ro_ef_cap"
+    d = str(tmp_path)
+    # Inject _MAX_EDITED_FILES distinct files
+    for i in range(_MAX_EDITED_FILES):
+        record_outcome(
+            sid, "Edit", {"file_path": f"/proj/f{i}.py"}, d, success=True,
+        )
+    # Push one more — oldest gets evicted, newest appears at tail.
+    record_outcome(
+        sid, "Edit", {"file_path": "/proj/overflow.py"}, d, success=True,
+    )
+    state = _read_state(tmp_path, sid)
+    ef = state.get("edited_files", [])
+    assert len(ef) == _MAX_EDITED_FILES
+    assert ef[-1] == "/proj/overflow.py"
+    assert "/proj/f0.py" not in ef  # oldest evicted
+
+
+def test_wiredo_session_has_code_edits_sees_record_outcome_writes(tmp_path):
+    """Integration: ``_session_has_code_edits`` flips True after a real
+    ``record_outcome`` on a Write/Edit. This is the exact wiring that
+    drives ``WiredoEnforcementGuard`` sub-agent verify dispatch.
+
+    Before the 2026-05-14 fix this assertion failed because the hook
+    layer (``hooks.on_post_tool._run_sentinel``) called
+    ``record_outcome``, which never populated ``edited_files``.
+    """
+    from concinno.wiredo_guards import _session_has_code_edits
+
+    sid = "ro_ef_integration"
+    d = str(tmp_path)
+    # Create a real file on disk so the WIREDO file filter accepts it
+    # (``_get_session_code_files`` requires ``os.path.isfile``).
+    target = tmp_path / "real_module.py"
+    target.write_text("# placeholder\n", encoding="utf-8")
+
+    # Before the edit: nothing recorded.
+    assert _session_has_code_edits(d, sid) is False
+
+    # Drive the PostToolUse codepath.
+    record_outcome(
+        sid, "Edit", {"file_path": str(target)}, d, success=True,
+    )
+
+    # After: the WIREDO guard sees a code edit.
+    assert _session_has_code_edits(d, sid) is True
+    assert os.path.isfile(str(target))

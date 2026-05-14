@@ -260,4 +260,168 @@ _FEATURE_META_PART_6: dict[str, dict[str, Any]] = {
         },
         "recommended": True,
     },
+    # ── concinno 4.7+ — auto_dispatch_chaotic_advisory PostToolUse cosmetic
+    #
+    # Detects ``git commit`` Bash commands whose subject contains an
+    # irreversible keyword (release / publish / pine deploy / prod / db
+    # schema / migration / force push / twine / npm / cargo / docker
+    # push / git tag) AND no manual red/blue/green ledger record fired
+    # in the last ``advisory_window_seconds`` window. Emits an audit
+    # JSONL line + single-line stderr warning. Never deny, never block —
+    # CC L6 (anthropics/claude-code#32105) physically cannot suppress
+    # PostToolUse side effects, and Goodhart-risk (auto-spawning red
+    # team) makes hard auto-dispatch a worse trade. The advisory nudges
+    # the operator to manually `concinno redteam record-manual` or run
+    # an Agent dispatch.
+    #
+    # Default OFF per L0 鐵律 #6 + MEMORY 4zn (open-source, user takes
+    # responsibility, warn-don't-deny, every flag user-controllable).
+    # Hook lives at concinno.guards.auto_dispatch_advisory wired in
+    # concinno/hooks/on_post_tool.py PostToolUse pipeline.
+    #
+    # Rate-limit: per-commit-sha 24 h cooldown so re-running a tool
+    # after the agent re-checks doesn't double-emit. Window for the
+    # "recent manual redteam" check defaults to 2 h (covers a typical
+    # session length without going so wide every session inherits an
+    # earlier dispatch).
+    #
+    # ZIQ-autotunable: False — the audit emission is a fixed cosmetic
+    # nudge, not a learned routing signal. Future ZIQ work would target
+    # the Agent dispatch *outcome* (verdict accept rate) not this hook.
+    "auto_dispatch_chaotic_advisory": {
+        "category": "behavioral",
+        # 2026-05-14 enabled: advisory-only never deny per L6 +
+        # MEMORY 4zn warn-don't-deny on opt-out.
+        "enabled": True,
+        "ziq_autotunable": False,
+        "cosmetic": False,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "高半徑 commit (release / publish / pine deploy / prod) 若 "
+            "未派紅藍綠不會被察覺，下個 session 沿用 verdict 沒驗證"
+        ),
+        "consequences_if_off_en": (
+            "High-blast-radius commits (release / publish / pine deploy "
+            "/ prod) shipped without red/blue/green dispatch go "
+            "unnoticed — the next session inherits an unverified verdict."
+        ),
+        "description": (
+            "PostToolUse advisory: detects irreversible git-commit "
+            "subjects with no recent manual red/blue/green ledger "
+            "record → audit JSONL + single-line stderr warn. Never "
+            "denies (CC L6 PostToolUse cannot suppress side effects)."
+        ),
+        "description_zh": (
+            "PostToolUse 鉤子偵測 git commit 訊息含「不可逆 / release / "
+            "publish / pine deploy / prod / migration / force push」"
+            "關鍵字 + 近 2hr 無手動紅藍綠 ledger record → 寫 audit "
+            "jsonl + stderr advisory。永遠不 deny（CC L6 PostToolUse "
+            "物理上無法抵銷已發生的 side effect）。"
+        ),
+        "params": {
+            "advisory_window_seconds": {
+                "type": "int",
+                "default": 7200,
+                "min": 600,
+                "max": 86400,
+                "recommended": 7200,
+                "risk_low": (
+                    "Below 600 s nearly every session emits advisory "
+                    "even when red team ran 30 min earlier"
+                ),
+                "risk_high": (
+                    "Above 24 h inherits dispatches from yesterday's "
+                    "session, masking today's gap"
+                ),
+                "risk_low_zh": (
+                    "低於 600s 幾乎每 session 都觸發，30min 前才派過"
+                    "也仍 fire"
+                ),
+                "risk_high_zh": (
+                    "高於 24h 會把昨天的派遣紀錄當今日 cover，遮住"
+                    "今日真實缺口"
+                ),
+            },
+            "rate_limit_seconds": {
+                "type": "int",
+                "default": 86400,
+                "min": 60,
+                "max": 604800,
+                "recommended": 86400,
+                "risk_low": (
+                    "Below 60 s the same commit re-emits advisory on "
+                    "every verification re-run, swamping audit log"
+                ),
+                "risk_high": (
+                    "Above 7 days a long-lived branch never re-warns "
+                    "even if the situation changes"
+                ),
+                "risk_low_zh": (
+                    "低於 60s 同一 commit 每次驗證跑都重複觸發，"
+                    "audit log 被洗版"
+                ),
+                "risk_high_zh": (
+                    "高於 7 天 long-lived branch 永遠不會再警告，"
+                    "情境改變也不知"
+                ),
+            },
+        },
+        "recommended": False,
+    },
+    # ── 2026-05-11 — markitdown_auto_trigger advisory cosmetic hook
+    #
+    # PreToolUse(Read|Bash) + UserPromptSubmit hook detects attempts to
+    # ingest binary doc files (.pdf .docx .xlsx .pptx .epub .csv etc.) and
+    # injects single-line stderr reminder suggesting markitdown conversion
+    # to Markdown first (token savings + structural preservation: heading,
+    # table, list). Never denies, never blocks.
+    #
+    # Hook lives at ~/.claude/hooks/markitdown_auto_trigger.py and is
+    # already wired in ~/.claude/settings.json::hooks UserPromptSubmit +
+    # PreToolUse(Read|Bash). Audit log at
+    # ~/.concinno/audit/markitdown_triggers.jsonl.
+    #
+    # Switch chain (6-source per L0 鐵律 #6):
+    #   1. FEATURE_META default (this row)            ← enabled=True
+    #   2. ~/.concinno/markitdown.json {"enabled":..} ← read by hook L73-80
+    #   3. cfg.feature("markitdown_auto_trigger",
+    #                  "enabled")                     ← read by hook L83-91
+    #   4. env MARKITDOWN_AUTO_TRIGGER_ENABLED=0      ← read by hook L69-71
+    #   5. settings.json::hooks entry removal         ← user-edit override
+    #
+    # ZIQ note: cosmetic advisory (no agent loop blocking, no quality
+    # outcome signal). ziq_autotunable=False per L0 鐵律 #6 cosmetic
+    # example — ZIQ does not spend budget learning binary-doc reminder
+    # frequency preferences.
+    "markitdown_auto_trigger": {
+        "category": "behavioral",
+        "enabled": True,  # advisory cosmetic — default on
+        "ziq_autotunable": False,
+        "cosmetic": True,
+        "severity_if_off": "minor",
+        "consequences_if_off": (
+            "用戶讀 .pdf/.docx/.xlsx 等 binary doc 檔案時主代理可能直接 "
+            "Read raw bytes 浪費 token 且結構（標題/表格/列表）丟失，"
+            "錯過 markitdown <path> -o <path>.md 先轉 Markdown 的提示"
+        ),
+        "consequences_if_off_en": (
+            "When user ingests .pdf/.docx/.xlsx binary doc files, the "
+            "main agent may Read raw bytes wasting tokens and losing "
+            "structure (heading/table/list), missing the markitdown "
+            "<path> -o <path>.md conversion reminder."
+        ),
+        "description": (
+            "Auto-trigger advisory reminder when Read/Bash attempts to "
+            "ingest binary doc files (.pdf .docx .xlsx etc.); suggests "
+            "markitdown conversion to Markdown first to save tokens and "
+            "preserve structure. Cosmetic stderr inject, never deny."
+        ),
+        "description_zh": (
+            "Read/Bash 嘗試讀 binary doc 檔案 (.pdf .docx .xlsx 等) 時 "
+            "stderr 提示先走 markitdown 轉 Markdown，省 token + 結構化保留。"
+            "Cosmetic 等級，永不阻擋。"
+        ),
+        "params": {},
+        "recommended": True,
+    },
 }

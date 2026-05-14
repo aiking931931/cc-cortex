@@ -326,3 +326,93 @@ def test_store_dir_override_param_overrides_env(monkeypatch, tmp_path):
     t.record(5.0, 1.0)
     assert (other / "t_override.jsonl").exists()
     assert not (env_dir / "t_override.jsonl").exists()
+
+
+# ── FTRL outcome emit (MEMORY 2h P3-a root-cause fix) ──────────────
+
+
+def test_record_emits_ftrl_outcome_to_ziq_state(
+    monkeypatch, tmp_path,
+):
+    """``record()`` must append one FTRL event per call to ``ziq_state/``.
+
+    MEMORY 2h P3-a root-cause fix: prior to this wiring the autotuner
+    persisted observations to ``ziq_tuners/<target>.jsonl`` only, which
+    the downstream FTRL loader (``concinno.ziq.persist.load_ftrl_state``)
+    never reads. The bridge here closes that gap so every ``record()``
+    call leaves an event on the shared FTRL trail keyed on the tuner's
+    ``target``.
+
+    Verified end-to-end:
+        * file lands at the env-pinned ``CONCINNO_ZIQ_STATE_DIR`` path,
+        * schema matches the 2026-05-07 baseline event exactly
+          (feature / key / weight_before / weight_after / signal / ts
+          / posterior_components),
+        * signal is centred to ``[-1, 1]`` so outcome=1.0 → signal=+1.0
+          (matches the existing ``agent_invariants_ftrl.jsonl`` event).
+    """
+    import json as _json
+
+    from concinno.ziq import persist as _persist
+
+    state_dir_override = tmp_path / "ziq_state_emit"
+    monkeypatch.setenv("CONCINNO_ZIQ_AUTOTUNE", "1")
+    monkeypatch.setenv("CONCINNO_ZIQ_STATE_DIR", str(state_dir_override))
+    monkeypatch.setenv("CONCINNO_ZIQ_TUNER_DIR", str(tmp_path / "ziq_tuners"))
+    monkeypatch.delenv("CONCINNO_ZIQ_PERSIST_DISABLED", raising=False)
+
+    t = ZIQAutoTuner(
+        "t_emit",
+        preset="A",
+        choices=["A", "B"],
+        tunable_threshold=1,
+        full_threshold=2,
+        auto_persist=True,
+    )
+    t.record("B", 1.0, context={"agent_id": "test-emit", "reason": "smoke"})
+
+    jsonl = _persist.jsonl_path("t_emit")
+    assert jsonl.exists(), f"FTRL emit target {jsonl} not created"
+    rows = jsonl.read_text(encoding="utf-8").strip().splitlines()
+    assert len(rows) == 1, f"expected exactly one row, got {len(rows)}"
+    rec = _json.loads(rows[0])
+
+    # Schema parity with 2026-05-07 baseline event.
+    assert rec["feature"] == "t_emit"
+    assert rec["key"] == "B"
+    assert rec["signal"] == pytest.approx(1.0, abs=1e-9)
+    assert "ts" in rec
+    assert "weight_before" in rec
+    assert "weight_after" in rec
+    # weight_before is the arm's weight before its first update; the
+    # FTRL-Proximal arm starts at z=0, n=0 so weight()==0.0.
+    assert rec["weight_before"] == pytest.approx(0.0, abs=1e-9)
+    # Context propagates into posterior_components so the FTRL audit
+    # trail can trace the originating call.
+    assert rec["posterior_components"]["agent_id"] == "test-emit"
+
+
+def test_record_emit_failure_does_not_break_tuner(
+    monkeypatch, tuner_env,
+):
+    """If the persist layer raises, ``record()`` still succeeds.
+
+    Telemetry is best-effort by contract — a broken FTRL emit must not
+    drop the in-memory observation or propagate the error.
+    """
+    from concinno.ziq import persist as _persist
+
+    def _boom(*_args, **_kwargs):  # noqa: ANN001
+        raise RuntimeError("simulated persist crash")
+
+    monkeypatch.setattr(_persist, "record_ftrl_update", _boom)
+
+    t = ZIQAutoTuner(
+        "t_emit_fail",
+        preset=10.0, vmin=0.0, vmax=100.0,
+        tunable_threshold=1, full_threshold=2,
+        auto_persist=True,
+    )
+    # Must not raise; in-memory observation must still land.
+    t.record(20.0, 0.75)
+    assert t.n == 1

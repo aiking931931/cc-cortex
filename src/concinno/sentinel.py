@@ -292,16 +292,13 @@ def check(
     calls = calls[-max_calls:]
     state["calls"] = calls
 
-    # Track edited files for split detection (capped to prevent unbounded growth)
-    _MAX_EDITED_FILES = 200
+    # Track edited files for split detection (capped to prevent unbounded growth).
+    # Uses ``_record_edited_file`` helper shared with ``record_outcome`` so
+    # the on-disk shape is identical regardless of which path filled it.
     split_warn = False
     if tool_name in WRITE_TOOLS and file_path:
+        _record_edited_file(state, file_path)
         ef = state.get("edited_files", [])
-        if file_path not in ef:
-            if len(ef) >= _MAX_EDITED_FILES:
-                ef = ef[-(_MAX_EDITED_FILES - 1):]
-            ef.append(file_path)
-            state["edited_files"] = ef
         if (
             len(ef) >= th["split"]
             and not state.get("split_warned")
@@ -533,11 +530,49 @@ def record_outcome(
     calls = calls[-max_calls:]
     state["calls"] = calls
 
+    # 2026-05-14 — Track edited files on successful Write/Edit so
+    # downstream consumers (WiredoEnforcementGuard via
+    # ``_get_session_code_files`` / ``_session_has_code_edits``) can see
+    # them. Previously this list was only populated by ``check()`` which
+    # the PostToolUse hook does not call, leading to ``edited_files=[]``
+    # and the WIREDO sub-agent verify dispatch path 100% short-circuiting
+    # (MEMORY 2h root cause). Same cap and de-dup logic as ``check()``.
+    if (
+        tool_name in WRITE_TOOLS
+        and file_path
+        and success is not False  # True or unknown — failed writes don't count
+    ):
+        _record_edited_file(state, file_path)
+
     # Track generated media artifacts from Bash output
     if tool_name == "Bash" and success is not False:
         _track_media_artifacts(state, tool_input, tool_result)
 
     store.write(_NS, session_id, state)
+
+
+# Maximum edited files retained per session — matches ``check()`` cap.
+_MAX_EDITED_FILES = 200
+
+
+def _record_edited_file(state: dict, file_path: str) -> None:
+    """Append ``file_path`` to ``state['edited_files']`` with cap + de-dup.
+
+    Mirrors the tracking semantics already implemented in :func:`check`
+    (line ~295-310 of this module) so both code paths converge on the
+    same on-disk shape. Extracted into a helper so the test suite can
+    verify behaviour without invoking the full ``check`` /
+    ``record_outcome`` surface.
+    """
+    ef = state.get("edited_files", [])
+    if not isinstance(ef, list):
+        ef = []
+    if file_path in ef:
+        return
+    if len(ef) >= _MAX_EDITED_FILES:
+        ef = ef[-(_MAX_EDITED_FILES - 1):]
+    ef.append(file_path)
+    state["edited_files"] = ef
 
 
 # ── Media Artifact Tracking ─────────────────────────────────
@@ -653,6 +688,10 @@ def _emit_consec_fail_outcome(
     Tripped = True → low reward (gate fired), scaled by how aggressive
     the threshold is. Tripped = False → reward grows with the headroom
     the threshold left unused (smaller observed/max_fails ratio).
+
+    2026-05-10: also append a forensic JSONL record so the multi-day
+    silent-broken detector can distinguish "gate never tripped" from
+    "gate not wired in" (per MEMORY 4zm).
     """
     try:
         from concinno.ziq_outcome_bus import Outcome
@@ -677,6 +716,20 @@ def _emit_consec_fail_outcome(
                     "mode": mode,
                 },
             )
+        )
+    except Exception:
+        pass
+    try:
+        from concinno.observability.guard_audit import emit_guard_fire
+        emit_guard_fire(
+            "consec_fail",
+            kind="tripped" if tripped else "non_tripped",
+            session="",  # caller doesn't have session_id at this layer
+            metadata={
+                "max_fails": max_fails,
+                "observed": observed,
+                "mode": mode,
+            },
         )
     except Exception:
         pass

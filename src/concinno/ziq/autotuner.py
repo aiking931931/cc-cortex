@@ -71,13 +71,35 @@ TargetKind = Literal["continuous", "discrete", "boolean"]
 
 
 def is_autotune_enabled() -> bool:
-    """Return True when ``CONCINNO_ZIQ_AUTOTUNE`` is set to a truthy value.
+    """Return True unless ``CONCINNO_ZIQ_AUTOTUNE`` is explicitly disabled.
 
-    Accepted truthy values (case-insensitive): ``1``, ``true``, ``yes``, ``on``.
-    Anything else (including absent env var) is treated as disabled.
+    2026-05-10 cold-start unblock: previously defaulted to **disabled**
+    (only enabled when env was set to a truthy value), which combined
+    with the 300-sample ``tunable_threshold`` meant 4-arm bandits with
+    only 1 arm observed (N=93) collapsed to ``regime='preset'`` — the
+    tuner produced zero exploration in production.
+
+    New default behaviour:
+
+    * ``CONCINNO_ZIQ_AUTOTUNE`` unset or truthy (``1``/``true``/``yes``/``on``)
+      → **enabled**
+    * ``CONCINNO_ZIQ_AUTOTUNE`` set to ``0``/``false``/``no``/``off``/``disabled``
+      → disabled (explicit opt-out preserved for ablation / red-team)
+    * Any other non-empty value → enabled (unrecognised values fall
+      through to the default-on policy rather than silently disabling)
+
+    Rationale: the tuner records (value, outcome) pairs unconditionally
+    via ``record()``; the only effect of disabling is that ``suggest()``
+    returns the preset even when the regime would otherwise be
+    conservative / full. Defaulting to enabled means the FTRL signal
+    starts contributing as soon as the threshold is crossed, instead
+    of requiring a one-time env-var ritual that no production caller
+    ever performed.
     """
     raw = os.environ.get("CONCINNO_ZIQ_AUTOTUNE", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    if raw in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return True
 
 
 def _default_store_dir() -> Path:
@@ -175,10 +197,11 @@ class ZIQAutoTuner:
         choices: Optional[Iterable[Any]] = None,
         vmin: Optional[float] = None,
         vmax: Optional[float] = None,
-        tunable_threshold: int = 300,
+        tunable_threshold: int = 50,
         full_threshold: int = 500,
         conservative_lr: float = 0.05,
         full_lr: float = 0.3,
+        cold_start_explore_pct: float = 0.05,
         store_dir: Optional[Path] = None,
         auto_persist: bool = True,
     ) -> None:
@@ -193,6 +216,13 @@ class ZIQAutoTuner:
         self.conservative_lr = conservative_lr
         self.full_lr = full_lr
         self.auto_persist = auto_persist
+        # 2026-05-10 cold-start exploration: every Nth observation in
+        # the conservative regime, force a random discrete arm pick so
+        # under-observed arms accumulate samples instead of starving.
+        # Continuous tuners ignore this knob.
+        self.cold_start_explore_pct = max(
+            0.0, min(0.5, float(cold_start_explore_pct)),
+        )
 
         self._choices_list: Optional[list[Any]] = (
             list(choices) if choices is not None else None
@@ -269,13 +299,36 @@ class ZIQAutoTuner:
             self._observations.append(obs)
             arm = self._arm_for(value)
             lr = self.conservative_lr if self.n < self.full_threshold else self.full_lr
+            # Capture FTRL weight pair around the update so we can emit
+            # one row per ``record()`` call to the shared ZIQ FTRL state
+            # log (``~/.concinno/ziq_state/<feature>_ftrl.jsonl``). The
+            # arm's ``weight()`` reflects the FTRL-Proximal estimate
+            # before/after the gradient step; that is the value the
+            # downstream FTRL loop (``concinno.ziq.persist.load_ftrl_state``
+            # + posterior bookkeeping) wants to observe.
+            weight_before = arm.weight()
             arm.update(outcome_f, lr)
+            weight_after = arm.weight()
+            arm_key = self._key(value)
 
             if self.kind == "continuous":
                 self._update_continuous_estimate()
 
             if self.auto_persist:
                 self._append_to_disk(obs)
+
+        # Emit the FTRL outcome event OUTSIDE the lock so disk I/O
+        # never serialises concurrent ``record()`` calls on the same
+        # tuner. ``_emit_ftrl_outcome`` is best-effort and silently
+        # tolerates persistence layer absence (lazy import) or disk
+        # failure — telemetry must not break the cognitive layer.
+        self._emit_ftrl_outcome(
+            arm_key=arm_key,
+            outcome=outcome_f,
+            weight_before=weight_before,
+            weight_after=weight_after,
+            context=ctx,
+        )
 
     def suggest(self, context: Optional[dict[str, Any]] = None) -> Any:
         """Return the currently best-guess value.
@@ -287,6 +340,28 @@ class ZIQAutoTuner:
         _ = context  # reserved for future use
         with self._lock:
             regime = self.current_regime()
+            # 2026-05-10 cold-start exploration applies in BOTH preset
+            # and conservative regimes for discrete targets — without
+            # this, a 4-arm bandit whose preset arm gets all the
+            # external traffic stays at N_other=0 forever and never
+            # reaches the threshold. ``self.n % stride == 0`` triggers
+            # at most floor(self.n * cold_start_explore_pct) times in
+            # ``self.n`` calls, which is the requested fraction.
+            if (
+                regime in ("preset", "conservative")
+                and self.kind in ("discrete", "boolean")
+                and self._choices_list is not None
+                and self.cold_start_explore_pct > 0.0
+                and self.n > 0
+                and is_autotune_enabled()
+            ):
+                stride = max(1, int(round(1.0 / self.cold_start_explore_pct)))
+                if self.n % stride == 0:
+                    least = self._least_observed_choice()
+                    # Skip exploration when the least-observed arm is
+                    # already the preset (no information gain).
+                    if least is not None and least != self.preset:
+                        return least
             if regime == "preset":
                 return self.preset
             if self.kind == "continuous":
@@ -300,7 +375,9 @@ class ZIQAutoTuner:
                         ),
                     )
                 return self._cont_mean_estimate
-            # discrete / boolean
+            # discrete / boolean. Cold-start exploration was already
+            # applied above (covers preset+conservative regimes). The
+            # remaining branch picks based on bandit posterior.
             arms = self._arms_sorted_by_reward()
             if not arms:
                 return self.preset
@@ -383,6 +460,34 @@ class ZIQAutoTuner:
             reverse=True,
         )
 
+    def _least_observed_choice(self) -> Optional[Any]:
+        """Return the choice with the lowest reward_count.
+
+        Used by the 2026-05-10 cold-start exploration path. When the
+        target has declared ``choices`` and one of them has never been
+        observed (``reward_count == 0``), prefer that one — it gives
+        the bandit its first signal on the under-explored arm. When
+        all arms have at least one observation, return the one with
+        the smallest count. Ties broken by ``choices`` declaration
+        order so behaviour is deterministic across runs.
+
+        Returns ``None`` for boolean / unbounded discrete targets.
+        """
+        if not self._choices_list:
+            return None
+        # Find the choice with the lowest observed count (zero counts
+        # for never-observed arms are best, since we want to fill the
+        # gaps in the bandit's information).
+        best: Optional[Any] = None
+        best_count: float = math.inf
+        for c in self._choices_list:
+            arm = self._arms.get(self._key(c))
+            count = float(arm.reward_count) if arm is not None else 0.0
+            if count < best_count:
+                best_count = count
+                best = c
+        return best
+
     def _conservative_discrete_pick(
         self, arms: list[tuple[Any, _FTRLArm]],
     ) -> Any:
@@ -450,6 +555,85 @@ class ZIQAutoTuner:
             # Storage hiccup should never break the cognitive layer.
             # Silently degrade to in-memory only for this observation.
             pass
+
+    def _emit_ftrl_outcome(
+        self,
+        *,
+        arm_key: Any,
+        outcome: float,
+        weight_before: float,
+        weight_after: float,
+        context: dict[str, Any],
+    ) -> None:
+        """Append one FTRL outcome event to the shared ZIQ state log.
+
+        Bridges the per-target observation log (``ziq_tuners/<target>.jsonl``,
+        kept for cold-load replay) onto the cross-feature FTRL trail at
+        ``ziq_state/<target>_ftrl.jsonl``. The latter is the source the
+        downstream FTRL posterior + ``load_ftrl_state`` consume — without
+        this emit, ``ZIQAutoTuner.record()`` is invisible to the rest of
+        ZIQ even when callers wire it correctly.
+
+        Schema mirrors :func:`concinno.ziq.persist.record_ftrl_update`
+        exactly: ``{ts, feature, key, weight_before, weight_after,
+        signal, posterior_components}``. ``signal`` is the outcome
+        centred to ``[-1, 1]`` (matching the existing
+        ``agent_invariants_ftrl.jsonl`` event from the 2026-05-07
+        smoke-real fixture) so downstream consumers can subtract 0.5
+        and double without re-centring.
+
+        Best-effort by contract:
+            * Lazy import of :mod:`concinno.ziq.persist` so a stripped
+              install (or test that monkeypatches the persist module
+              out) does not crash the tuner.
+            * Every failure path swallows the exception — the tuner's
+              in-memory state remains the source of truth for the
+              running process and the unit tests assert that.
+
+        Args:
+            arm_key: Hashable arm key as returned by ``self._key()``.
+                Serialised via ``str(...)`` because the persist layer
+                requires a string key (filesystem-safe + jsonl-stable).
+            outcome: The clamped reward in ``[0, 1]`` that drove the
+                FTRL update.
+            weight_before: Arm's FTRL weight estimate immediately
+                before ``arm.update()``.
+            weight_after: Arm's FTRL weight estimate immediately after
+                ``arm.update()``.
+            context: Caller-supplied audit dict copied into
+                ``posterior_components`` so downstream consumers can
+                trace why a particular update fired.
+        """
+        if not self.auto_persist:
+            return
+        try:
+            # Lazy import — keeps the autotuner module importable even
+            # when the persist sub-module is stubbed out (e.g.
+            # ``CONCINNO_ZIQ_PERSIST_DISABLED=1`` integration tests).
+            from concinno.ziq import persist as _persist  # noqa: PLC0415
+        except ImportError:
+            return
+        # Centre [0, 1] → [-1, 1] so the on-disk signal matches the
+        # convention used by the rest of ZIQ (positive = reward,
+        # negative = penalty). Done as ``(outcome - 0.5) * 2`` to
+        # preserve exact 0 / ±1 endpoints without floating-point drift
+        # at the boundaries.
+        signal = (float(outcome) - 0.5) * 2.0
+        try:
+            _persist.record_ftrl_update(
+                self.target,
+                str(arm_key),
+                weight_before=float(weight_before),
+                weight_after=float(weight_after),
+                signal=signal,
+                posterior_components=context or {},
+            )
+        except Exception:  # noqa: BLE001
+            # The persist layer is itself try/except'd around the disk
+            # call, so the only way this raises is a programmer error
+            # in the schema. We still swallow — telemetry is best-
+            # effort by contract.
+            return
 
     def _load_from_disk(self) -> None:
         path = self._target_path()
