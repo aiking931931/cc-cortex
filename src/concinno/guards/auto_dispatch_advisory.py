@@ -262,7 +262,10 @@ def _count_recent_redteam(window_seconds: int) -> int:
                 except json.JSONDecodeError:
                     continue
                 role = str(record.get("role", "")).lower()
-                if role not in ("redteam", "blueteam", "greenteam", "red", "blue", "green"):
+                if role not in (
+                    "redteam", "blueteam", "greenteam",
+                    "red", "blue", "green", "verifier",
+                ):
                     continue
                 ts_raw = record.get("timestamp", "")
                 ts_epoch = _parse_iso_timestamp(ts_raw)
